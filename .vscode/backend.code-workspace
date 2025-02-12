@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "../backend/finds.team"
+		}
+	],
+	"settings": {
+		"java.compile.nullAnalysis.mode": "automatic"
+	},
+	"extensions": {
+		"recommendations": [
+			"vmware.vscode-boot-dev-pack"
+		]
+	}
+}
