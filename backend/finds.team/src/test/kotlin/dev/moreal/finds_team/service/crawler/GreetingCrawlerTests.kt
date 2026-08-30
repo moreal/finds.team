@@ -110,6 +110,12 @@ class GreetingCrawlerTests {
         careerSite.copy(url = "https://nested.acme.career.greetinghr.com"),
       ),
     )
+    assertFalse(
+      crawler.matches(careerSite.copy(url = "//acme.career.greetinghr.com")),
+    )
+    assertFalse(
+      crawler.matches(careerSite.copy(url = "http://acme.career.greetinghr.com")),
+    )
     assertFalse(crawler.matches(careerSite.copy(url = "not a URL")))
   }
 

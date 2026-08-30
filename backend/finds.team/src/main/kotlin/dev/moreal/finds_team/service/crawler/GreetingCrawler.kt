@@ -133,7 +133,17 @@ class GreetingCrawler : JobCrawler {
     val GREETING_JOB_PATH_PATTERN = Regex("^/(?:[a-z]{2}/)?o/[0-9]+/?$")
 
     fun siteHost(url: String): String? = runCatching {
-      URI(url).host?.lowercase()?.takeIf(String::isNotEmpty)
+      val uri = URI(url)
+      if (
+        !uri.isAbsolute ||
+        !uri.scheme.equals("https", ignoreCase = true) ||
+        uri.userInfo != null ||
+        uri.port != -1
+      ) {
+        return@runCatching null
+      }
+
+      uri.host?.lowercase()?.takeIf(String::isNotEmpty)
     }.getOrNull()
   }
 }

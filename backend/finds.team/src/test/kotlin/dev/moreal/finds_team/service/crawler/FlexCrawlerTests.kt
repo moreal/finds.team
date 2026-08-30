@@ -81,6 +81,8 @@ class FlexCrawlerTests {
     assertTrue(crawler.matches(careerSite.copy(url = "https://ACME.CAREERS.TEAM")))
     assertFalse(crawler.matches(careerSite.copy(url = "https://acme.careers.team.evil.test")))
     assertFalse(crawler.matches(careerSite.copy(url = "https://nested.acme.careers.team")))
+    assertFalse(crawler.matches(careerSite.copy(url = "//acme.careers.team")))
+    assertFalse(crawler.matches(careerSite.copy(url = "http://acme.careers.team")))
     assertFalse(crawler.matches(careerSite.copy(url = "not a URL")))
   }
 }

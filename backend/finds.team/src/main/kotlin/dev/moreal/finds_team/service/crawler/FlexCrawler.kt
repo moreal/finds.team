@@ -132,7 +132,17 @@ class FlexCrawler : JobCrawler {
     val FLEX_HOST_PATTERN = Regex("^[^.]+\\.careers\\.team$")
 
     fun siteHost(url: String): String? = runCatching {
-      URI(url).host?.lowercase()?.takeIf(String::isNotEmpty)
+      val uri = URI(url)
+      if (
+        !uri.isAbsolute ||
+        !uri.scheme.equals("https", ignoreCase = true) ||
+        uri.userInfo != null ||
+        uri.port != -1
+      ) {
+        return@runCatching null
+      }
+
+      uri.host?.lowercase()?.takeIf(String::isNotEmpty)
     }.getOrNull()
   }
 }
