@@ -15,52 +15,84 @@ import java.net.URI
 
 @Component
 class FlexCrawler : JobCrawler {
-  override fun crawlJobs(careerSite: CareerSite): List<Job> {
-    val jobs = mutableListOf<Job>()
-    val uri = URI("https", URI(careerSite.url).host, "/", "")
+  private val json = Json { ignoreUnknownKeys = true }
 
-    val client = HttpClient(CIO)
-    val body = runBlocking { client.get(uri.toURL()).bodyAsText() }
-    val document = Jsoup.parse(body)
-    val nextDataScript =
-      document.body().select("script[id=__NEXT_DATA__]").first()
-        ?: throw Exception("Failed to find __NEXT_DATA__ script tag")
+  override fun crawlJobs(careerSite: CareerSite): List<Job> = runBlocking {
+    val host = requireNotNull(siteHost(careerSite.url)) {
+      "Career site URL must contain a host"
+    }
+    val homepageUrl = URI("https", host, "/", null).toString()
 
-    val nextDataScriptText = nextDataScript.html()
-    val json = Json { ignoreUnknownKeys = true }
-    val flexNextData = json.decodeFromString<FlexNextData>(nextDataScriptText)
-    val customerIdHash =
-      flexNextData.props.pageProps.recruitingSiteResponse.customerIdHash
+    HttpClient(CIO).use { client ->
+      val customerIdHash = extractCustomerIdHash(
+        client.get(homepageUrl).bodyAsText(),
+      )
+      val jobDescriptionsUrl =
+        "https://flex.team/api-public/v2/recruiting/customers/$customerIdHash/sites/job-descriptions"
 
-    val jobDescriptionsUrl =
-      "https://flex.team/api-public/v2/recruiting/customers/$customerIdHash/sites/job-descriptions"
-    val jobDescriptionsResponse: JobDescriptionsResponse =
-      json.decodeFromString(runBlocking {
-        client.get(jobDescriptionsUrl).bodyAsText()
-      })
-    jobs.addAll(
-      jobDescriptionsResponse.jobDescriptions.map { jobDescription ->
-        Job(
-          title = jobDescription.title,
-          description = jobDescription.jobRoleName,
-          url = URI(
-            "https",
-            uri.host,
-            "/job-descriptions/${jobDescription.jobDescriptionIdHash}",
-            "",
-          ).toString(),
-          careerSite = careerSite,
-        )
-      },
-    )
+      parseJobDescriptions(
+        client.get(jobDescriptionsUrl).bodyAsText(),
+        careerSite,
+      )
+    }
+  }
 
-    return jobs
+  internal fun extractCustomerIdHash(homepageHtml: String): String {
+    val nextData = Jsoup.parse(homepageHtml)
+      .selectFirst("script#__NEXT_DATA__")
+      ?.data()
+      ?.trim()
+      .orEmpty()
+    require(nextData.isNotEmpty()) { "Failed to find __NEXT_DATA__ script tag" }
+
+    return json.decodeFromString<FlexNextData>(nextData)
+      .props.pageProps.recruitingSiteResponse.customerIdHash
+      .trim()
+      .also { require(it.isNotEmpty()) { "Flex customer ID must not be empty" } }
+  }
+
+  internal fun parseJobDescriptions(
+    responseBody: String,
+    careerSite: CareerSite,
+  ): List<Job> {
+    val host = requireNotNull(siteHost(careerSite.url)) {
+      "Career site URL must contain a host"
+    }
+    val response = json.decodeFromString<JobDescriptionsResponse>(responseBody)
+
+    return response.jobDescriptions.mapNotNull { jobDescription ->
+      val id = jobDescription.jobDescriptionIdHash.trim()
+      val title = jobDescription.title.trim()
+      if (id.isEmpty() || title.isEmpty()) {
+        return@mapNotNull null
+      }
+
+      val description = jobDescription.jobRoleName
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?: jobDescription.recruitingEmploymentContractType
+          ?.trim()
+          ?.takeIf(String::isNotEmpty)
+        ?: title
+
+      Job(
+        title = title,
+        description = description,
+        url = URI(
+          "https",
+          host,
+          "/job-descriptions/$id",
+          null,
+        ).toString(),
+        careerSite = careerSite,
+      )
+    }
   }
 
   override fun matches(careerSite: CareerSite): Boolean {
-    val pattern = Regex(pattern = "^[^.]+.careers.team$")
+    val host = siteHost(careerSite.url) ?: return false
 
-    return pattern.find(URI(careerSite.url).host) != null
+    return FLEX_HOST_PATTERN.matches(host)
   }
 
   @Serializable
@@ -85,18 +117,22 @@ class FlexCrawler : JobCrawler {
 
   @Serializable
   private data class JobDescriptionsResponse(
-    val jobDescriptions: List<JobDescription>,
+    val jobDescriptions: List<JobDescription> = emptyList(),
   )
 
   @Serializable
   private data class JobDescription(
-    val jobDescriptionIdHash: String,
-    val customerJobGroupIdHash: String? = null, // Made nullable as some entries don't have this field
-    val title: String,
-    val jobRoleName: String,
-    val recruitingEmploymentContractType: String,
-    val isOccasionalRecruitment: Boolean,
-    val recruitingStartDate: String? = null, // Made nullable as some entries don't have this field
-    val recruitingEndDate: String? = null, // Made nullable as some entries don't have this field
+    val jobDescriptionIdHash: String = "",
+    val title: String = "",
+    val jobRoleName: String? = null,
+    val recruitingEmploymentContractType: String? = null,
   )
+
+  private companion object {
+    val FLEX_HOST_PATTERN = Regex("^[^.]+\\.careers\\.team$")
+
+    fun siteHost(url: String): String? = runCatching {
+      URI(url).host?.lowercase()?.takeIf(String::isNotEmpty)
+    }.getOrNull()
+  }
 }

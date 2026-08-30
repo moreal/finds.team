@@ -29,7 +29,7 @@ class JobController(
     @RequestBody job: Job,
   ): ResponseEntity<JobDto> {
     return try {
-      val jobEntity = jobService.createJob JobService.createJob(job)
+      val jobEntity = jobService.createJob(job)
       ResponseEntity.ok(
         JobDto(
           id = jobEntity.id,
