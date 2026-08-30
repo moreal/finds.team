@@ -130,7 +130,7 @@ class GreetingCrawler : JobCrawler {
 
   private companion object {
     val GREETING_HOST_PATTERN = Regex("^[^.]+\\.career\\.greetinghr\\.com$")
-    val GREETING_JOB_PATH_PATTERN = Regex("^/(?:[a-z]{2}/)?o/[0-9]+/?$")
+    val GREETING_JOB_PATH_PATTERN = Regex("^/o/[0-9]+/?$")
 
     fun siteHost(url: String): String? = runCatching {
       val uri = URI(url)

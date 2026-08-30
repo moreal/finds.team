@@ -45,10 +45,7 @@ class GreetingCrawlerTests {
     """.trimIndent()
 
     assertEquals(
-      listOf(
-        "https://acme.career.greetinghr.com/o/101",
-        "https://acme.career.greetinghr.com/ko/o/102",
-      ),
+      listOf("https://acme.career.greetinghr.com/o/101"),
       crawler.parseJobUrls(sitemap, careerSite),
     )
   }
