@@ -32,6 +32,7 @@ ktor-client-encoding = { module = "io.ktor:ktor-client-encoding", version.ref = 
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 jooq = { module = "org.jooq:jooq", version.ref = "jooq" }
+jooq-codegen-lib = { module = "org.jooq:jooq-codegen", version.ref = "jooq" }
 flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
@@ -45,4 +46,3 @@ kotlin-jpa = { id = "org.jetbrains.kotlin.plugin.jpa", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
 spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "spring-dependency-management" }
-jooq-codegen = { id = "org.jooq.jooq-codegen-gradle", version.ref = "jooq" }
