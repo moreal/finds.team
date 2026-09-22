@@ -21,7 +21,10 @@ interface SourceAdapter {
 }
 
 internal sealed interface ProviderReadResult {
-  data class Success(val body: String) : ProviderReadResult
+  data class Success(
+    val body: String,
+    val finalUrl: SiteUrl,
+  ) : ProviderReadResult
 
   data class Failure(val failure: CrawlFailure) : ProviderReadResult
 }
@@ -54,7 +57,7 @@ internal suspend fun readSource(
       ),
     )
     is WebResult.Success -> if (result.response.status in 200..299) {
-      ProviderReadResult.Success(result.response.bodyText())
+      ProviderReadResult.Success(result.response.bodyText(), result.response.finalUrl)
     } else {
       ProviderReadResult.Failure(
         CrawlFailure(
