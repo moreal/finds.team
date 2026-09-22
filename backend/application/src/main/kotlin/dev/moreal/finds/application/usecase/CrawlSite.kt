@@ -149,7 +149,16 @@ class CrawlSite(
       )
       return CrawlSiteResult.Succeeded(startedRunId, counts)
     } catch (error: Exception) {
-      if (error is CancellationException) throw error
+      if (error is CancellationException) {
+        runId?.let { started ->
+          val failure = CrawlFailure(
+            CrawlFailureCode.CANCELLED,
+            error.safeMessage(),
+          )
+          runCatching { runs.fail(started, failure, clock.now()) }
+        }
+        throw error
+      }
       val failure = CrawlFailure(infrastructureFailureCode, error.safeMessage())
       runId?.let { started ->
         runCatching { runs.fail(started, failure, clock.now()) }

@@ -31,9 +31,11 @@ import dev.moreal.finds.domain.posting.PostingUrlResult
 import dev.moreal.finds.domain.posting.RawPosting
 import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -169,6 +171,19 @@ class CrawlSiteTest {
 
     assertEquals("network secret", result.message)
     assertEquals(CrawlFailureCode.SOURCE_FETCH_FAILED, fixture.runs.failedRuns.single().failure.code)
+    assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
+  }
+
+  @Test
+  fun `cancellation records the started run releases lease and propagates`() = runTest {
+    val fixture = fixture()
+    fixture.source.throwable = CancellationException("scheduler stopped")
+
+    assertFailsWith<CancellationException> {
+      fixture.useCase.execute(command())
+    }
+
+    assertEquals(CrawlFailureCode.CANCELLED, fixture.runs.failedRuns.single().failure.code)
     assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
   }
 
