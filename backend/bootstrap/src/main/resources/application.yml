@@ -32,6 +32,7 @@ management:
 finds:
   source:
     user-agent-product: ${FINDS_USER_AGENT_PRODUCT:finds.team}
+    robots-product-token: ${FINDS_ROBOTS_PRODUCT_TOKEN:findsteam}
     contact-url: ${FINDS_CONTACT_URL:https://finds.team/contact}
     connect-timeout: 5s
     request-timeout: 20s
@@ -39,18 +40,18 @@ finds:
     minimum-host-spacing: 1s
     maximum-response-bytes: 5242880
     maximum-redirects: 5
-    retry-delays: [1s, 3s]
     robots-success-ttl: 1h
     robots-failure-ttl: 5m
     sitemap-maximum-depth: 4
     sitemap-maximum-documents: 100
     sitemap-maximum-urls: 50000
+    sitemap-maximum-total-bytes: 20971520
   crawl:
     scan-interval: 1m
     success-interval: 6h
-    failure-retry-interval: 30m
+    retry-delays: [30m, 2h, 6h]
     lease-duration: 10m
+    lease-owner: ${FINDS_LEASE_OWNER:${HOSTNAME:local}}
     dispatch-limit: 100
     global-concurrency: 4
     close-after-misses: 2
-

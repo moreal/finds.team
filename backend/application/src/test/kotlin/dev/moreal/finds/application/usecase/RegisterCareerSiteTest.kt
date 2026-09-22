@@ -6,10 +6,12 @@ import dev.moreal.finds.application.testing.FakeCareerSiteRepository
 import dev.moreal.finds.application.testing.FakeSourceDiscoveryPort
 import dev.moreal.finds.domain.career.CareerSite
 import dev.moreal.finds.domain.career.CareerSiteId
+import dev.moreal.finds.domain.career.CrawlSettings
 import dev.moreal.finds.domain.career.SiteUrl
 import dev.moreal.finds.domain.career.SiteUrlResult
 import dev.moreal.finds.domain.career.SourceProvider
 import kotlinx.coroutines.test.runTest
+import java.time.Duration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -102,6 +104,20 @@ class RegisterCareerSiteTest {
     assertEquals("Acme", result.site.displayName)
     assertEquals(listOf(result.site), fixture.sites.sites)
     assertEquals(1, fixture.discovery.requestedUrls.size)
+  }
+
+  @Test
+  fun `successful registration applies the configured crawl policy`() = runTest {
+    val sites = FakeCareerSiteRepository()
+    val discovery = FakeSourceDiscoveryPort().apply {
+      result = ProviderDiscoveryResult.Detected(SourceProvider.FLEX)
+    }
+    val expected = CrawlSettings(successfulInterval = Duration.ofHours(12))
+    val useCase = RegisterCareerSite(sites, discovery, expected)
+
+    val result = assertIs<RegisterCareerSiteResult.Registered>(useCase.execute(command()))
+
+    assertEquals(expected, result.site.crawlSettings)
   }
 
   private fun fixture(initialSites: List<CareerSite> = emptyList()): Fixture {

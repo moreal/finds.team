@@ -6,6 +6,7 @@ import dev.moreal.finds.application.port.InsertCareerSiteResult
 import dev.moreal.finds.application.port.ProviderDiscoveryResult
 import dev.moreal.finds.application.port.SourceDiscoveryPort
 import dev.moreal.finds.domain.career.CareerSite
+import dev.moreal.finds.domain.career.CrawlSettings
 import dev.moreal.finds.domain.career.SiteUrl
 import dev.moreal.finds.domain.career.SiteUrlResult
 import dev.moreal.finds.domain.career.SourceProvider
@@ -34,6 +35,7 @@ sealed interface RegisterCareerSiteResult {
 class RegisterCareerSite(
   private val sites: CareerSiteRepository,
   private val discovery: SourceDiscoveryPort,
+  private val defaultCrawlSettings: CrawlSettings = CrawlSettings(),
 ) {
   suspend fun execute(command: RegisterCareerSiteCommand): RegisterCareerSiteResult {
     val siteUrl = when (val parsed = SiteUrl.parse(command.url)) {
@@ -67,6 +69,7 @@ class RegisterCareerSite(
       canonicalBaseUrl = siteUrl,
       provider = provider,
       displayName = command.displayName,
+      crawlSettings = defaultCrawlSettings,
     )
     return when (val inserted = sites.insert(newSite)) {
       is InsertCareerSiteResult.Inserted -> RegisterCareerSiteResult.Registered(inserted.site)
