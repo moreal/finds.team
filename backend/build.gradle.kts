@@ -7,6 +7,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization) apply false
   alias(libs.plugins.spring.boot) apply false
   alias(libs.plugins.spring.dependency.management) apply false
+  alias(libs.plugins.jooq.codegen) apply false
 }
 
 allprojects {
