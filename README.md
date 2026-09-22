@@ -69,6 +69,31 @@ cd ..
 docker compose down
 ```
 
+### Same-origin production topology
+
+The opt-in `app` Compose profile builds the Spring Boot and TanStack Start
+production images and exposes one Caddy origin at `http://127.0.0.1:8080`:
+
+```sh
+docker compose --profile app up -d --build
+pnpm --dir frontend exec playwright test e2e/same-origin-routing.spec.ts
+```
+
+Caddy sends `/graphql`, `/auth/*`, and `/webauthn/*` directly to Spring and
+sends every other path to the Start production server. The browser therefore
+uses relative `/graphql` requests without CORS, while Start SSR alone receives
+`FINDS_INTERNAL_GRAPHQL_URL=http://backend:8080/graphql`. The backend and
+frontend have no host ports; set `FINDS_APP_PORT` to change the proxy's
+localhost-only host port. The existing PostgreSQL development binding and named
+volume are unchanged.
+
+Inspect health and stop the application without deleting database data:
+
+```sh
+docker compose --profile app ps
+docker compose --profile app down
+```
+
 ## Configuration
 
 Defaults live in `backend/bootstrap/src/main/resources/application.yml`. The
@@ -80,6 +105,7 @@ most commonly deployed overrides are:
 | `FINDS_DB_PORT` | Compose host port | `55432` |
 | `FINDS_DB_USER` | PostgreSQL user | `finds` |
 | `FINDS_DB_PASSWORD` | PostgreSQL password | `finds` |
+| `FINDS_APP_PORT` | Same-origin proxy host port | `8080` |
 | `FINDS_USER_AGENT_PRODUCT` | HTTP User-Agent product | `finds.team` |
 | `FINDS_ROBOTS_PRODUCT_TOKEN` | robots.txt product token | `findsteam` |
 | `FINDS_CONTACT_URL` | HTTPS operator contact in User-Agent | `https://finds.team/contact` |

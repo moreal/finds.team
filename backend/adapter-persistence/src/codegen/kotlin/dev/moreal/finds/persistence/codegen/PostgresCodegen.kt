@@ -12,54 +12,71 @@ import org.jooq.meta.jaxb.Target
 import org.testcontainers.postgresql.PostgreSQLContainer
 
 fun main(args: Array<String>) {
-  require(args.size == 2) { "Expected migration directory and generated-source directory" }
+  require(args.size == 2 || args.size == 5) {
+    "Expected migration and generated-source directories, optionally followed by JDBC URL, user, and password"
+  }
   val migrations = File(args[0]).canonicalFile
   val output = File(args[1]).canonicalFile
   require(migrations.isDirectory) { "Migration directory does not exist: $migrations" }
 
+  if (args.size == 5) {
+    generate(migrations, output, args[2], args[3], args[4])
+    return
+  }
+
   PostgreSQLContainer("postgres:17-alpine").use { postgres ->
     postgres.start()
-    Flyway.configure()
-      .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
-      .locations("filesystem:${migrations.path}")
-      .load()
-      .migrate()
-
-    GenerationTool.generate(
-      Configuration()
-        .withJdbc(
-          Jdbc()
-            .withDriver("org.postgresql.Driver")
-            .withUrl(postgres.jdbcUrl)
-            .withUser(postgres.username)
-            .withPassword(postgres.password),
-        )
-        .withGenerator(
-          Generator()
-            .withName("org.jooq.codegen.KotlinGenerator")
-            .withDatabase(
-              Database()
-                .withName("org.jooq.meta.postgres.PostgresDatabase")
-                .withInputSchema("public")
-                .withIncludes(".*")
-                .withExcludes("flyway_schema_history"),
-            )
-            .withGenerate(
-              Generate()
-                .withDaos(false)
-                .withPojos(false)
-                .withJpaAnnotations(false)
-                .withValidationAnnotations(false)
-                .withDeprecated(false),
-            )
-            .withTarget(
-              Target()
-                .withPackageName("dev.moreal.finds.persistence.jooq.generated")
-                .withDirectory(output.path)
-                .withEncoding("UTF-8")
-                .withClean(true),
-            ),
-        ),
-    )
+    generate(migrations, output, postgres.jdbcUrl, postgres.username, postgres.password)
   }
+}
+
+private fun generate(
+  migrations: File,
+  output: File,
+  jdbcUrl: String,
+  user: String,
+  password: String,
+) {
+  Flyway.configure()
+    .dataSource(jdbcUrl, user, password)
+    .locations("filesystem:${migrations.path}")
+    .load()
+    .migrate()
+
+  GenerationTool.generate(
+    Configuration()
+      .withJdbc(
+        Jdbc()
+          .withDriver("org.postgresql.Driver")
+          .withUrl(jdbcUrl)
+          .withUser(user)
+          .withPassword(password),
+      )
+      .withGenerator(
+        Generator()
+          .withName("org.jooq.codegen.KotlinGenerator")
+          .withDatabase(
+            Database()
+              .withName("org.jooq.meta.postgres.PostgresDatabase")
+              .withInputSchema("public")
+              .withIncludes(".*")
+              .withExcludes("flyway_schema_history"),
+          )
+          .withGenerate(
+            Generate()
+              .withDaos(false)
+              .withPojos(false)
+              .withJpaAnnotations(false)
+              .withValidationAnnotations(false)
+              .withDeprecated(false),
+          )
+          .withTarget(
+            Target()
+              .withPackageName("dev.moreal.finds.persistence.jooq.generated")
+              .withDirectory(output.path)
+              .withEncoding("UTF-8")
+              .withClean(true),
+          ),
+      ),
+  )
 }

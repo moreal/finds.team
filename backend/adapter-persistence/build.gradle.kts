@@ -40,6 +40,13 @@ val jooqCodegen = tasks.register<JavaExec>("jooqCodegen") {
   outputs.dir(output)
   doFirst {
     args(migrations.asFile.absolutePath, output.get().asFile.absolutePath)
+    providers.gradleProperty("finds.codegen.jdbcUrl").orNull?.let { jdbcUrl ->
+      args(
+        jdbcUrl,
+        providers.gradleProperty("finds.codegen.user").get(),
+        providers.gradleProperty("finds.codegen.password").getOrElse(""),
+      )
+    }
   }
 }
 

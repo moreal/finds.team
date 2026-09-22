@@ -1,0 +1,9 @@
+.git
+.worktrees
+backend/**/build
+frontend/.relay
+frontend/dist
+frontend/node_modules
+frontend/playwright-report
+frontend/test-results
+node_modules
