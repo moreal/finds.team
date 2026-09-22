@@ -1,41 +1,63 @@
 import { createSignal } from "solid-js";
 import { VirtualList } from "../../src/ui/virtual/VirtualList";
 
+function StatefulRow(props: { id: number; index: number; label: string }) {
+  const [edits, setEdits] = createSignal(0);
+  return <button class="fixture-row" data-state-row={props.id} data-position={props.index} data-label={props.label}
+    onClick={() => setEdits((value) => value + 1)}>State {props.id}: {edits()}</button>;
+}
+
 export function VirtualLists() {
   const items = Array.from({ length: 200 }, (_, id) => ({ id, label: `Row ${id}` }));
   const [enabled, setEnabled] = createSignal(false);
   const [count, setCount] = createSignal(3);
   const [loaded, setLoaded] = createSignal(false);
   const [expanded, setExpanded] = createSignal(false);
+  const [stateful, setStateful] = createSignal(items.slice(0, 3));
+  const [initialEnabled, setInitialEnabled] = createSignal(true);
   return <main>
     <button onClick={() => setEnabled((value) => !value)}>Toggle virtualization</button>
     <button onClick={() => setCount(200)}>Grow short list</button>
     <button onClick={() => setCount(3)}>Shrink short list</button>
     <button onClick={() => setLoaded(true)}>Load empty list</button>
     <button onClick={() => setExpanded(true)}>Expand compact rows</button>
+    <button onClick={() => setStateful(items)}>Append stateful rows</button>
+    <button onClick={() => setStateful([...items.slice(0, 3).reverse(), ...items.slice(3)])}>Reorder stateful rows</button>
+    <button onClick={() => setStateful((rows) => rows.map((row) => ({ ...row, label: `Updated ${row.id}` })))}>Refresh stateful rows</button>
+    <button onClick={() => setInitialEnabled((value) => !value)}>Toggle initially enabled rows</button>
     <section aria-label="Variable rows">
       <VirtualList items={items} getKey={(item) => item.id} estimateSize={() => 70} enabled={enabled()}>
-        {(item) => <button class={`fixture-row fixture-height-${item.id % 3}`} data-row={item.id}>{item.label}</button>}
+        {(item) => <button class={`fixture-row fixture-height-${item().id % 3}`} data-row={item().id}>{item().label}</button>}
       </VirtualList>
     </section>
     <section aria-label="Short rows">
       <VirtualList items={items.slice(0, count())} getKey={(item) => item.id} estimateSize={() => 70} enabled>
-        {(item) => <button class="fixture-row">Short {item.id}</button>}
+        {(item) => <button class="fixture-row">Short {item().id}</button>}
       </VirtualList>
     </section>
     <section aria-label="Initially enabled">
-      <VirtualList items={items} getKey={(item) => item.id} estimateSize={() => 70} enabled>
-        {(item) => <button class="fixture-row">Initial {item.id}</button>}
+      <VirtualList items={items} getKey={(item) => item.id} estimateSize={() => 70} enabled={initialEnabled()}>
+        {(item) => <button class="fixture-row" data-row={item().id}>Initial {item().id}</button>}
       </VirtualList>
     </section>
     <section aria-label="Initially empty">
       <VirtualList items={loaded() ? items : []} getKey={(item) => item.id} estimateSize={() => 70} enabled>
-        {(item) => <button class="fixture-row">Loaded {item.id}</button>}
+        {(item) => <button class="fixture-row">Loaded {item().id}</button>}
       </VirtualList>
     </section>
     <section aria-label="Compact rows">
       <VirtualList items={items.slice(0, 25)} getKey={(item) => item.id} estimateSize={() => 700} enabled>
-        {(item) => <div class={expanded() ? "fixture-row" : "fixture-compact"}>Compact {item.id}</div>}
+        {(item) => <div class={expanded() ? "fixture-row" : "fixture-compact"}>Compact {item().id}</div>}
+      </VirtualList>
+    </section>
+    <section aria-label="Stateful rows">
+      <VirtualList items={stateful()} getKey={(item) => item.id} estimateSize={() => 60} enabled>
+        {(item, index) => <StatefulRow id={item().id} index={index()} label={item().label} />}
+      </VirtualList>
+    </section>
+    <section aria-label="Heterogeneous rows">
+      <VirtualList items={items} getKey={(item) => item.id} estimateSize={() => 20} enabled>
+        {(item) => <div class={item().id < 20 ? "fixture-row" : "fixture-compact"} data-heterogeneous-row={item().id}>Mixed {item().id}</div>}
       </VirtualList>
     </section>
   </main>;

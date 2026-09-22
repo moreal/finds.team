@@ -119,9 +119,18 @@ PW_TEST_CONNECT_WS_ENDPOINT=ws://127.0.0.1:3300/ PW_TEST_CONNECT_EXPOSE_NETWORK=
 `src/ui/virtual/VirtualList.tsx` uses `@tanstack/virtual-core@3.17.11` with
 Solid 2's `onSettled` lifecycle and two-phase effects. Product code imports only
 this local component. Its public `VirtualListProps<T>` exposes local props and
-Solid JSX types, with no TanStack types. Pass readonly `items`, a positive
+Solid accessor/JSX types, with no TanStack types. Pass readonly `items`, a positive
 `estimateSize(index)` in pixels, stable unique `getKey(item)` values, and a
-`children(item, index)` renderer.
+`children(item, index)` renderer whose two arguments are reactive accessors.
+The renderer runs once for each mounted key; read `item()` and `index()` in JSX
+or component props so same-key data updates and reorder positions stay live
+without recreating the row's subtree or local state:
+
+```tsx
+<VirtualList items={rows()} estimateSize={() => 80} getKey={(row) => row.id} enabled={enabled()}>
+  {(item, index) => <Row item={item()} position={index() + 1} />}
+</VirtualList>
+```
 
 The exact `@tanstack/solid-virtual@3.13.40` candidate declares `solid-js@^1.3.0`.
 With the package-scoped peer allowance resolving it to `2.0.0-rc.9`, the actual
@@ -150,15 +159,25 @@ The local contract is:
 - After hydration settles, `enabled` still defaults to false. Disabled lists
   render all supplied items. Callers enable only collections their product
   measurements justify; the adapter additionally requires more than 20 rows and
-  more than three viewportfuls, computed from actual average rendered row height.
+  more than three viewportfuls, computed from the first page's actual average
+  row height. That keyed measurement evidence survives the page leaving the
+  mounted window; the current window does not replace the collection sample.
   Empty, hidden, and unmeasurable lists remain disabled until measurable.
-- Resize observation rechecks the threshold after container/content changes.
+- Before activation, resize observation rechecks the threshold after
+  container/content changes. Once activated, the mode is retained until the
+  caller disables it or the collection shrinks to 20 items or fewer. Ordinary
+  scrolling and later row measurements cannot switch the list between modes.
   The core measures variable-height rows and positions them only after activation.
   Styles use an external stylesheet plus browser CSSOM property assignments,
   preserving the existing nonce-only CSP. The scroll container has a default
   `max-height: min(70vh, 40rem)`; a containing stylesheet can size
   `.ui-virtual-list` for its layout.
-- Keys preserve row DOM across scroll/measurement updates. Five overscan rows
+- Keys preserve the row subtree, component state, and focus across append,
+  reorder, and same-key data replacement, as well as scroll/measurement updates.
+  Activation seeds the core with existing row measurements and the current
+  scroll offset. Mode transitions preserve the visible keyed item and its
+  within-row offset even when preceding estimates differed from real heights.
+  Five overscan rows
   surround the visible range. The focused row and its five neighbours on each
   side remain mounted even when pointer scrolling moves the viewport away;
   leaving the list releases that retained range. The initial page remains
@@ -173,9 +192,12 @@ pnpm --dir frontend test --run src/ui/virtual
 pnpm --dir frontend exec playwright test e2e/virtual-list.spec.ts
 ```
 
-The six real-browser cases pass on macOS Chromium and Linux Chromium. They cover
+The nine real-browser cases pass on macOS Chromium and Linux Chromium. They cover
 retained SSR nodes with no diagnostics, caller/measurement gating, growth and
 shrink, disabling, initially empty data, resizing, variable-height end/back
-scrolling, and forward/backward keyboard traversal through 35 rows. All browser
+scrolling, child DOM/state retention with live item/index updates, scrolled mode
+transitions, heterogeneous-height mode stability, and forward/backward keyboard
+traversal through 35 rows. SSR assertions check the exact 20-row page and retained
+child identity/text after hydration. All browser
 console warnings/errors fail the gate. The shared fixture also keeps all 16
 native-control browser cases passing on Linux Chromium.
