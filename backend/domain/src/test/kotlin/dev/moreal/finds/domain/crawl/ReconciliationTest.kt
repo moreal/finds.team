@@ -1,6 +1,7 @@
 package dev.moreal.finds.domain.crawl
 
 import dev.moreal.finds.domain.career.CareerSiteId
+import dev.moreal.finds.domain.career.SiteHost
 import dev.moreal.finds.domain.posting.JobPosting
 import dev.moreal.finds.domain.posting.JobPostingId
 import dev.moreal.finds.domain.posting.PostingStatus
@@ -111,6 +112,23 @@ class ReconciliationTest {
   }
 
   @Test
+  fun `posting URL from another host is rejected`() {
+    assertEquals(
+      ReconciliationResult.WrongPostingHost(
+        expected = SITE_HOST,
+        actual = SiteHost("foreign.example"),
+        externalKey = "foreign",
+      ),
+      reconcile(
+        existing = emptyList(),
+        snapshot = snapshot(raw("foreign", host = "foreign.example")),
+        policy = ClosePolicy(2),
+        now = NOW,
+      ),
+    )
+  }
+
+  @Test
   fun `operations are ordered by external key`() {
     val plan = planFor(
       emptyList(),
@@ -152,18 +170,33 @@ class ReconciliationTest {
     assertFailsWith<IllegalArgumentException> { ClosePolicy(0) }
   }
 
+  @Test
+  fun `miss count saturates and closes instead of overflowing`() {
+    val plan = planFor(
+      listOf(
+        openPosting("gone", misses = Int.MAX_VALUE),
+        openPosting("present"),
+      ),
+      snapshot(raw("present")),
+    )
+
+    assertEquals(Int.MAX_VALUE, plan.close.single().consecutiveMisses)
+  }
+
   private fun raw(
     key: String,
     description: String = "Description $key",
+    host: String = SITE_HOST.value,
   ): RawPosting = RawPosting(
     externalKey = key,
     title = "Title $key",
     descriptionText = description,
-    canonicalUrl = validPostingUrl("https://jobs.example/postings/$key"),
+    canonicalUrl = validPostingUrl("https://$host/postings/$key"),
   )
 
   private fun snapshot(vararg postings: RawPosting) = Snapshot(
     careerSiteId = SITE_ID,
+    siteHost = SITE_HOST,
     fetchedAt = NOW,
     postings = postings.toList(),
   )
@@ -275,6 +308,7 @@ class ReconciliationTest {
 
   private companion object {
     val SITE_ID = CareerSiteId(1)
+    val SITE_HOST = SiteHost("jobs.example")
     val NOW: Instant = Instant.parse("2026-09-22T00:00:00Z")
   }
 }

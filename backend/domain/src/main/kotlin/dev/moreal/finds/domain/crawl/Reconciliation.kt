@@ -1,6 +1,7 @@
 package dev.moreal.finds.domain.crawl
 
 import dev.moreal.finds.domain.career.CareerSiteId
+import dev.moreal.finds.domain.career.SiteHost
 import dev.moreal.finds.domain.posting.JobPosting
 import dev.moreal.finds.domain.posting.JobPostingId
 import dev.moreal.finds.domain.posting.PostingStatus
@@ -9,6 +10,7 @@ import java.time.Instant
 
 data class Snapshot(
   val careerSiteId: CareerSiteId,
+  val siteHost: SiteHost,
   val fetchedAt: Instant,
   val postings: List<RawPosting>,
   val sourceRevision: String? = null,
@@ -81,6 +83,12 @@ sealed interface ReconciliationResult {
     val expected: CareerSiteId,
     val actual: CareerSiteId,
   ) : ReconciliationResult
+
+  data class WrongPostingHost(
+    val expected: SiteHost,
+    val actual: SiteHost,
+    val externalKey: String,
+  ) : ReconciliationResult
 }
 
 fun reconcile(
@@ -102,6 +110,16 @@ fun reconcile(
       return ReconciliationResult.WrongCareerSite(
         expected = snapshot.careerSiteId,
         actual = posting.careerSiteId,
+      )
+    }
+
+  snapshot.postings
+    .firstOrNull { it.canonicalUrl.host != snapshot.siteHost }
+    ?.let { posting ->
+      return ReconciliationResult.WrongPostingHost(
+        expected = snapshot.siteHost,
+        actual = posting.canonicalUrl.host,
+        externalKey = posting.externalKey,
       )
     }
 
@@ -141,7 +159,11 @@ fun reconcile(
       return@forEach
     }
 
-    val misses = persisted.consecutiveMisses + 1
+    val misses = if (persisted.consecutiveMisses == Int.MAX_VALUE) {
+      Int.MAX_VALUE
+    } else {
+      persisted.consecutiveMisses + 1
+    }
     if (misses >= policy.missesBeforeClose) {
       close += PostingClosure(persisted.ref(), now, misses)
     } else {

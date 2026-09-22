@@ -1,6 +1,7 @@
 package dev.moreal.finds.domain.posting
 
 import dev.moreal.finds.domain.career.CareerSiteId
+import dev.moreal.finds.domain.career.SiteHost
 import java.net.IDN
 import java.net.URI
 import java.nio.ByteBuffer
@@ -15,7 +16,10 @@ sealed interface PostingUrlResult {
 }
 
 @ConsistentCopyVisibility
-data class PostingUrl private constructor(val value: URI) {
+data class PostingUrl private constructor(
+  val value: URI,
+  val host: SiteHost,
+) {
   companion object {
     fun parse(value: String): PostingUrlResult = runCatching {
       val parsed = URI(value)
@@ -33,8 +37,7 @@ data class PostingUrl private constructor(val value: URI) {
         "URL host must be a DNS name without a port"
       }
       val host = IDN.toASCII(authority.lowercase(), IDN.USE_STD3_ASCII_RULES)
-      require(host.isNotBlank() && '.' in host) { "URL host must be a public DNS name" }
-      require(!IPV4_PATTERN.matches(host)) { "URL host must not be an IP address" }
+      val siteHost = SiteHost(host)
 
       PostingUrl(
         URI(
@@ -46,13 +49,12 @@ data class PostingUrl private constructor(val value: URI) {
           parsed.query,
           null,
         ),
+        siteHost,
       )
     }.fold(
       onSuccess = PostingUrlResult::Valid,
       onFailure = { error -> PostingUrlResult.Invalid(error.message ?: "Invalid posting URL") },
     )
-
-    private val IPV4_PATTERN = Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}")
   }
 }
 
