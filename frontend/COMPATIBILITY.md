@@ -172,6 +172,10 @@ The local contract is:
   heights can activate or deactivate it; ordinary scrolling retains the same
   collection sample and cannot cause mode oscillation. When changed sample rows
   are offscreen, they are temporarily mounted to obtain fresh evidence.
+  Real size changes on already-mounted rows, or a changed container width,
+  invalidate offscreen sample geometry even when item identities are unchanged.
+  Newly mounted window rows establish a size baseline; their initial observer
+  notifications and canvas estimate corrections do not trigger resampling.
   The core measures variable-height rows and positions them only after activation.
   Styles use an external stylesheet plus browser CSSOM property assignments,
   preserving the existing nonce-only CSP. The scroll container has a default
@@ -199,13 +203,14 @@ pnpm --dir frontend test --run src/ui/virtual
 pnpm --dir frontend exec playwright test e2e/virtual-list.spec.ts
 ```
 
-The 17 real-browser cases pass on macOS Chromium and Linux Chromium. They cover
+The 19 real-browser cases pass on macOS Chromium and Linux Chromium. They cover
 retained SSR nodes with no diagnostics, caller/measurement gating, growth and
 shrink, disabling, initially empty data, resizing, variable-height end/back
 scrolling, child DOM/state retention with live item/index updates, scrolled mode
 transitions, heterogeneous-height mode stability, removal/replacement/clearing
 in both modes with owner disposal, fresh activation evidence in both size
-directions, and forward/backward keyboard
+directions, offscreen CSS shrink/re-expand with unchanged items, no sample
+remounts during ordinary scroll estimate corrections, and forward/backward keyboard
 traversal through 35 rows. SSR assertions check the exact 20-row page and retained
 child identity/text after hydration. All browser
 console warnings/errors fail the gate. The shared fixture also keeps all 16

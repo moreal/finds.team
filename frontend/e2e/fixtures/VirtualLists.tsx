@@ -44,6 +44,25 @@ function FreshMeasurementRows() {
   </section>;
 }
 
+function ResizeRow(props: { id: number; onSampleMount: () => void }) {
+  onSettled(() => { if (props.id < 20) props.onSampleMount(); });
+  return <div class="fixture-row" data-resize-row={props.id}>Resize {props.id}</div>;
+}
+
+function OffscreenResizeRows() {
+  const items = Array.from({ length: 200 }, (_, id) => ({ id }));
+  const [compact, setCompact] = createSignal(false);
+  const [sampleMounts, setSampleMounts] = createSignal(0);
+  return <section aria-label="Offscreen resizing" class={compact() ? "fixture-condensed" : ""}>
+    <button onClick={() => setCompact(true)}>Shrink all boxes</button>
+    <button onClick={() => setCompact(false)}>Expand all boxes</button>
+    <output aria-label="Sample mounts">{sampleMounts()}</output>
+    <VirtualList items={items} getKey={(item) => item.id} estimateSize={() => 80} enabled>
+      {(item) => <ResizeRow id={item().id} onSampleMount={() => setSampleMounts((count) => count + 1)} />}
+    </VirtualList>
+  </section>;
+}
+
 export function VirtualLists() {
   const items = Array.from({ length: 200 }, (_, id) => ({ id, label: `Row ${id}` }));
   const [enabled, setEnabled] = createSignal(false);
@@ -100,5 +119,6 @@ export function VirtualLists() {
     <ReconciliationRows active={false} />
     <ReconciliationRows active />
     <FreshMeasurementRows />
+    <OffscreenResizeRows />
   </main>;
 }

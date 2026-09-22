@@ -71,24 +71,31 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
     // Keep collection evidence when its first page leaves the virtual window.
     // Sampling only the current window makes tall/short collections oscillate.
     const sampleSizes = new Map<string | number, { item: T; size: number }>();
-    const watchedRows = new Set<Element>();
+    const watchedRows = new Map<Element, { width: number; height: number }>();
+    let containerWidth = container.clientWidth;
     function measureThreshold() {
       const current = entries();
       const sample = current.slice(0, INITIAL_PAGE);
       const sampleKeys = new Set(sample.map((entry) => entry.key));
-      const renderedSample = new Set<Element>();
+      const renderedRows = new Set<Element>();
       for (const key of sampleSizes.keys()) if (!sampleKeys.has(key)) sampleSizes.delete(key);
       for (const node of canvas.children) {
         const row = node as HTMLDivElement;
+        renderedRows.add(row);
+        // New window rows establish a baseline; their initial observation is
+        // not a content resize and must not invalidate the offscreen sample.
+        const initialSize = !watchedRows.has(row) ? row.getBoundingClientRect() : undefined;
+        if (initialSize) {
+          watchedRows.set(row, { width: initialSize.width, height: initialSize.height });
+          observer.observe(row);
+        }
         const entry = current[Number(row.dataset.index)];
         if (entry && sampleKeys.has(entry.key)) {
-          sampleSizes.set(entry.key, { item: entry.item, size: row.getBoundingClientRect().height });
-          renderedSample.add(row);
-          if (!watchedRows.has(row)) { observer.observe(row); watchedRows.add(row); }
+          sampleSizes.set(entry.key, { item: entry.item, size: initialSize?.height ?? row.getBoundingClientRect().height });
         }
       }
-      for (const row of watchedRows) {
-        if (!renderedSample.has(row)) { observer.unobserve(row); watchedRows.delete(row); }
+      for (const row of watchedRows.keys()) {
+        if (!renderedRows.has(row)) { observer.unobserve(row); watchedRows.delete(row); }
       }
       const sizes = sample.flatMap((entry) => {
         const known = sampleSizes.get(entry.key);
@@ -104,7 +111,30 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
       setMeasurement((previous) => previous?.entries === current && previous.enabled === enabled && previous.threshold === threshold
         ? previous : { entries: current, enabled, threshold });
     }
-    const observer = new ResizeObserver(measureThreshold);
+    const observer = new ResizeObserver((changes) => {
+      let geometryChanged = false;
+      for (const { target } of changes) {
+        if (target === container) {
+          if (containerWidth !== container.clientWidth) geometryChanged = true;
+          containerWidth = container.clientWidth;
+        } else if (target !== canvas && target.isConnected) {
+          const previous = watchedRows.get(target);
+          if (!previous) continue;
+          const { width, height } = target.getBoundingClientRect();
+          if (previous.width !== width || previous.height !== height) geometryChanged = true;
+          watchedRows.set(target, { width, height });
+        }
+      }
+      if (geometryChanged) {
+        // CSS/font/content changes can resize an offscreen first page without
+        // changing item identity. Resample that same page, never the tail.
+        sampleSizes.clear();
+        setMeasurement(undefined);
+      }
+      // Canvas size changes alone include estimate corrections during scroll.
+      // They do not invalidate stable sample geometry.
+      measureThreshold();
+    });
     observer.observe(container);
     observer.observe(canvas);
     measureRows = measureThreshold;

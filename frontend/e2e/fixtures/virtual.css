@@ -3,3 +3,4 @@
 .fixture-height-1 { height: 100px; }
 .fixture-height-2 { height: 140px; }
 .fixture-compact { height: 2px; overflow: hidden; }
+.fixture-condensed .fixture-row { height: 2px; overflow: hidden; }

@@ -180,6 +180,50 @@ test.describe("review round 2", () => {
   });
 });
 
+test.describe("review round 3", () => {
+  test("offscreen same-item CSS shrink resamples the first page and can expand again", async ({ page }) => {
+    await page.goto("/virtual");
+    await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+    const section = page.getByRole("region", { name: "Offscreen resizing", exact: true });
+    const list = section.getByRole("list");
+    const last = list.locator("[data-resize-row='199']");
+    await list.scrollIntoViewIfNeeded();
+    await expect(list).toHaveAttribute("data-virtualized", "true");
+    await expect(async () => {
+      await list.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+      await expect(last).toBeInViewport({ timeout: 250 });
+    }).toPass({ timeout: 5000 });
+    await expect(list.locator("[data-resize-row='0']")).toHaveCount(0);
+    await section.getByRole("button", { name: "Shrink all boxes" }).evaluate((node: HTMLButtonElement) => node.click());
+    await expect(list).toHaveAttribute("data-virtualized", "false");
+    await expect(list.getByRole("listitem")).toHaveCount(200);
+    expect(await list.locator(".ui-virtual-canvas").evaluate((node) => node.getBoundingClientRect().height)).toBe(400);
+    await section.getByRole("button", { name: "Expand all boxes" }).evaluate((node: HTMLButtonElement) => node.click());
+    await expect(list).toHaveAttribute("data-virtualized", "true");
+    await expect(async () => {
+      await list.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+      await expect(last).toBeInViewport({ timeout: 250 });
+    }).toPass({ timeout: 5000 });
+  });
+
+  test("ordinary scrolling with estimate corrections never remounts the offscreen sample", async ({ page }) => {
+    await page.goto("/virtual");
+    await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+    const section = page.getByRole("region", { name: "Offscreen resizing", exact: true });
+    const list = section.getByRole("list");
+    const mounts = section.getByRole("status", { name: "Sample mounts" });
+    await expect(list).toHaveAttribute("data-virtualized", "true");
+    await expect(mounts).toHaveText("20");
+    for (const offset of [2500, 5000, 9000, 6000, 11000]) {
+      await list.evaluate((node, value) => { node.scrollTop = value; }, offset);
+      await expect(list.locator("[data-resize-row='0']")).toHaveCount(0);
+      await list.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+      await expect(list).toHaveAttribute("data-virtualized", "true");
+      await expect(mounts).toHaveText("20");
+    }
+  });
+});
+
 test("requires caller enablement and a measured size threshold, then responds to growth and disablement", async ({ page }) => {
   await page.goto("/virtual");
   await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
