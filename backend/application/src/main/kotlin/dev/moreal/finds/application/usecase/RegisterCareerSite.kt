@@ -35,7 +35,7 @@ class RegisterCareerSite(
   private val sites: CareerSiteRepository,
   private val discovery: SourceDiscoveryPort,
 ) {
-  fun execute(command: RegisterCareerSiteCommand): RegisterCareerSiteResult {
+  suspend fun execute(command: RegisterCareerSiteCommand): RegisterCareerSiteResult {
     val siteUrl = when (val parsed = SiteUrl.parse(command.url)) {
       is SiteUrlResult.Invalid -> return RegisterCareerSiteResult.InvalidUrl(parsed.reason)
       is SiteUrlResult.Valid -> parsed.url

@@ -9,6 +9,7 @@ import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.career.SiteUrl
 import dev.moreal.finds.domain.career.SiteUrlResult
 import dev.moreal.finds.domain.career.SourceProvider
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -16,7 +17,7 @@ import kotlin.test.assertTrue
 
 class RegisterCareerSiteTest {
   @Test
-  fun `invalid URL and display name stop before discovery`() {
+  fun `invalid URL and display name stop before discovery`() = runTest {
     val fixture = fixture()
 
     assertIs<RegisterCareerSiteResult.InvalidUrl>(
@@ -33,7 +34,7 @@ class RegisterCareerSiteTest {
   }
 
   @Test
-  fun `unsupported ambiguous and failed discovery are typed results`() {
+  fun `unsupported ambiguous and failed discovery are typed results`() = runTest {
     val fixture = fixture()
 
     fixture.discovery.result = ProviderDiscoveryResult.Unsupported
@@ -61,7 +62,7 @@ class RegisterCareerSiteTest {
   }
 
   @Test
-  fun `existing host returns duplicate without discovery`() {
+  fun `existing host returns duplicate without discovery`() = runTest {
     val existing = existingSite()
     val fixture = fixture(listOf(existing))
 
@@ -73,7 +74,7 @@ class RegisterCareerSiteTest {
   }
 
   @Test
-  fun `insert race returns existing site`() {
+  fun `insert race returns existing site`() = runTest {
     val existing = existingSite()
     val fixture = fixture()
     fixture.discovery.result = ProviderDiscoveryResult.Detected(SourceProvider.GREETING)
@@ -88,7 +89,7 @@ class RegisterCareerSiteTest {
   }
 
   @Test
-  fun `successful registration stores detected provider without crawling`() {
+  fun `successful registration stores detected provider without crawling`() = runTest {
     val fixture = fixture()
     fixture.discovery.result = ProviderDiscoveryResult.Detected(SourceProvider.NINEHIRE)
 

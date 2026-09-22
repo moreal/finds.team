@@ -70,7 +70,7 @@ class FakeSourceDiscoveryPort(
 ) : SourceDiscoveryPort {
   val requestedUrls = mutableListOf<SiteUrl>()
 
-  override fun detect(url: SiteUrl): ProviderDiscoveryResult {
+  override suspend fun detect(url: SiteUrl): ProviderDiscoveryResult {
     requestedUrls += url
     return result
   }

@@ -24,7 +24,7 @@ sealed interface InsertCareerSiteResult {
 }
 
 fun interface SourceDiscoveryPort {
-  fun detect(url: SiteUrl): ProviderDiscoveryResult
+  suspend fun detect(url: SiteUrl): ProviderDiscoveryResult
 }
 
 sealed interface ProviderDiscoveryResult {
