@@ -10,7 +10,7 @@ dependencies {
   implementation(libs.jooq)
   implementation(libs.flyway.core)
   implementation(libs.flyway.postgresql)
-  runtimeOnly(libs.postgresql)
+  implementation(libs.postgresql)
   testImplementation(libs.kotlin.test.junit5)
   testImplementation(libs.junit.jupiter)
   testImplementation(libs.postgresql)

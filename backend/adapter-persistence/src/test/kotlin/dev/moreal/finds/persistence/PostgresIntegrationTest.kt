@@ -18,7 +18,7 @@ abstract class PostgresIntegrationTest {
     }
   }
 
-  protected fun resetPublicSchema(dataSource: DataSource = dataSource()): DataSource {
+  internal fun resetPublicSchema(dataSource: DataSource = dataSource()): DataSource {
     dataSource.connection.use { connection ->
       connection.createStatement().use { statement ->
         statement.execute("DROP SCHEMA IF EXISTS public CASCADE")
