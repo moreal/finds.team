@@ -2,8 +2,9 @@
 
 This roadmap turns finds.team from its JPA prototype into a domain-driven job
 aggregation service. The roadmap is executable: every phase has an observable
-exit condition and exact verification commands. The detailed architecture is in
-[`docs/superpowers/specs/2026-09-22-domain-driven-crawling-platform-design.md`](docs/superpowers/specs/2026-09-22-domain-driven-crawling-platform-design.md).
+exit condition and exact verification commands. Detailed local agent working
+documents live under the ignored `docs/superpowers/` directory; this roadmap is
+the repository's durable delivery contract.
 
 ## Delivery principles
 
