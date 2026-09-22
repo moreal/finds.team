@@ -26,7 +26,7 @@ test("the built handler applies a unique strict CSP nonce to every script", asyn
   assert.ok(firstNonce);
   assert.ok(secondNonce);
   assert.notEqual(firstNonce, secondNonce);
-  assert.doesNotMatch(firstPolicy, /unsafe-eval|unsafe-inline/);
+  assert.doesNotMatch(firstPolicy, /strict-dynamic|unsafe-eval|unsafe-inline/);
   assert.match(
     first.html,
     new RegExp(

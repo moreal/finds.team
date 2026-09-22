@@ -16,7 +16,7 @@ export function getCspNonce() {
 export function createContentSecurityPolicy(nonce: string) {
   return [
     "default-src 'self'",
-    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
+    `script-src 'nonce-${nonce}'`,
     "object-src 'none'",
     "base-uri 'none'",
     "frame-ancestors 'none'",

@@ -56,6 +56,7 @@ describe("SSR content security policy", () => {
 
     expect(nonce).toBeTruthy();
     expect(policy).toContain(`script-src 'nonce-${nonce}'`);
+    expect(policy).not.toContain("'strict-dynamic'");
     expect(policy).not.toContain("'unsafe-eval'");
     expect(policy).not.toContain("'unsafe-inline'");
   });
