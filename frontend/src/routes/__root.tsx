@@ -4,8 +4,9 @@ import {
   Scripts,
   createRootRoute,
 } from "@tanstack/solid-router";
-import { HydrationScript, type JSX } from "@solidjs/web";
+import type { JSX } from "@solidjs/web";
 
+import { createContentSecurityPolicy } from "../security/csp";
 import globalCss from "../styles/global.css?url";
 
 export const Route = createRootRoute({
@@ -20,6 +21,15 @@ export const Route = createRootRoute({
       { title: "finds.team" },
     ],
   }),
+  headers: ({ ssr }) => {
+    if (!ssr?.nonce) {
+      throw new Error("SSR requires a Content Security Policy nonce");
+    }
+
+    return {
+      "Content-Security-Policy": createContentSecurityPolicy(ssr.nonce),
+    };
+  },
   component: Outlet,
   shellComponent: RootDocument,
 });
@@ -27,9 +37,7 @@ export const Route = createRootRoute({
 function RootDocument(props: Readonly<{ children: JSX.Element }>) {
   return (
     <html lang="ko">
-      <head>
-        <HydrationScript />
-      </head>
+      <head />
       <body>
         <HeadContent />
         {props.children}

@@ -85,7 +85,9 @@ The first frontend task must therefore create a minimal production-build spike t
 2. Relay compile, query rendering, record serialization, and hydration without a duplicate fetch.
 3. One Kobalte dialog and one keyboard-driven select under SSR/hydration.
 4. One variable-height virtual list under hydration.
-5. A strict Content Security Policy-compatible serialization mode.
+5. Per-request cryptographic nonce protection for every SSR script under a
+   strict Content Security Policy that permits only the request nonce and
+   forbids `unsafe-eval` and unrestricted `unsafe-inline`.
 
 If the Kobalte peer override fails behavior or hydration tests, retain the local design-system interfaces and temporarily implement the required native controls without Kobalte until a compatible Kobalte build exists. If the Solid Virtual adapter fails, implement a small local adapter over `@tanstack/virtual-core`. The target remains SolidJS 2 RC; downgrading the application to Solid 1 is not a fallback.
 

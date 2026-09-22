@@ -1,2 +1,4 @@
 packages:
   - frontend
+patchedDependencies:
+  '@tanstack/solid-start@2.0.0-rc.8': patches/@tanstack__solid-start@2.0.0-rc.8.patch

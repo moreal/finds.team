@@ -1,0 +1,16 @@
+diff --git a/dist/esm/server-functions-handler.js b/dist/esm/server-functions-handler.js
+index fc6d49794629fddf4241aa8548d819a332fa24da..1eb33f77e5385a7dbb2c1187c61769be2fd2ab85 100644
+--- a/dist/esm/server-functions-handler.js
++++ b/dist/esm/server-functions-handler.js
+@@ -4 +4 @@
+-import { configureServerFunctionsServer, createNoJSHandler, handleServerFunctionRequest, parseServerFunctionUrl, registerFlightDataSource, serverFunctionUrl } from "@solidjs/web/server-functions/server";
++import { configureServerFunctionsServer, createNoJSHandler, handleServerFunctionRequest, parseServerFunctionActionUrl, registerFlightDataSource, serverFunctionActionUrl } from "@solidjs/web/server-functions/server";
+@@ -50 +50 @@
+-	const parsedId = parseServerFunctionUrl(request.url);
++	const parsedId = parseServerFunctionActionUrl(request.url);
+@@ -59 +59 @@
+-	if (parseServerFunctionUrl(request.url) === serverFnId) return request;
++	if (parseServerFunctionActionUrl(request.url) === serverFnId) return request;
+@@ -61 +61 @@
+-	const canonicalUrl = new URL(serverFunctionUrl(serverFnId), url.origin);
++	const canonicalUrl = new URL(serverFunctionActionUrl(serverFnId), url.origin);

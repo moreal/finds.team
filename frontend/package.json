@@ -6,6 +6,7 @@
     "build": "vite build",
     "dev": "vite dev",
     "test": "vitest",
+    "test:built": "node --test tests/built-handler.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

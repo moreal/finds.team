@@ -15,7 +15,8 @@
 - Keep SolidJS on the 2.x release-candidate line; Solid 1 is not a fallback.
 - Use same-origin `/graphql`; do not add a TanStack Start BFF.
 - Every SSR request owns a fresh Relay Environment.
-- Use CSP-compatible JSON serialization.
+- Protect executable SSR serialization with a fresh cryptographic nonce per
+  request and a strict CSP that permits only nonce-bearing scripts.
 - Product components never import Kobalte or TanStack Virtual directly; only local adapters may do so.
 - Generated Relay artifacts are produced by codegen and checked for drift.
 
@@ -25,7 +26,8 @@
 - Hydration must restore SSR records without issuing the initial GraphQL request again.
 - A Kobalte dialog and select must retain keyboard/focus behavior after SSR hydration.
 - Variable-height virtualization must not run on the server or cause a hydration mismatch.
-- Production serialization must work under a CSP that excludes `unsafe-eval`.
+- Every Start-emitted script must carry the request nonce, and production CSP
+  must exclude `unsafe-eval` and unrestricted `unsafe-inline`.
 
 ---
 
@@ -77,8 +79,10 @@ git commit -m "build(frontend): add pnpm workspace" -m "Assisted-by: Codex:gpt-5
 - Create: `frontend/src/router.tsx`
 - Create: `frontend/src/routes/__root.tsx`
 - Create: `frontend/src/routes/index.tsx`
+- Create: `frontend/src/security/csp.ts`
 - Create: `frontend/src/styles/global.css`
 - Create: `frontend/src/app.test.tsx`
+- Create: `frontend/tests/built-handler.test.mjs`
 
 **Interfaces:**
 - Produces: `getRouter(): Router`, SSR route `/`, and production client/server bundles.
@@ -95,7 +99,7 @@ Expected: FAIL because the frontend package and route do not exist.
 
 - [ ] **Step 3: Pin the validated prerelease baseline**
 
-Add exact dependencies for `solid-js@2.0.0-rc.9`, `@solidjs/web@2.0.0-rc.9`, `@tanstack/solid-start@2.0.0-rc.8`, and the matching `@tanstack/solid-router@2.0.0-rc.8`. Configure Start serialization with `{ mode: "json" }` and SSR enabled.
+Add exact dependencies for `solid-js@2.0.0-rc.9`, `@solidjs/web@2.0.0-rc.9`, `@tanstack/solid-start@2.0.0-rc.8`, and the matching `@tanstack/solid-router@2.0.0-rc.8`. Enable SSR with a fresh cryptographic nonce per request, attach that nonce to every Start-emitted script, and return a strict nonce-only script CSP.
 
 - [ ] **Step 4: Implement the minimal route tree**
 
@@ -103,9 +107,10 @@ Add exact dependencies for `solid-js@2.0.0-rc.9`, `@solidjs/web@2.0.0-rc.9`, `@t
 
 - [ ] **Step 5: Verify unit and production builds**
 
-Run: `pnpm --dir frontend test --run && pnpm --dir frontend typecheck && pnpm --dir frontend build`
+Run: `pnpm --dir frontend test --run && pnpm --dir frontend typecheck && pnpm --dir frontend build && pnpm --dir frontend test:built`
 
-Expected: all commands PASS and `dist/client` plus `dist/server` are created.
+Expected: all commands PASS, `dist/client` plus `dist/server` are created, and
+the built handler proves nonce/CSP coverage with one hydration bootstrap.
 
 - [ ] **Step 6: Commit**
 
