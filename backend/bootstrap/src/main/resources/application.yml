@@ -55,3 +55,5 @@ finds:
     dispatch-limit: 100
     global-concurrency: 4
     close-after-misses: 2
+  graphql:
+    maximum-request-bytes: 65536

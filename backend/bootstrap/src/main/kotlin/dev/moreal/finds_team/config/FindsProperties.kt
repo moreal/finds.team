@@ -14,6 +14,7 @@ import java.time.Duration
 data class FindsProperties(
   @field:Valid val source: Source = Source(),
   @field:Valid val crawl: Crawl = Crawl(),
+  @field:Valid val graphql: Graphql = Graphql(),
 ) {
   data class Source(
     @field:NotBlank val userAgentProduct: String = "finds.team",
@@ -72,6 +73,11 @@ data class FindsProperties(
       }
     }
   }
+
+  data class Graphql(
+    @field:Min(1_024) @field:Max(1_048_576)
+    val maximumRequestBytes: Int = 65_536,
+  )
 
   companion object {
     private fun requirePositive(value: Duration, name: String) {

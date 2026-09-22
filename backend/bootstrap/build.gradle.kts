@@ -20,6 +20,7 @@ dependencies {
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.kotlinx.coroutines.jdk8)
   implementation(libs.jooq)
+  implementation(libs.graphql.java)
   implementation(libs.flyway.core)
   implementation(libs.flyway.postgresql)
   runtimeOnly(libs.postgresql)
