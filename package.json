@@ -1,0 +1,10 @@
+{
+  "name": "finds-team",
+  "private": true,
+  "packageManager": "pnpm@12.5.1",
+  "scripts": {
+    "frontend:typecheck": "pnpm --dir frontend typecheck",
+    "frontend:test": "pnpm --dir frontend test",
+    "frontend:build": "pnpm --dir frontend build"
+  }
+}

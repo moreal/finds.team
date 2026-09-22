@@ -16,6 +16,22 @@ cd backend
 ./gradlew :bootstrap:bootRun
 ```
 
+### Frontend workspace
+
+The Nix development shell supplies Node.js 24 and a `pnpm` command backed by
+Corepack. Its version is pinned by the root `packageManager` field. When using
+Node outside Nix, enable the Corepack shims once before running pnpm:
+
+```sh
+corepack enable
+```
+
+Install the locked frontend dependencies from the repository root:
+
+```sh
+pnpm install --frozen-lockfile
+```
+
 Flyway applies the schema at startup. The service listens on port 8080 by
 default. Its operational endpoints are:
 
