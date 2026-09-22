@@ -6,7 +6,7 @@
 
 **Architecture:** File routes own URL parsing and page-level Relay queries. Components consume generated fragments. Local design-system wrappers own accessible primitives and semantic tokens; product patterns compose them without importing Kobalte or virtualization libraries directly.
 
-**Tech Stack:** SolidJS 2 RC, TanStack Start 2 RC, solid-relay/Relay, CSS Modules/custom properties, Kobalte adapter, TanStack Virtual adapter, Vitest, Testing Library, axe, Playwright
+**Tech Stack:** SolidJS 2 RC, TanStack Start 2 RC, Relay runtime through the approved local Solid 2 binding, CSS Modules/custom properties, Kobalte adapter, TanStack Virtual adapter, Vitest, Testing Library, axe, Playwright
 
 **Spec:** `docs/superpowers/specs/2026-09-22-solid-frontend-design.md`
 

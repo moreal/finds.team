@@ -4,3 +4,13 @@
 .fixture-height-2 { height: 140px; }
 .fixture-compact { height: 2px; overflow: hidden; }
 .fixture-condensed .fixture-row { height: 2px; overflow: hidden; }
+.fixture-width-case { width: 640px; }
+.fixture-width-case.fixture-width-narrow { width: 160px; }
+.fixture-width-row {
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 10px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.fixture-width-tail { height: 40px; }

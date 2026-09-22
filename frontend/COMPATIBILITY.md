@@ -1,7 +1,62 @@
-# Relay on the Solid 2 foundation
+# Frontend compatibility foundation
 
 The validated baseline is Solid/Web `2.0.0-rc.9`, TanStack Start/Router
 `2.0.0-rc.8`, Relay compiler/runtime `20.1.1`, and Vite `8.3.0`.
+
+## Resolved package matrix
+
+The exact direct versions below are present in `pnpm-lock.yaml` and were
+confirmed from the installed graph with `pnpm list --depth 0 --json`. The Nix
+shell resolves Node `24.19.0`; the root `packageManager` and Corepack-managed
+lock resolve pnpm `12.5.1`.
+
+| Package | Resolved version | Scope |
+| --- | --- | --- |
+| `solid-js` / `@solidjs/web` | `2.0.0-rc.9` / `2.0.0-rc.9` | Active application runtime |
+| `@tanstack/solid-start` / `@tanstack/solid-router` | `2.0.0-rc.8` / `2.0.0-rc.8` | Active SSR/router runtime |
+| `relay-runtime` / `relay-compiler` | `20.1.1` / `20.1.1` | Active runtime and build-time codegen |
+| `graphql` | `16.11.0` | Relay compiler input tooling |
+| `@tanstack/virtual-core` | `3.17.11` | Active virtual-list engine |
+| `tabbable` | `6.5.0` | Active native Dialog focus traversal |
+| `@kobalte/core` | `2.0.0-alpha.2` | Test-only failed candidate; native controls are active |
+| `@tanstack/solid-virtual` | `3.13.40` | Test-only failed candidate; virtual-core is active |
+| `vite` / `vite-plugin-solid` | `8.3.0` / `3.0.0-next.27` | Build and Solid transform |
+| `vite-plugin-relay-lite` / `vite-plugin-cjs-interop` | `0.12.0` / `4.0.3` | Relay transform and runtime interop |
+| `typescript` / `vitest` | `5.9.3` / `5.0.1` | Type and unit-test gates |
+| `@playwright/test` | `1.63.0` | Browser compatibility gate |
+| `@solidjs/testing-library` / `@testing-library/jest-dom` | `1.0.0-beta.3` / `7.0.1` | DOM test support |
+| `jsdom` / `@types/jsdom` | `28.1.0` / `28.0.3` | DOM test environment and types |
+| `@types/node` / `@types/relay-runtime` | `24.10.0` / `20.1.1` | Type-only tooling |
+
+## Peer policy, overrides, and remaining diagnostics
+
+`.npmrc` keeps `strict-peer-dependencies=false` only for this prerelease
+compatibility foundation. `pnpm-workspace.yaml` contains exactly three scoped
+`allowedVersions` entries:
+
+| Override | Declared peer | Resolved peer | Scope and evidence |
+| --- | --- | --- | --- |
+| `@kobalte/core>solid-js` | exact `2.0.0-rc.3` | `2.0.0-rc.9` | Test-only Kobalte candidate; its real hydration gate fails and the native fallback remains active. |
+| `@kobalte/core>@solidjs/web` | exact `2.0.0-rc.3` | `2.0.0-rc.9` | Same test-only Kobalte probe; not a runtime compatibility claim. |
+| `@tanstack/solid-virtual>solid-js` | `^1.3.0` | `2.0.0-rc.9` | Test-only Solid adapter probe; its production bundle fails and virtual-core remains active. |
+
+`pnpm peers check` intentionally remains nonzero. Every reported mismatch is
+named here; none has an additional override:
+
+| Packages reporting the peer | Wanted | Installed | Scope |
+| --- | --- | --- | --- |
+| `@kobalte/utils@2.0.0-alpha.0` → `@solidjs/web`, `solid-js` | exact `2.0.0-rc.0` | `2.0.0-rc.9` | Transitive test-only Kobalte candidate. |
+| `@solid-primitives/utils@6.4.1`, `refs@1.1.4`, `static-store@0.1.4`, `styles@0.1.4`, `rootless@1.5.4`, `scheduled@1.5.3`, `event-listener@2.4.6`, `media@2.3.6`, `keyboard@1.3.7`, `bounds@0.1.7`, `resize-observer@2.2.0` → `solid-js` | `^1.6.12` | `2.0.0-rc.9` | Transitive through the TanStack router's Solid devtools graph; covered by SSR, hydration, DOM, type, browser, and build gates. |
+| `@solid-devtools/logger@0.9.11`, `shared@0.20.0`, `debugger@0.28.1` → `solid-js` | `^1.9.0` | `2.0.0-rc.9` | Transitive through `@tanstack/solid-router@2.0.0-rc.8`; same active-runtime gate coverage. |
+| `vite-plugin-relay-lite@0.12.0` → `vite` | `^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0` | `8.3.0` | Build-time Relay transform; covered by codegen, query, hydration, typecheck, and production-build gates. |
+
+The only package patch is scoped to `@tanstack/solid-start@2.0.0-rc.8`
+(`d42e4d6f8a1e052341af34680b1cae9e42c41672d69e1aba20a885569e830035`
+in the lock). It maps that RC's removed Solid Web rc.8 server-function URL
+helpers to rc.9's action-URL helpers. Native rc.9 imports for every other
+consumer remain unchanged; remove the patch when TanStack consumes the rc.9 API.
+
+## Relay runtime boundary
 
 - `solid-relay@1.0.0-beta.29` imports removed Solid 1 APIs and
   `solid-js/store`, so it cannot load on this baseline. `src/relay/RelayRoot.tsx`
@@ -30,16 +85,19 @@ credentials. Server forwarding allows `cookie`, `accept-language`, `x-request-id
 and, for mutations only, `x-csrf-token`/`x-xsrf-token`. Browser mutation CSRF-token
 acquisition belongs to the later identity/mutation integration.
 
-Run the gate with the repository's Node 24 shell:
+Run the full fail-fast gate from the repository root with the pinned
+Corepack/pnpm toolchain:
 
 ```sh
-pnpm --dir frontend relay
-pnpm --dir frontend relay:validate
-pnpm --dir frontend test --run
-pnpm --dir frontend typecheck
-pnpm --dir frontend build
-pnpm --dir frontend test:built
+pnpm install --frozen-lockfile
+pnpm --dir frontend exec playwright install chromium
+pnpm frontend:check
 ```
+
+The gate order is Relay validation, TypeScript, Vitest, the two compatibility
+Playwright specs (`e2e/kobalte-hydration.spec.ts` and
+`e2e/virtual-list.spec.ts`), then the production build. The opt-in Kobalte and
+Solid Virtual failure reproductions below remain outside the passing gate.
 
 ## KOBALTE-ALPHA2-SOLID-RC9
 
@@ -203,15 +261,16 @@ pnpm --dir frontend test --run src/ui/virtual
 pnpm --dir frontend exec playwright test e2e/virtual-list.spec.ts
 ```
 
-The 19 real-browser cases pass on macOS Chromium and Linux Chromium. They cover
+The 20 real-browser cases pass on macOS Chromium and Linux Chromium. They cover
 retained SSR nodes with no diagnostics, caller/measurement gating, growth and
 shrink, disabling, initially empty data, resizing, variable-height end/back
 scrolling, child DOM/state retention with live item/index updates, scrolled mode
 transitions, heterogeneous-height mode stability, removal/replacement/clearing
 in both modes with owner disposal, fresh activation evidence in both size
-directions, offscreen CSS shrink/re-expand with unchanged items, no sample
-remounts during ordinary scroll estimate corrections, and forward/backward keyboard
-traversal through 35 rows. SSR assertions check the exact 20-row page and retained
+directions, offscreen CSS shrink/re-expand with unchanged items, width-only
+container invalidation with the sample offscreen, no sample remounts during
+ordinary scroll estimate corrections, and forward/backward keyboard traversal
+through 35 rows. SSR assertions check the exact 20-row page and retained
 child identity/text after hydration. All browser
 console warnings/errors fail the gate. The shared fixture also keeps all 16
 native-control browser cases passing on Linux Chromium.

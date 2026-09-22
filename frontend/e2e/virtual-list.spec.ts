@@ -224,6 +224,45 @@ test.describe("review round 3", () => {
   });
 });
 
+test("container width changes invalidate and refresh the offscreen first-page geometry", async ({ page }) => {
+  await page.goto("/virtual");
+  await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+  const section = page.getByRole("region", { name: "Container width invalidation", exact: true });
+  const list = section.getByRole("list");
+  const canvas = list.locator(".ui-virtual-canvas");
+  const mounts = section.getByRole("status", { name: "Width sample mounts" });
+  const first = list.locator("[data-width-row='0']");
+  const last = list.locator("[data-width-row='199']");
+
+  await list.scrollIntoViewIfNeeded();
+  await expect(list).toHaveAttribute("data-virtualized", "true");
+  await expect(mounts).toHaveText("20");
+  const wideHeight = await canvas.evaluate((node) => node.getBoundingClientRect().height);
+  await expect(async () => {
+    await list.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    await expect(last).toBeInViewport({ timeout: 250 });
+  }).toPass({ timeout: 5000 });
+  await expect(first).toHaveCount(0);
+
+  await section.getByRole("button", { name: "Narrow container" }).evaluate((node: HTMLButtonElement) => node.click());
+  await expect(list).toHaveCSS("width", "160px");
+  await expect.poll(async () => Number(await mounts.textContent())).toBeGreaterThan(20);
+  await expect.poll(async () => canvas.evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThan(wideHeight);
+  await expect(async () => {
+    await list.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    await expect(last).toBeInViewport({ timeout: 250 });
+  }).toPass({ timeout: 5000 });
+
+  const narrowHeight = await canvas.evaluate((node) => node.getBoundingClientRect().height);
+  await section.getByRole("button", { name: "Widen container" }).evaluate((node: HTMLButtonElement) => node.click());
+  await expect(list).toHaveCSS("width", "640px");
+  await expect.poll(async () => canvas.evaluate((node) => node.getBoundingClientRect().height)).toBeLessThan(narrowHeight);
+  await expect(async () => {
+    await list.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    await expect(last).toBeInViewport({ timeout: 250 });
+  }).toPass({ timeout: 5000 });
+});
+
 test("requires caller enablement and a measured size threshold, then responds to growth and disablement", async ({ page }) => {
   await page.goto("/virtual");
   await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");

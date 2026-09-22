@@ -30,7 +30,17 @@ Install the locked frontend dependencies from the repository root:
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm --dir frontend exec playwright install chromium
+pnpm frontend:check
 ```
+
+`pnpm frontend:check` is the canonical compatibility gate. It fails at the
+first error and runs Relay artifact validation, TypeScript, Vitest, the Kobalte
+and virtual-list Playwright specifications, and the production build in that
+order. On macOS, use the Linux Chromium server documented in
+[`frontend/COMPATIBILITY.md`](frontend/COMPATIBILITY.md) for the native-select
+keyboard case, then run the same root command with
+`PW_TEST_CONNECT_WS_ENDPOINT` and `PW_TEST_CONNECT_EXPOSE_NETWORK` set.
 
 Flyway applies the schema at startup. The service listens on port 8080 by
 default. Its operational endpoints are:

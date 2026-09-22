@@ -63,6 +63,27 @@ function OffscreenResizeRows() {
   </section>;
 }
 
+function WidthSensitiveRow(props: { id: number; onSampleMount: () => void }) {
+  onSettled(() => { if (props.id < 20) props.onSampleMount(); });
+  return <div class={props.id < 20 ? "fixture-width-row" : "fixture-width-tail"} data-width-row={props.id}>
+    {props.id < 20 ? `Container width sample ${props.id}: compatible responsive geometry` : `Width tail ${props.id}`}
+  </div>;
+}
+
+function ContainerWidthRows() {
+  const items = Array.from({ length: 200 }, (_, id) => ({ id }));
+  const [narrow, setNarrow] = createSignal(false);
+  const [sampleMounts, setSampleMounts] = createSignal(0);
+  return <section aria-label="Container width invalidation"
+    class={`fixture-width-case${narrow() ? " fixture-width-narrow" : ""}`}>
+    <button onClick={() => setNarrow((value) => !value)}>{narrow() ? "Widen container" : "Narrow container"}</button>
+    <output aria-label="Width sample mounts">{sampleMounts()}</output>
+    <VirtualList items={items} getKey={(item) => item.id} estimateSize={() => 40} enabled>
+      {(item) => <WidthSensitiveRow id={item().id} onSampleMount={() => setSampleMounts((count) => count + 1)} />}
+    </VirtualList>
+  </section>;
+}
+
 export function VirtualLists() {
   const items = Array.from({ length: 200 }, (_, id) => ({ id, label: `Row ${id}` }));
   const [enabled, setEnabled] = createSignal(false);
@@ -120,5 +141,6 @@ export function VirtualLists() {
     <ReconciliationRows active />
     <FreshMeasurementRows />
     <OffscreenResizeRows />
+    <ContainerWidthRows />
   </main>;
 }
