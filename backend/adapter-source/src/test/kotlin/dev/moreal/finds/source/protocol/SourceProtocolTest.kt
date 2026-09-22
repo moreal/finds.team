@@ -28,6 +28,7 @@ class SourceProtocolTest {
     assertEquals(3, settings.maxSitemapDepth)
     assertEquals(100, settings.maxSitemapDocuments)
     assertEquals(50_000, settings.maxSitemapUrls)
+    assertEquals(20L * 1024 * 1024, settings.maxSitemapTotalBytes)
     assertEquals(Duration.ofMillis(500), settings.minimumHostSpacing)
   }
 
@@ -70,6 +71,9 @@ class SourceProtocolTest {
     }
     assertFailsWith<IllegalArgumentException> {
       SourceProtocolSettings(maxSitemapUrls = 1_000_001)
+    }
+    assertFailsWith<IllegalArgumentException> {
+      SourceProtocolSettings(maxSitemapTotalBytes = 200L * 1024 * 1024 + 1)
     }
   }
 

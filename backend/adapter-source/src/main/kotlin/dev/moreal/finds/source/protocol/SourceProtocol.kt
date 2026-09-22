@@ -17,6 +17,7 @@ data class SourceProtocolSettings(
   val maxSitemapDepth: Int = 3,
   val maxSitemapDocuments: Int = 100,
   val maxSitemapUrls: Int = 50_000,
+  val maxSitemapTotalBytes: Long = 20L * 1024 * 1024,
   val minimumHostSpacing: Duration = Duration.ofMillis(500),
 ) {
   init {
@@ -39,6 +40,9 @@ data class SourceProtocolSettings(
     }
     require(maxSitemapUrls in 1..1_000_000) {
       "Sitemap URL limit must be between 1 and 1000000"
+    }
+    require(maxSitemapTotalBytes in 1..200L * 1024 * 1024) {
+      "Sitemap total byte limit must be between 1 and 209715200"
     }
     requirePositiveBounded(
       minimumHostSpacing,

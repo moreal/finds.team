@@ -17,7 +17,10 @@ import kotlinx.coroutines.sync.withLock
 sealed interface RobotsDecision {
   data class Allowed(val sitemaps: List<SiteUrl>) : RobotsDecision
 
-  data class Denied(val path: String) : RobotsDecision
+  data class Denied(
+    val path: String,
+    val sitemaps: List<SiteUrl>,
+  ) : RobotsDecision
 
   data class Unavailable(val failure: WebFailure) : RobotsDecision
 }
@@ -100,12 +103,12 @@ class RobotsClient(
           append(target.value.rawPath.ifEmpty { "/" })
           target.value.rawQuery?.let { append('?').append(it) }
         }
-        if (!policy.allows(productToken, path)) {
-          return RobotsDecision.Denied(path)
-        }
         val sitemaps = policy.sitemaps.mapNotNull(::parseUrl)
           .filter { it.host == target.host }
           .distinct()
+        if (!policy.allows(productToken, path)) {
+          return RobotsDecision.Denied(path, sitemaps)
+        }
         return RobotsDecision.Allowed(sitemaps)
       }
     }
