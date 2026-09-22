@@ -26,20 +26,27 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
   let container!: HTMLDivElement;
   let canvas!: HTMLDivElement;
   let virtualizer: Virtualizer<HTMLDivElement, HTMLDivElement> | undefined;
+  let measureRows: (() => void) | undefined;
+  let measurementFrame: number | undefined;
   const [hydrated, setHydrated] = createSignal(false);
-  const [threshold, setThreshold] = createSignal(Infinity);
   const [focused, setFocused] = createSignal<string | number | undefined>(undefined);
   const [layout, setLayout] = createSignal<{ rows: VirtualItem[]; size: number } | undefined>(undefined);
   const entries = createMemo(() => props.items.map((item, index) => ({ item, index, key: props.getKey(item) })));
+  const [measurement, setMeasurement] = createSignal<{
+    entries: ReturnType<typeof entries>; enabled: boolean; threshold: number;
+  }>();
   const byKey = createMemo(() => new Map(entries().map((entry) => [entry.key, entry])));
-  const keys = createMemo(() => {
+  const visibleEntries = createMemo(() => {
     const current = entries();
-    if (!hydrated()) return current.slice(0, INITIAL_PAGE).map((entry) => entry.key);
+    if (!hydrated()) return current.slice(0, INITIAL_PAGE);
     const measured = layout();
     // Inputs can shrink before the core's next effect publishes its new range.
     return measured
-      ? measured.rows.map((row) => row.key as string | number).filter((key) => byKey().has(key))
-      : current.map((entry) => entry.key);
+      ? measured.rows.flatMap((row) => {
+        const entry = byKey().get(row.key as string | number);
+        return entry ? [entry] : [];
+      })
+      : current;
   });
 
   function publish() {
@@ -63,41 +70,75 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
     const cleanup = virtualizer._didMount();
     // Keep collection evidence when its first page leaves the virtual window.
     // Sampling only the current window makes tall/short collections oscillate.
-    const sampleSizes = new Map<string | number, number>();
-    const measureThreshold = () => {
+    const sampleSizes = new Map<string | number, { item: T; size: number }>();
+    const watchedRows = new Set<Element>();
+    function measureThreshold() {
       const current = entries();
-      const sampleKeys = new Set(current.slice(0, INITIAL_PAGE).map((entry) => entry.key));
+      const sample = current.slice(0, INITIAL_PAGE);
+      const sampleKeys = new Set(sample.map((entry) => entry.key));
+      const renderedSample = new Set<Element>();
       for (const key of sampleSizes.keys()) if (!sampleKeys.has(key)) sampleSizes.delete(key);
       for (const node of canvas.children) {
         const row = node as HTMLDivElement;
-        const key = current[Number(row.dataset.index)]?.key;
-        if (key !== undefined && sampleKeys.has(key)) sampleSizes.set(key, row.getBoundingClientRect().height);
+        const entry = current[Number(row.dataset.index)];
+        if (entry && sampleKeys.has(entry.key)) {
+          sampleSizes.set(entry.key, { item: entry.item, size: row.getBoundingClientRect().height });
+          renderedSample.add(row);
+          if (!watchedRows.has(row)) { observer.observe(row); watchedRows.add(row); }
+        }
       }
-      const total = [...sampleSizes.values()].reduce((sum, size) => sum + size, 0);
-      const average = sampleSizes.size ? total / sampleSizes.size : 0;
-      setThreshold(average > 0 && container.clientHeight > 0
+      for (const row of watchedRows) {
+        if (!renderedSample.has(row)) { observer.unobserve(row); watchedRows.delete(row); }
+      }
+      const sizes = sample.flatMap((entry) => {
+        const known = sampleSizes.get(entry.key);
+        return known && Object.is(known.item, entry.item) ? [known.size] : [];
+      });
+      // A new item object needs fresh DOM evidence, even under a retained key.
+      if (sizes.length !== sample.length) return;
+      const average = sizes.length ? sizes.reduce((sum, size) => sum + size, 0) / sizes.length : 0;
+      const threshold = average > 0 && container.clientHeight > 0
         ? Math.max(INITIAL_PAGE, Math.ceil(container.clientHeight / average) * 3)
-        : Infinity);
-    };
-    measureThreshold();
+        : Infinity;
+      const enabled = props.enabled === true;
+      setMeasurement((previous) => previous?.entries === current && previous.enabled === enabled && previous.threshold === threshold
+        ? previous : { entries: current, enabled, threshold });
+    }
     const observer = new ResizeObserver(measureThreshold);
     observer.observe(container);
     observer.observe(canvas);
-    for (const row of canvas.children) observer.observe(row);
+    measureRows = measureThreshold;
+    measureThreshold();
     setHydrated(true);
-    return () => { observer.disconnect(); cleanup(); virtualizer = undefined; };
+    return () => {
+      if (measurementFrame !== undefined) cancelAnimationFrame(measurementFrame);
+      observer.disconnect(); cleanup(); virtualizer = undefined; measureRows = undefined;
+    };
   });
 
+  // Read collection/content geometry after the DOM's current updates finish.
+  // Rendering a new window can refresh which sample nodes are observed, but
+  // cached evidence for unchanged sample items survives ordinary scrolling.
   createEffect(
-    () => ({ ready: hydrated(), enabled: props.enabled === true, threshold: threshold(), entries: entries(), focused: focused() }),
+    () => ({ ready: hydrated(), entries: entries(), enabled: props.enabled, visible: visibleEntries() }),
+    ({ ready }) => {
+      if (!ready) return;
+      if (measurementFrame !== undefined) cancelAnimationFrame(measurementFrame);
+      measurementFrame = requestAnimationFrame(() => { measurementFrame = undefined; measureRows?.(); });
+    },
+  );
+
+  createEffect(
+    () => ({ ready: hydrated(), enabled: props.enabled === true, measurement: measurement(), entries: entries(), focused: focused() }),
     (state) => {
       if (!state.ready || !virtualizer) return;
       const focusedIndex = state.entries.findIndex((entry) => entry.key === state.focused);
       const wasEnabled = virtualizer.options.enabled;
-      // Retain activation during ordinary scrolling and later measurements.
-      // Caller disablement or returning to a single bounded page releases it.
+      const fresh = state.measurement?.entries === state.entries && state.measurement.enabled === state.enabled;
+      // Pending evidence may retain an already-active mode, but may not start
+      // activation. Fresh collection/content measurements can change either way.
       const enabled = state.enabled && state.entries.length > INITIAL_PAGE
-        && (wasEnabled || state.entries.length > state.threshold);
+        && (fresh ? state.entries.length > state.measurement!.threshold : wasEnabled);
       // Seed every already-rendered row before switching to estimates. This
       // preserves the visible item and its intra-row offset at any scroll depth.
       const measurements = enabled && !wasEnabled
@@ -127,7 +168,7 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
         rangeExtractor: (range) => {
           const indexes = new Set(defaultRangeExtractor(range));
           // Preserve the SSR page at the top, including during activation.
-          if ((virtualizer?.scrollOffset ?? 0) === 0) {
+          if ((virtualizer?.scrollOffset ?? 0) === 0 || !fresh) {
             for (let index = 0; index < Math.min(INITIAL_PAGE, range.count); index++) indexes.add(index);
           }
           // Keep focused controls and their keyboard neighbours mounted even if
@@ -163,10 +204,12 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
       if (!container.contains(event.relatedTarget as Node | null)) setFocused(undefined);
     }}>
     <div ref={canvas} class="ui-virtual-canvas">
-      <For each={keys()}>{(key) => {
+      <For each={visibleEntries()} keyed={(entry) => entry.key}>{(entry) => {
         let row!: HTMLDivElement;
-        const item = createMemo(() => byKey().get(key)!.item);
-        const index = createMemo(() => byKey().get(key)!.index);
+        // For owns the entry accessor until its row scope is disposed. It does
+        // not look up a key that may already have disappeared from the input.
+        const item = createMemo(() => entry().item);
+        const index = createMemo(() => entry().index);
         const content = props.children(item, index);
         createEffect(() => ({ measured: layout(), index: index() }), ({ measured, index }) => {
           const position = measured?.rows.find((item) => item.index === index);
@@ -175,7 +218,7 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
         });
         return <div ref={row} class="ui-virtual-row" role="listitem" data-index={index()}
           aria-posinset={index() + 1} aria-setsize={props.items.length}
-          onFocusIn={() => setFocused(key)}>
+          onFocusIn={() => setFocused(entry().key)}>
           {content}
         </div>;
       }}</For>

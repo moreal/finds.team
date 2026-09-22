@@ -1,10 +1,47 @@
-import { createSignal } from "solid-js";
+import { createSignal, onSettled } from "solid-js";
 import { VirtualList } from "../../src/ui/virtual/VirtualList";
 
 function StatefulRow(props: { id: number; index: number; label: string }) {
   const [edits, setEdits] = createSignal(0);
   return <button class="fixture-row" data-state-row={props.id} data-position={props.index} data-label={props.label}
     onClick={() => setEdits((value) => value + 1)}>State {props.id}: {edits()}</button>;
+}
+
+function RemovalRow(props: { id: number; onMounted: (delta: number) => void }) {
+  onSettled(() => {
+    props.onMounted(1);
+    return () => props.onMounted(-1);
+  });
+  return <button class="fixture-row" data-removal-row={props.id}>Mutable {props.id}</button>;
+}
+
+function ReconciliationRows(props: { active: boolean }) {
+  const original = Array.from({ length: props.active ? 30 : 3 }, (_, id) => ({ id }));
+  const [rows, setRows] = createSignal(original);
+  const [mounted, setMounted] = createSignal(0);
+  return <section aria-label={props.active ? "Active mutations" : "Disabled mutations"}>
+    <button onClick={() => setRows((items) => items.filter((item) => item.id !== 1))}>Remove middle</button>
+    <button onClick={() => setRows(original.map((item) => ({ id: item.id + 1000 })))}>Replace rows</button>
+    <button onClick={() => setRows([])}>Clear rows</button>
+    <button onClick={() => setRows(original)}>Restore rows</button>
+    <output aria-label="Mounted rows">{mounted()}</output>
+    <VirtualList items={rows()} getKey={(item) => item.id} estimateSize={() => 60} enabled={props.active}>
+      {(item) => <RemovalRow id={item().id} onMounted={(delta) => setMounted((value) => value + delta)} />}
+    </VirtualList>
+  </section>;
+}
+
+function FreshMeasurementRows() {
+  const makeRows = (count: number, compact: boolean) => Array.from({ length: count }, (_, id) => ({ id, compact }));
+  const [rows, setRows] = createSignal(makeRows(3, false));
+  return <section aria-label="Fresh measurements">
+    <button onClick={() => setRows(makeRows(25, true))}>Grow compact sample</button>
+    <button onClick={() => setRows(makeRows(25, false))}>Expand sample</button>
+    <button onClick={() => setRows(makeRows(25, true))}>Compact sample</button>
+    <VirtualList items={rows()} getKey={(item) => item.id} estimateSize={() => 60} enabled>
+      {(item) => <div class={item().compact ? "fixture-compact" : "fixture-row"}>Sample {item().id}</div>}
+    </VirtualList>
+  </section>;
 }
 
 export function VirtualLists() {
@@ -60,5 +97,8 @@ export function VirtualLists() {
         {(item) => <div class={item().id < 20 ? "fixture-row" : "fixture-compact"} data-heterogeneous-row={item().id}>Mixed {item().id}</div>}
       </VirtualList>
     </section>
+    <ReconciliationRows active={false} />
+    <ReconciliationRows active />
+    <FreshMeasurementRows />
   </main>;
 }

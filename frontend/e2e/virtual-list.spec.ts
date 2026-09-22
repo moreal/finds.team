@@ -110,6 +110,76 @@ test.describe("review regressions", () => {
   });
 });
 
+test.describe("review round 2", () => {
+  for (const active of [false, true]) {
+    for (const action of ["Remove middle", "Replace rows", "Clear rows"]) {
+      test(`${active ? "active" : "disabled"} list reconciles ${action.toLowerCase()} and disposes removed rows`, async ({ page }) => {
+        await page.goto("/virtual");
+        await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+        const section = page.getByRole("region", { name: active ? "Active mutations" : "Disabled mutations", exact: true });
+        const list = section.getByRole("list");
+        await expect(list).toHaveAttribute("data-virtualized", String(active));
+        const retained = list.locator("[data-removal-row='2']");
+        await retained.focus();
+        const original = await retained.elementHandle();
+        await section.getByRole("button", { name: action, exact: true }).evaluate((node: HTMLButtonElement) => node.click());
+        if (action === "Remove middle") {
+          await expect(list.locator("[data-removal-row='1']")).toHaveCount(0);
+          expect(await retained.evaluate((node, handle) => node === handle, original)).toBe(true);
+          await expect(retained).toBeFocused();
+        } else if (action === "Replace rows") {
+          await expect(list.locator("[data-removal-row='0']")).toHaveCount(0);
+          await expect(list.locator("[data-removal-row='1000']")).toHaveCount(1);
+        } else {
+          await expect(list.getByRole("listitem")).toHaveCount(0);
+        }
+        await expect.poll(async () => Number(await section.getByRole("status", { name: "Mounted rows" }).textContent()))
+          .toBe(await list.getByRole("listitem").count());
+        // All removed owners must be gone, including after a fresh list mounts.
+        await section.getByRole("button", { name: "Clear rows", exact: true }).click();
+        await expect(list.getByRole("listitem")).toHaveCount(0);
+        await expect(section.getByRole("status", { name: "Mounted rows" })).toHaveText("0");
+        await section.getByRole("button", { name: "Restore rows", exact: true }).click();
+        await expect(list.locator("[data-removal-row='0']")).toHaveCount(1);
+        await expect(list).toHaveAttribute("data-virtualized", String(active));
+        await expect.poll(async () => Number(await section.getByRole("status", { name: "Mounted rows" }).textContent()))
+          .toBe(await list.getByRole("listitem").count());
+      });
+    }
+  }
+
+  test("three tall rows growing to 25 compact rows never activate from stale evidence", async ({ page }) => {
+    await page.goto("/virtual");
+    await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+    const section = page.getByRole("region", { name: "Fresh measurements", exact: true });
+    const list = section.getByRole("list");
+    await expect(list.getByRole("listitem")).toHaveCount(3);
+    await expect(list).toHaveAttribute("data-virtualized", "false");
+    await list.evaluate((node) => {
+      node.setAttribute("data-test-modes", "false");
+      new MutationObserver(() => node.setAttribute("data-test-modes", `${node.getAttribute("data-test-modes")},${node.getAttribute("data-virtualized")}`))
+        .observe(node, { attributes: true, attributeFilter: ["data-virtualized"] });
+    });
+    await section.getByRole("button", { name: "Grow compact sample" }).click();
+    await expect(list.getByRole("listitem")).toHaveCount(25);
+    await list.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(list).toHaveAttribute("data-virtualized", "false");
+    expect(await list.locator(".ui-virtual-canvas").evaluate((node) => node.getBoundingClientRect().height)).toBe(50);
+    expect(await list.getAttribute("data-test-modes")).not.toContain("true");
+  });
+
+  test("retained-key content changes remeasure activation in both directions", async ({ page }) => {
+    await page.goto("/virtual");
+    await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
+    const section = page.getByRole("region", { name: "Fresh measurements", exact: true });
+    const list = section.getByRole("list");
+    for (const [action, mode] of [["Expand sample", "true"], ["Compact sample", "false"], ["Expand sample", "true"]]) {
+      await section.getByRole("button", { name: action, exact: true }).click();
+      await expect(list).toHaveAttribute("data-virtualized", mode);
+    }
+  });
+});
+
 test("requires caller enablement and a measured size threshold, then responds to growth and disablement", async ({ page }) => {
   await page.goto("/virtual");
   await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");

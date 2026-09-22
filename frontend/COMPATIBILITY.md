@@ -162,11 +162,16 @@ The local contract is:
   more than three viewportfuls, computed from the first page's actual average
   row height. That keyed measurement evidence survives the page leaving the
   mounted window; the current window does not replace the collection sample.
+  Evidence is tied to the current collection, item identities, and caller
+  enablement. Replaced content must be measured after its DOM update before it
+  can activate virtualization, even when its keys are retained.
   Empty, hidden, and unmeasurable lists remain disabled until measurable.
-- Before activation, resize observation rechecks the threshold after
-  container/content changes. Once activated, the mode is retained until the
-  caller disables it or the collection shrinks to 20 items or fewer. Ordinary
-  scrolling and later row measurements cannot switch the list between modes.
+- Resize observation and a coalesced post-update measurement pass recheck the
+  threshold after collection/content changes. Pending fresh evidence may retain
+  an already-active mode but cannot activate an inactive list. Fresh first-page
+  heights can activate or deactivate it; ordinary scrolling retains the same
+  collection sample and cannot cause mode oscillation. When changed sample rows
+  are offscreen, they are temporarily mounted to obtain fresh evidence.
   The core measures variable-height rows and positions them only after activation.
   Styles use an external stylesheet plus browser CSSOM property assignments,
   preserving the existing nonce-only CSP. The scroll container has a default
@@ -174,6 +179,8 @@ The local contract is:
   `.ui-virtual-list` for its layout.
 - Keys preserve the row subtree, component state, and focus across append,
   reorder, and same-key data replacement, as well as scroll/measurement updates.
+  Solid's keyed entry accessors own each row's live values until disposal, so
+  removal, clearing, and full replacement cannot read already-deleted map keys.
   Activation seeds the core with existing row measurements and the current
   scroll offset. Mode transitions preserve the visible keyed item and its
   within-row offset even when preceding estimates differed from real heights.
@@ -192,11 +199,13 @@ pnpm --dir frontend test --run src/ui/virtual
 pnpm --dir frontend exec playwright test e2e/virtual-list.spec.ts
 ```
 
-The nine real-browser cases pass on macOS Chromium and Linux Chromium. They cover
+The 17 real-browser cases pass on macOS Chromium and Linux Chromium. They cover
 retained SSR nodes with no diagnostics, caller/measurement gating, growth and
 shrink, disabling, initially empty data, resizing, variable-height end/back
 scrolling, child DOM/state retention with live item/index updates, scrolled mode
-transitions, heterogeneous-height mode stability, and forward/backward keyboard
+transitions, heterogeneous-height mode stability, removal/replacement/clearing
+in both modes with owner disposal, fresh activation evidence in both size
+directions, and forward/backward keyboard
 traversal through 35 rows. SSR assertions check the exact 20-row page and retained
 child identity/text after hydration. All browser
 console warnings/errors fail the gate. The shared fixture also keeps all 16
