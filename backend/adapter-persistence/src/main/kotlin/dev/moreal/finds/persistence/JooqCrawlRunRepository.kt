@@ -14,6 +14,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import org.jooq.DSLContext
 import org.jooq.impl.DSL.max
+import org.jooq.impl.DSL.row
 
 class JooqCrawlRunRepository(
   private val context: DSLContext,
@@ -27,14 +28,25 @@ class JooqCrawlRunRepository(
       .fetchOne() ?: return null
     val outcome = CrawlOutcome.valueOf(requireNotNull(latest.outcome))
     val failures = if (outcome == CrawlOutcome.FAILED) {
-      val latestSuccessId = context.select(max(CRAWL_RUNS.ID))
+      val latestSuccess = context.select(CRAWL_RUNS.FINISHED_AT, CRAWL_RUNS.ID)
         .from(CRAWL_RUNS)
         .where(CRAWL_RUNS.CAREER_SITE_ID.eq(siteId.value))
         .and(CRAWL_RUNS.OUTCOME.eq(CrawlOutcome.SUCCESS.name))
-        .fetchOne(0, Long::class.java)
+        .orderBy(CRAWL_RUNS.FINISHED_AT.desc(), CRAWL_RUNS.ID.desc())
+        .limit(1)
+        .fetchOne()
       var condition: org.jooq.Condition = CRAWL_RUNS.CAREER_SITE_ID.eq(siteId.value)
         .and(CRAWL_RUNS.OUTCOME.eq(CrawlOutcome.FAILED.name))
-      if (latestSuccessId != null) condition = condition.and(CRAWL_RUNS.ID.gt(latestSuccessId))
+      if (latestSuccess != null) {
+        condition = condition.and(
+          row(CRAWL_RUNS.FINISHED_AT, CRAWL_RUNS.ID).gt(
+            row(
+              requireNotNull(latestSuccess.value1()),
+              requireNotNull(latestSuccess.value2()),
+            ),
+          ),
+        )
+      }
       context.fetchCount(CRAWL_RUNS, condition)
     } else {
       0
@@ -69,12 +81,16 @@ class JooqCrawlRunRepository(
     check(updated == 1) { "Crawl run ${runId.value} was missing or already completed" }
   }
 
-  override fun latestStatuses(): List<CrawlStatus> =
-    context.selectFrom(CRAWL_RUNS)
+  override fun latestStatuses(): List<CrawlStatus> {
+    val latestIds = context.select(max(CRAWL_RUNS.ID))
+      .from(CRAWL_RUNS)
+      .groupBy(CRAWL_RUNS.CAREER_SITE_ID)
+    return context.selectFrom(CRAWL_RUNS)
+      .where(CRAWL_RUNS.ID.`in`(latestIds))
       .orderBy(CRAWL_RUNS.CAREER_SITE_ID.asc(), CRAWL_RUNS.ID.desc())
       .fetch()
-      .distinctBy { it.careerSiteId }
       .map { it.toStatus() }
+  }
 
   private fun CrawlRunsRecord.toStatus(): CrawlStatus {
     val code = failureCode?.let(CrawlFailureCode::valueOf)
