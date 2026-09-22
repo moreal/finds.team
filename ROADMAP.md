@@ -141,15 +141,15 @@ cd backend
 
 Deliverables:
 
-- [ ] Add PostgreSQL migrations for career sites, postings, posting skills,
+- [x] Add PostgreSQL migrations for career sites, postings, posting skills,
       crawl runs, and crawl leases.
-- [ ] Configure jOOQ generation from the migrated schema; generated sources are
+- [x] Configure jOOQ generation from the migrated schema; generated sources are
       build artifacts and are not committed.
-- [ ] Implement jOOQ repositories and transactional `SyncPlan` application.
-- [ ] Translate the domain filter algebra to jOOQ `Condition` values.
-- [ ] Prove SQL filter semantics agree with the in-memory domain semantics.
-- [ ] Prove applying a sync plan is idempotent.
-- [ ] Test against PostgreSQL with Testcontainers.
+- [x] Implement jOOQ repositories and transactional `SyncPlan` application.
+- [x] Translate the domain filter algebra to jOOQ `Condition` values.
+- [x] Prove SQL filter semantics agree with the in-memory domain semantics.
+- [x] Prove applying a sync plan is idempotent.
+- [x] Test against PostgreSQL with Testcontainers.
 
 Exit criteria:
 
