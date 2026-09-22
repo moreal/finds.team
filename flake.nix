@@ -18,20 +18,14 @@
         system:
         let
           pkgs = import nixpkgs { inherit system; };
-          gradle = pkgs.gradle-packages.mkGradle {
-            version = "8.12.1";
-            hash = "sha256-jZepeYT2y9K4X+TGCnQ0QKNHVEvxiBgEjmEfUojUbJQ=";
-            defaultJava = pkgs.jdk21;
-          };
         in
         {
           default = pkgs.mkShell {
             packages = [
-              pkgs.jdk21
-              gradle
+              pkgs.jdk25
             ];
 
-            JAVA_HOME = pkgs.jdk21.home;
+            JAVA_HOME = pkgs.jdk25.home;
           };
         }
       );

@@ -8,6 +8,8 @@ the repository's durable delivery contract.
 
 ## Delivery principles
 
+- Target Java 25 LTS with the Gradle 9.7.1 wrapper, Kotlin 2.4.20, and
+  Spring Boot 4.1.1; the Nix shell provides JDK 25 and builds use the wrapper.
 - Build a pure Kotlin domain before infrastructure.
 - Keep provider parsing separate from crawl policy and orchestration.
 - Treat PostgreSQL migrations as the source of truth and generate jOOQ code
