@@ -3,3 +3,4 @@ docs/superpowers/
 .worktrees/
 node_modules/
 frontend/dist/
+frontend/.relay/

@@ -17,7 +17,7 @@ The repository has no frontend implementation and no user, account, role, creden
 ## Approved decisions
 
 - Use SolidJS 2 RC and TanStack Start 2 RC with full-document streaming SSR.
-- Use Relay compiler and `solid-relay`; generated types replace hand-written response types.
+- Use Relay compiler/runtime with an isolated local Solid 2 binding; generated types replace hand-written response types. Replace the local binding with upstream bindings once compatible.
 - Use Kobalte through local design-system wrappers, subject to the compatibility gate below.
 - Use TanStack Virtual only after hydration and only where measured DOM size warrants it.
 - Use a same-origin reverse proxy, not a TanStack Start BFF.
@@ -77,7 +77,8 @@ The 2026-09-22 package snapshot has no peer-dependency set that directly satisfi
 - `@tanstack/solid-start` `rc`: `2.0.0-rc.8`, requiring Solid 2 pre-release and `@solidjs/web >=2.0.0-rc.6`.
 - `@kobalte/core` `alpha`: `2.0.0-alpha.2`, declaring exact peers on Solid/Web `2.0.0-rc.3`.
 - `@tanstack/solid-virtual` current packages still declare Solid 1 peer ranges.
-- `solid-relay`: `1.0.0-beta.29`, allowing Solid `>=1.4.0` but requiring an SSR/codegen proof against the chosen RC set.
+- `solid-relay@1.0.0-beta.29` cannot load on Solid 2: it imports removed Solid 1 APIs and `solid-js/store`. Keep a minimal local Solid 2 provider binding; later tasks add only query, fragment, pagination, and mutation APIs actually used. We own binding correctness until upstream supports Solid 2; no broad Solid 1 shim is allowed.
+- Relay compiler 20.1.1 accepts `.graphql`/`.gql`, not Spring's canonical `.graphqls`. Every codegen, watch, validation, and Vite-codegen invocation refreshes an ignored `.graphql` copy from the canonical schema bytes. Remove the adapter once Relay accepts `.graphqls`.
 
 The first frontend task must therefore create a minimal production-build spike that proves:
 

@@ -2,14 +2,17 @@ import {
   HeadContent,
   Outlet,
   Scripts,
-  createRootRoute,
+  createRootRouteWithContext,
+  useRouter,
 } from "@tanstack/solid-router";
 import type { JSX } from "@solidjs/web";
+import type { Environment } from "relay-runtime";
 
+import { RelayEnvironmentProvider } from "../relay/RelayRoot";
 import { createContentSecurityPolicy } from "../security/csp";
 import globalCss from "../styles/global.css?url";
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{ relayEnvironment: Environment }>()({
   head: () => ({
     links: [{ href: globalCss, rel: "stylesheet" }],
     meta: [
@@ -30,9 +33,18 @@ export const Route = createRootRoute({
       "Content-Security-Policy": createContentSecurityPolicy(ssr.nonce),
     };
   },
-  component: Outlet,
+  component: RelayRoot,
   shellComponent: RootDocument,
 });
+
+function RelayRoot() {
+  const router = useRouter();
+  return (
+    <RelayEnvironmentProvider environment={router.options.context.relayEnvironment}>
+      <Outlet />
+    </RelayEnvironmentProvider>
+  );
+}
 
 function RootDocument(props: Readonly<{ children: JSX.Element }>) {
   return (

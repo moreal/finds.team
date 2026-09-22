@@ -8,6 +8,10 @@ Build an SSR-first SolidJS 2 web application that lets visitors explore jobs by 
 
 TanStack Start owns routing, full-document streaming SSR, document metadata, and deployment bundles. Relay owns GraphQL normalization, fragment composition, and connection pagination. Each SSR request creates a fresh Relay environment, forwards the incoming cookie to Spring GraphQL over an internal service URL, and serializes normalized records into the document. Browser hydration restores those records without repeating the initial query.
 
+Solid 2 integration uses an isolated local binding over Relay runtime because `solid-relay@1.0.0-beta.29` imports removed Solid 1 APIs. The foundation implements only the environment provider/context; product tasks extend query, fragment, pagination, and mutation bindings only as used. Keep this boundary replaceable by upstream bindings once compatible. Until then, local binding correctness is our responsibility.
+
+The Relay compiler launcher refreshes an ignored `.graphql` copy from the committed `schema/finds.graphqls` bytes on every invocation, including validation and Vite codegen, and refreshes it when the canonical schema changes during watch mode. Spring's schema remains authoritative; remove this adapter when Relay supports its extension.
+
 After hydration, the browser network layer calls same-origin `/graphql` directly. Ingress routes GraphQL and security endpoints to Spring and page requests to TanStack Start. There is no Start BFF and no duplicated application session.
 
 ## Routes and information hierarchy

@@ -5,6 +5,9 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite dev",
+    "relay": "node scripts/relay.ts",
+    "relay:watch": "node scripts/relay.ts --watch",
+    "relay:validate": "node scripts/relay.ts --validate",
     "test": "vitest",
     "test:built": "node --test tests/built-handler.test.mjs",
     "typecheck": "tsc --noEmit"
@@ -13,6 +16,7 @@
     "@solidjs/web": "2.0.0-rc.9",
     "@tanstack/solid-router": "2.0.0-rc.8",
     "@tanstack/solid-start": "2.0.0-rc.8",
+    "relay-runtime": "20.1.1",
     "solid-js": "2.0.0-rc.9"
   },
   "devDependencies": {
@@ -20,9 +24,14 @@
     "@testing-library/jest-dom": "7.0.1",
     "@types/jsdom": "28.0.3",
     "@types/node": "24.10.0",
+    "@types/relay-runtime": "20.1.1",
+    "graphql": "16.11.0",
     "jsdom": "28.1.0",
+    "relay-compiler": "20.1.1",
     "typescript": "5.9.3",
     "vite": "8.3.0",
+    "vite-plugin-cjs-interop": "4.0.3",
+    "vite-plugin-relay-lite": "0.12.0",
     "vite-plugin-solid": "3.0.0-next.27",
     "vitest": "5.0.1"
   }

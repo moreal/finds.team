@@ -5,6 +5,7 @@ import { renderToString } from "@solidjs/web";
 import {
   GET,
   createServerReference,
+  configureServerFunctionsServer,
   parseServerFunctionActionUrl,
   registerServerReference,
   serverFunctionActionUrl,
@@ -13,14 +14,15 @@ import {
 import { createMemoryHistory } from "@tanstack/solid-router";
 import { RouterServer } from "@tanstack/solid-router/ssr/server";
 import { JSDOM } from "jsdom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getRouter } from "./router";
 import { getCspNonce } from "./security/csp";
 
 async function renderRootRoute() {
-  const router = getRouter();
+  const router = getRouter(new Request("https://finds.team/"));
   router.update({
+    context: router.options.context,
     history: createMemoryHistory({ initialEntries: ["/"] }),
   });
   await router.load();
@@ -71,8 +73,8 @@ describe("SSR content security policy", () => {
   });
 
   it("creates a unique nonce for each router request scope", () => {
-    expect(getRouter().options.ssr?.nonce).not.toBe(
-      getRouter().options.ssr?.nonce,
+    expect(getRouter(new Request("https://finds.team/")).options.ssr?.nonce).not.toBe(
+      getRouter(new Request("https://finds.team/")).options.ssr?.nonce,
     );
   });
 
@@ -91,6 +93,9 @@ describe("SSR content security policy", () => {
 });
 
 describe("the pinned server-function compatibility boundary", () => {
+  beforeEach(() => configureServerFunctionsServer({ endpoint: "/_server" }));
+  afterEach(() => configureServerFunctionsServer({ endpoint: process.env.TSS_SERVER_FN_BASE }));
+
   it("preserves TanStack's legacy action URL generation and parsing", () => {
     const url = serverFunctionActionUrl("finds/legacy", "hello world");
 

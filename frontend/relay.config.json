@@ -1,0 +1,10 @@
+{
+  "src": "./src",
+  "schema": "../schema/finds.graphqls",
+  "language": "typescript",
+  "artifactDirectory": "./src/__generated__",
+  "eagerEsModules": true,
+  "noSourceControl": true,
+  "codegenCommand": "node scripts/relay.ts",
+  "exclude": ["**/node_modules/**", "**/__generated__/**"]
+}

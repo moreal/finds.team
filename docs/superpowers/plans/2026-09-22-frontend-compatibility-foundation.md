@@ -4,9 +4,9 @@
 
 **Goal:** Establish a reproducible SolidJS 2 RC, TanStack Start 2 RC, Relay, Kobalte, and virtualization frontend foundation and prove SSR/hydration compatibility before feature work.
 
-**Architecture:** A root pnpm workspace owns `frontend/`. TanStack Start performs request-scoped SSR, `solid-relay` owns normalized GraphQL state, and compatibility-only integrations are isolated behind local adapters so prerelease dependency changes do not leak into product components.
+**Architecture:** A root pnpm workspace owns `frontend/`. TanStack Start performs request-scoped SSR, Relay runtime owns normalized GraphQL state through an isolated local Solid 2 binding, and compatibility-only integrations are isolated behind local adapters so prerelease dependency changes do not leak into product components.
 
-**Tech Stack:** Node.js 24, pnpm 12.5.1, TypeScript, SolidJS 2 RC, TanStack Start 2 RC, Relay compiler/runtime, solid-relay, Kobalte 2 alpha, TanStack Virtual/core, Vitest, Playwright
+**Tech Stack:** Node.js 24, pnpm 12.5.1, TypeScript, SolidJS 2 RC, TanStack Start 2 RC, Relay compiler/runtime with a local Solid 2 binding, Kobalte 2 alpha, TanStack Virtual/core, Vitest, Playwright
 
 **Spec:** `docs/superpowers/specs/2026-09-22-web-product-program-design.md`
 
@@ -150,6 +150,8 @@ Expected: FAIL because the Relay environment factories do not exist.
 
 Use `schema: "../schema/finds.graphqls"`, `src: "./src"`, language `typescript`, and artifact directory `./src/__generated__`. Add `relay`, `relay:watch`, and `relay:validate` scripts. Configure `vite-plugin-relay-lite` and CJS interop required by `relay-runtime`.
 
+Compatibility ruling: Relay 20 rejects `.graphqls`. A launcher must copy the canonical schema bytes to an ignored `.graphql` file on every invocation and derive an ignored compiler config pointing to it. Apply the launcher to all three scripts and Vite codegen; test exact bytes and stale-copy replacement. Refresh the copy on canonical-schema changes in watch mode. Remove this adapter when Relay supports `.graphqls`.
+
 - [ ] **Step 4: Implement environment factories**
 
 Server network calls use `FINDS_INTERNAL_GRAPHQL_URL`, forward only the `cookie`, `accept-language`, request id, and CSRF headers required by the operation, and never store the environment globally. Browser calls use relative `/graphql` with `credentials: "same-origin"`.
@@ -157,6 +159,8 @@ Server network calls use `FINDS_INTERNAL_GRAPHQL_URL`, forward only the `cookie`
 - [ ] **Step 5: Serialize and restore records**
 
 Expose only `RecordSource.toJSON()` data through the Start document serialization boundary. Restore it before mounting `RelayEnvironmentProvider`.
+
+Compatibility ruling: `solid-relay@1.0.0-beta.29` imports removed Solid 1 APIs and cannot load on Solid 2. Implement only the local Solid 2 `RelayEnvironmentProvider`/`useRelayEnvironment` boundary for this task. Replace it with upstream when compatible; later tasks extend only binding APIs actually used. Do not add a broad Solid 1 shim. Local binding correctness is our responsibility meanwhile.
 
 - [ ] **Step 6: Verify codegen, tests, and CSP build**
 
