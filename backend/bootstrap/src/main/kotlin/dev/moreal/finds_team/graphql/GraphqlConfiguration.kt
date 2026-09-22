@@ -6,6 +6,7 @@ import dev.moreal.finds.application.usecase.RegisterCareerSite
 import dev.moreal.finds.application.usecase.SearchPostings
 import dev.moreal.finds.graphql.FindsGraphqlFacade
 import dev.moreal.finds.graphql.GraphqlRuntime
+import dev.moreal.finds_team.runtime.ManagedCoroutineScope
 import graphql.GraphQL
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -27,4 +28,3 @@ class GraphqlConfiguration {
   fun graphQL(facade: FindsGraphqlFacade, scope: ManagedCoroutineScope): GraphQL =
     GraphqlRuntime.create(facade, scope)
 }
-

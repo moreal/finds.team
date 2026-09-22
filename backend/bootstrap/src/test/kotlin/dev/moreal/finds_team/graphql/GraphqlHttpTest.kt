@@ -6,6 +6,7 @@ import dev.moreal.finds.application.usecase.RegisterCareerSiteResult
 import dev.moreal.finds.graphql.FindsGraphqlFacade
 import dev.moreal.finds.graphql.GraphqlRuntime
 import dev.moreal.finds_team.config.FindsProperties
+import dev.moreal.finds_team.runtime.ManagedCoroutineScope
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
