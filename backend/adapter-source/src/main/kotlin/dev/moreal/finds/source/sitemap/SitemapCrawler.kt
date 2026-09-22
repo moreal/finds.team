@@ -16,6 +16,7 @@ data class SitemapUrl(
 )
 
 enum class SitemapFailureCode {
+  ROBOTS_DENIED,
   ROBOTS_UNAVAILABLE,
   FETCH_FAILED,
   MALFORMED,
@@ -47,7 +48,12 @@ class SitemapCrawler(
       is RobotsDecision.Allowed -> initialRobots.sitemaps.ifEmpty { listOf(conventional) }
       is RobotsDecision.Denied -> initialRobots.sitemaps
     }
-    if (initial.isEmpty()) return SitemapCrawlResult.Success(emptyList())
+    if (initial.isEmpty()) {
+      return failure(
+        SitemapFailureCode.ROBOTS_DENIED,
+        "robots.txt denied the conventional sitemap",
+      )
+    }
 
     val queue = ArrayDeque(initial.map { PendingDocument(it, depth = 1) })
     val visited = mutableSetOf<SiteUrl>()
@@ -65,7 +71,10 @@ class SitemapCrawler(
           SitemapFailureCode.ROBOTS_UNAVAILABLE,
           decision.failure.message,
         )
-        is RobotsDecision.Denied -> continue
+        is RobotsDecision.Denied -> return failure(
+          SitemapFailureCode.ROBOTS_DENIED,
+          "robots.txt denied sitemap ${pending.url.value.path}",
+        )
         is RobotsDecision.Allowed -> Unit
       }
 

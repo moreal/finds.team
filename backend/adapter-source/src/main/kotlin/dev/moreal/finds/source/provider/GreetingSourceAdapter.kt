@@ -37,10 +37,13 @@ class GreetingSourceAdapter(
     val discovered = when (val result = sitemaps.discover(site.canonicalBaseUrl)) {
       is SitemapCrawlResult.Failure -> return SourceFetchResult.Failure(
         CrawlFailure(
-          if (result.code == SitemapFailureCode.ROBOTS_UNAVAILABLE) {
-            CrawlFailureCode.ROBOTS_UNAVAILABLE
-          } else {
-            CrawlFailureCode.PARSE_FAILED
+          when (result.code) {
+            SitemapFailureCode.ROBOTS_DENIED -> CrawlFailureCode.ROBOTS_DENIED
+            SitemapFailureCode.ROBOTS_UNAVAILABLE -> CrawlFailureCode.ROBOTS_UNAVAILABLE
+            SitemapFailureCode.FETCH_FAILED -> CrawlFailureCode.SOURCE_FETCH_FAILED
+            SitemapFailureCode.MALFORMED,
+            SitemapFailureCode.LIMIT_EXCEEDED,
+            -> CrawlFailureCode.PARSE_FAILED
           },
           result.message,
         ),

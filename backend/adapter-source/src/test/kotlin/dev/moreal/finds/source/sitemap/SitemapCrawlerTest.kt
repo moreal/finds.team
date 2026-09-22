@@ -64,7 +64,7 @@ class SitemapCrawlerTest {
   }
 
   @Test
-  fun `uses conventional sitemap fallback and obeys robots denial`() = runTest {
+  fun `robots denial fails the crawl instead of producing an empty snapshot`() = runTest {
     val web = ScriptedWebClient(
       listOf(
         response(
@@ -76,8 +76,34 @@ class SitemapCrawlerTest {
 
     val result = crawler(web).discover(url("https://jobs.example"))
 
-    assertIs<SitemapCrawlResult.Success>(result)
+    assertEquals(
+      SitemapFailureCode.ROBOTS_DENIED,
+      assertIs<SitemapCrawlResult.Failure>(result).code,
+    )
     assertEquals(1, web.requests.size)
+  }
+
+  @Test
+  fun `denied nested sitemap fails instead of returning a partial snapshot`() = runTest {
+    val web = ScriptedWebClient(
+      listOf(
+        response(
+          "https://jobs.example/robots.txt",
+          "user-agent: *\nallow: /sitemap.xml\ndisallow: /private.xml",
+        ),
+        response(
+          "https://jobs.example/sitemap.xml",
+          "<sitemapindex><sitemap><loc>https://jobs.example/private.xml</loc></sitemap></sitemapindex>",
+        ),
+      ),
+    )
+
+    val result = crawler(web).discover(url("https://jobs.example"))
+
+    assertEquals(
+      SitemapFailureCode.ROBOTS_DENIED,
+      assertIs<SitemapCrawlResult.Failure>(result).code,
+    )
   }
 
   @Test
