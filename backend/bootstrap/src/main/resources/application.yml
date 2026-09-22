@@ -2,7 +2,7 @@ spring:
   application:
     name: finds.team
   datasource:
-    url: ${FINDS_DB_URL:jdbc:postgresql://localhost:5432/finds_team}
+    url: ${FINDS_DB_URL:jdbc:postgresql://localhost:55432/finds_team}
     username: ${FINDS_DB_USER:finds}
     password: ${FINDS_DB_PASSWORD:finds}
   flyway:
@@ -36,24 +36,24 @@ finds:
     contact-url: ${FINDS_CONTACT_URL:https://finds.team/contact}
     connect-timeout: 5s
     request-timeout: 20s
-    site-timeout: 2m
-    minimum-host-spacing: 1s
+    site-timeout: 60s
+    minimum-host-spacing: 500ms
     maximum-response-bytes: 5242880
     maximum-redirects: 5
-    robots-success-ttl: 1h
+    robots-success-ttl: 24h
     robots-failure-ttl: 5m
     sitemap-maximum-depth: 4
     sitemap-maximum-documents: 100
     sitemap-maximum-urls: 50000
     sitemap-maximum-total-bytes: 20971520
   crawl:
-    scan-interval: 1m
+    scan-interval: 15m
     success-interval: 6h
-    retry-delays: [30m, 2h, 6h]
+    retry-delays: [5m, 30m, 2h, 6h]
     lease-duration: 10m
     lease-owner: ${FINDS_LEASE_OWNER:${HOSTNAME:local}}
     dispatch-limit: 100
-    global-concurrency: 4
+    global-concurrency: 3
     close-after-misses: 2
   graphql:
     maximum-request-bytes: 65536

@@ -22,11 +22,11 @@ data class FindsProperties(
     @field:NotBlank val contactUrl: String = "https://finds.team/contact",
     val connectTimeout: Duration = Duration.ofSeconds(5),
     val requestTimeout: Duration = Duration.ofSeconds(20),
-    val siteTimeout: Duration = Duration.ofMinutes(2),
-    val minimumHostSpacing: Duration = Duration.ofSeconds(1),
+    val siteTimeout: Duration = Duration.ofSeconds(60),
+    val minimumHostSpacing: Duration = Duration.ofMillis(500),
     @field:Min(1) val maximumResponseBytes: Long = 5L * 1024 * 1024,
     @field:Min(0) @field:Max(10) val maximumRedirects: Int = 5,
-    val robotsSuccessTtl: Duration = Duration.ofHours(1),
+    val robotsSuccessTtl: Duration = Duration.ofHours(24),
     val robotsFailureTtl: Duration = Duration.ofMinutes(5),
     @field:Min(1) val sitemapMaximumDepth: Int = 4,
     @field:Min(1) val sitemapMaximumDocuments: Int = 100,
@@ -48,9 +48,10 @@ data class FindsProperties(
   }
 
   data class Crawl(
-    val scanInterval: Duration = Duration.ofMinutes(1),
+    val scanInterval: Duration = Duration.ofMinutes(15),
     val successInterval: Duration = Duration.ofHours(6),
     val retryDelays: List<Duration> = listOf(
+      Duration.ofMinutes(5),
       Duration.ofMinutes(30),
       Duration.ofHours(2),
       Duration.ofHours(6),
@@ -58,7 +59,7 @@ data class FindsProperties(
     val leaseDuration: Duration = Duration.ofMinutes(10),
     @field:NotBlank val leaseOwner: String = "local",
     @field:Min(1) val dispatchLimit: Int = 100,
-    @field:Min(1) val globalConcurrency: Int = 4,
+    @field:Min(1) val globalConcurrency: Int = 3,
     @field:Min(1) val closeAfterMisses: Int = 2,
   ) {
     init {

@@ -22,11 +22,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.boot.health.contributor.Health
 import org.springframework.boot.health.contributor.HealthIndicator
 import org.springframework.scheduling.annotation.Scheduled
-import org.springframework.stereotype.Component
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 
-@Component
 class ScheduledCrawlDispatcher internal constructor(
   private val selectDue: (Int) -> List<CareerSiteId>,
   private val crawl: suspend (CrawlSiteCommand) -> CrawlSiteResult,

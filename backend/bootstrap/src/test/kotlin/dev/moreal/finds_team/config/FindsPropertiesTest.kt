@@ -11,9 +11,9 @@ class FindsPropertiesTest {
     val properties = FindsProperties()
 
     assertEquals("finds.team", properties.source.userAgentProduct)
-    assertEquals(Duration.ofSeconds(1), properties.source.minimumHostSpacing)
+    assertEquals(Duration.ofMillis(500), properties.source.minimumHostSpacing)
     assertEquals(5L * 1024 * 1024, properties.source.maximumResponseBytes)
-    assertEquals(4, properties.crawl.globalConcurrency)
+    assertEquals(3, properties.crawl.globalConcurrency)
     assertEquals(2, properties.crawl.closeAfterMisses)
   }
 
@@ -31,4 +31,3 @@ class FindsPropertiesTest {
     }
   }
 }
-

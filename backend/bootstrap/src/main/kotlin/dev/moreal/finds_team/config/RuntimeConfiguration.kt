@@ -38,17 +38,29 @@ import dev.moreal.finds.source.provider.ProviderDetector
 import dev.moreal.finds.source.provider.SourceAdapter
 import dev.moreal.finds.source.robots.RobotsClient
 import dev.moreal.finds.source.sitemap.SitemapCrawler
+import dev.moreal.finds_team.crawl.ScheduledCrawlDispatcher
+import dev.moreal.finds_team.runtime.ManagedCoroutineScope
+import io.micrometer.core.instrument.MeterRegistry
+import org.flywaydb.core.Flyway
 import org.jooq.DSLContext
 import org.jooq.SQLDialect
 import org.jooq.impl.DSL
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.context.annotation.DependsOn
 import java.time.Instant
 import javax.sql.DataSource
 
 @Configuration(proxyBeanMethods = false)
 class RuntimeConfiguration {
+  @Bean(initMethod = "migrate")
+  fun flyway(dataSource: DataSource): Flyway = Flyway.configure()
+    .dataSource(dataSource)
+    .locations("classpath:db/migration")
+    .load()
+
   @Bean
+  @DependsOn("flyway")
   fun dslContext(dataSource: DataSource): DSLContext = DSL.using(dataSource, SQLDialect.POSTGRES)
 
   @Bean
@@ -214,6 +226,23 @@ class RuntimeConfiguration {
   @Bean
   fun getCrawlStatus(runs: CrawlRunRepository): GetCrawlStatus = GetCrawlStatus(runs)
 
+  @Bean
+  fun scheduledCrawlDispatcher(
+    due: CrawlAllDue,
+    crawl: CrawlSite,
+    clock: ClockPort,
+    scope: ManagedCoroutineScope,
+    properties: FindsProperties,
+    registry: MeterRegistry,
+  ): ScheduledCrawlDispatcher = ScheduledCrawlDispatcher(
+    due,
+    crawl,
+    clock,
+    scope,
+    properties,
+    registry,
+  )
+
   private fun requireUrl(value: String): SiteUrl = when (val parsed = SiteUrl.parse(value)) {
     is SiteUrlResult.Valid -> parsed.url
     is SiteUrlResult.Invalid -> error("Configured contact URL is invalid: ${parsed.reason}")
@@ -224,4 +253,3 @@ class RuntimeConfiguration {
     return toInt()
   }
 }
-

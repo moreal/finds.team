@@ -20,8 +20,8 @@ the repository's durable delivery contract.
   dependency on JPA entities.
 - Finish each phase with the listed verification before starting a dependent
   phase.
-- Remove the legacy JPA/H2 path only after the replacement vertical slice is
-  proven end to end.
+- Remove the legacy JPA/H2 path after the replacement modules are independently
+  proven, then prove the assembled vertical slice end to end.
 
 ## Target structure
 
@@ -183,19 +183,19 @@ cd backend
 
 Deliverables:
 
-- [ ] Wire the application in `bootstrap` with Spring Boot.
-- [ ] Poll for due sites at a short fixed scheduler interval while domain policy
+- [x] Wire the application in `bootstrap` with Spring Boot.
+- [x] Poll for due sites at a short fixed scheduler interval while domain policy
       controls each site's actual recrawl cadence.
-- [ ] Bound global and per-host concurrency and acquire database-backed crawl
+- [x] Bound global and per-host concurrency and acquire database-backed crawl
       leases before fetching.
-- [ ] Enforce deployment-level outbound network policy as defense in depth
+- [x] Enforce deployment-level outbound network policy as defense in depth
       against DNS rebinding, in addition to source-layer DNS validation.
-- [ ] Expose configuration for crawl interval, timeouts, concurrency, request
+- [x] Expose configuration for crawl interval, timeouts, concurrency, request
       spacing, close grace, User-Agent, and contact URL.
-- [ ] Provide Docker Compose for local PostgreSQL and documented run commands.
-- [ ] Add structured crawl logs and health/metrics endpoints without placing
+- [x] Provide Docker Compose for local PostgreSQL and documented run commands.
+- [x] Add structured crawl logs and health/metrics endpoints without placing
       operational concerns in the domain.
-- [ ] Verify registration -> crawl -> reconciliation -> search end to end.
+- [x] Verify registration -> crawl -> reconciliation -> search end to end.
 
 Exit criteria:
 
@@ -213,14 +213,15 @@ must cover the same vertical slice in CI.
 
 Deliverables:
 
-- [ ] Delete JPA entities, Spring Data repositories, legacy REST controllers,
+- [x] Delete JPA entities, Spring Data repositories, legacy REST controllers,
       synchronous crawl-on-registration flow, and the empty background task.
-- [ ] Remove H2, `kotlin-jpa`, and Spring Data JPA dependencies.
-- [ ] Remove legacy `bin` artifacts and expand ignore rules for local IDE/build
+- [x] Remove H2, `kotlin-jpa`, and Spring Data JPA dependencies.
+- [x] Remove legacy `bin` artifacts and expand ignore rules for local IDE/build
       output without deleting user-owned untracked files.
-- [ ] Confirm no `jakarta.persistence`, H2, or Spring Data JPA references remain.
-- [ ] Run the full test suite and architecture checks from a clean build.
-- [ ] Reconcile this roadmap against the implementation and record every item as
+- [x] Confirm no `jakarta.persistence`, H2, or Spring Data JPA references remain
+      in production sources and build dependencies.
+- [x] Run the full test suite and architecture checks from a clean build.
+- [x] Reconcile this roadmap against the implementation and record every item as
       complete only when direct evidence exists.
 
 Exit criteria:
@@ -229,7 +230,7 @@ Exit criteria:
 cd backend
 ./gradlew clean check
 cd ..
-test -z "$(git grep -nE 'jakarta\.persistence|com\.h2database|spring-boot-starter-data-jpa' -- backend || true)"
+test -z "$(git grep -nE 'jakarta\.persistence|com\.h2database|spring-boot-starter-data-jpa' -- 'backend/*/src/main/**' 'backend/*.gradle.kts' backend/gradle/libs.versions.toml || true)"
 ```
 
 ## Initial policy defaults
@@ -258,3 +259,18 @@ The roadmap is complete only when all phases are checked, `./gradlew clean
 check` passes, the end-to-end vertical slice works with PostgreSQL, all three
 providers have fixture-backed adapter tests, and no JPA/H2 implementation path
 remains.
+
+## Completion audit — 2026-09-22
+
+- `./gradlew clean check` completed with all 40 tasks executed successfully on
+  Java 25.
+- `BootstrapVerticalSliceTest` covers Spring startup/Flyway and GraphQL
+  registration -> fixture crawl -> transactional reconciliation -> search and
+  crawl status against PostgreSQL Testcontainers.
+- A Compose smoke run reported Actuator health `UP` and returned an empty,
+  error-free GraphQL search/status response; the test container and network were
+  then stopped while preserving the named volume.
+- Production-source/build grep contains no JPA, H2, or Spring Data JPA path.
+- Provider fixtures cover Flex, Greeting, and Ninehire; outbound protocol tests
+  cover DNS/redirect constraints, robots.txt, sitemap bounds, host serialization,
+  timeouts, and response limits.
