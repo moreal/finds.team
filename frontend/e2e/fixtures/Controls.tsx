@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 
 import { Dialog } from "../../src/ui/kobalte/Dialog";
 import { Select } from "../../src/ui/kobalte/Select";
+import { RegressionControls } from "./RegressionControls";
 
 export function Controls() {
   const options = [{ id: "all", label: "All roles" }, { id: "engineering", label: "Engineering" }];
@@ -27,6 +28,7 @@ export function Controls() {
       <button type="button" onClick={() => setOpen(true)}>Open externally</button>
       <output aria-label="Controlled dialog state">{open() ? "open" : "closed"}</output>
       <button type="button">After controls</button>
+      <RegressionControls />
     </main>
   );
 }

@@ -51,6 +51,13 @@ and trigger focus restoration. `Select<T>` is controlled, returns the original
 option object, and submits `getOptionValue(option)` through its native form
 control. Option values must be unique. Dialogs become modal after hydration.
 
+Focus traversal uses `tabbable@6.5.0` for visibility-aware native tab order,
+including contenteditable fields. It respects handled keyboard events and only
+cancels default Tab traversal after focus succeeds. Both controlled adapters
+reconcile native DOM changes after Solid's updates settle, so a parent can
+decline a dialog dismissal or select change without changing its prop. Dialog
+dimensions include padding and borders in their viewport limits.
+
 `@kobalte/core@2.0.0-alpha.2` declares exact Solid/Web peers at `2.0.0-rc.3`.
 The workspace explicitly allows this package's peers to resolve to our pinned
 `2.0.0-rc.9` for the compatibility probe. The alpha passes TypeScript but fails

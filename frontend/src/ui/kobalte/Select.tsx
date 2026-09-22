@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createUniqueId, For } from "solid-js";
+import { createUniqueId, For, onSettled } from "solid-js";
 
 import "./kobalte.css";
 
@@ -25,8 +25,14 @@ export function Select<T>(props: SelectProps<T>): JSX.Element {
       <select id={id} class="ui-select" name={props.name} disabled={props.disabled}
         required={props.required} value={props.getOptionValue(props.value)}
         onChange={(event) => {
-          const option = props.options.find((item) => props.getOptionValue(item) === event.currentTarget.value);
+          const select = event.currentTarget;
+          const option = props.options.find((item) => props.getOptionValue(item) === select.value);
           if (option !== undefined) props.onChange(option);
+          // The browser already changed its value. Once the parent's updates
+          // settle, restore the authoritative prop even when it stayed unchanged.
+          onSettled(() => {
+            if (select.isConnected) select.value = props.getOptionValue(props.value);
+          });
         }}>
         <For each={props.options}>{(option) => (
           <option value={props.getOptionValue(option)}

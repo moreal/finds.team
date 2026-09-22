@@ -27,12 +27,12 @@ test("hydrates the existing server DOM with stable labels under nonce-only CSP",
   await expect(page.getByRole("button", { name: "Edit preferences" })).toBeVisible();
   const root = await page.locator("#root").elementHandle();
   const trigger = await page.getByRole("button", { name: "Edit preferences" }).elementHandle();
-  const select = await page.locator("select").elementHandle();
+  const select = await page.locator("select[name=role]").elementHandle();
   release();
   await expect(page.locator("html")).toHaveAttribute("data-hydrated", "true");
   expect(await page.locator("#root").evaluate((node, original) => node === original, root)).toBe(true);
   expect(await page.getByRole("button", { name: "Edit preferences" }).evaluate((node, original) => node === original, trigger)).toBe(true);
-  expect(await page.locator("select").evaluate((node, original) => node === original, select)).toBe(true);
+  expect(await page.locator("select[name=role]").evaluate((node, original) => node === original, select)).toBe(true);
   expect(response?.headers()["content-security-policy"]).not.toMatch(/unsafe-inline|unsafe-eval|strict-dynamic/);
   await expect(page.getByLabel("Role", { exact: true })).toHaveCount(1);
 });
@@ -97,4 +97,108 @@ test("native form dismissal synchronizes controlled state and permits reopening"
   await expect(trigger).toBeFocused();
   await trigger.press("Enter");
   await expect(page.getByRole("dialog", { name: "Controlled preferences", exact: true })).toBeVisible();
+});
+
+test.describe("review regressions", () => {
+  for (const [key, start, end] of [
+    ["Tab", "Before hidden", "After hidden"],
+    ["Shift+Tab", "After hidden", "Before hidden"],
+  ] as const) {
+    test(`${key} skips controls under visibility:hidden ancestors`, async ({ page }) => {
+      await page.getByRole("button", { name: "Keyboard cases", exact: true }).click();
+      await page.getByRole("button", { name: start, exact: true }).focus();
+      await page.keyboard.press(key);
+      await expect(page.getByRole("button", { name: end, exact: true })).toBeFocused();
+    });
+  }
+
+  test("native editable fields participate in both Tab directions", async ({ page }) => {
+    await page.getByRole("button", { name: "Keyboard cases", exact: true }).click();
+    const before = page.getByRole("button", { name: "After hidden", exact: true });
+    const editable = page.getByRole("textbox", { name: "Native editable" });
+    const after = page.getByRole("button", { name: "After editable", exact: true });
+    await before.focus();
+    await page.keyboard.press("Tab");
+    await expect(editable).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(after).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(editable).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(before).toBeFocused();
+  });
+
+  test("dialog respects a child's already-handled Tab event", async ({ page }) => {
+    await page.getByRole("button", { name: "Keyboard cases", exact: true }).click();
+    const control = page.getByRole("button", { name: "Handles Tab" });
+    await control.focus();
+    await page.keyboard.press("Tab");
+    await expect(control).toBeFocused();
+  });
+
+  test("failed focus attempts continue to a reachable control in either direction", async ({ page }) => {
+    await page.getByRole("button", { name: "Keyboard cases", exact: true }).click();
+    const before = page.getByRole("button", { name: "After editable", exact: true });
+    const after = page.getByRole("button", { name: "After redirect", exact: true });
+    await before.focus();
+    await page.keyboard.press("Tab");
+    await expect(after).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(before).toBeFocused();
+  });
+
+  test("declined native dialog closure keeps the unchanged true prop authoritative", async ({ page }) => {
+    const trigger = page.getByRole("button", { name: "Held dialog", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Held preferences", exact: true });
+    await trigger.click();
+    await page.getByRole("button", { name: "Finish held dialog" }).click();
+    await expect(page.getByRole("status", { name: "Held dialog state" })).toHaveText("open");
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(dialog).toBeVisible();
+    expect(await dialog.evaluate((node) => node.matches(":modal"))).toBe(true);
+    await page.getByRole("button", { name: "Accept external close" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+  });
+
+  test("accepted select changes update the DOM, typed value and form value", async ({ page }) => {
+    const select = page.getByLabel("Role", { exact: true });
+    await select.selectOption("engineering");
+    await expect(select).toHaveValue("engineering");
+    await expect(page.getByRole("status", { name: "Selected role", exact: true })).toHaveText("Engineering");
+    expect(await select.evaluate((node) => new FormData((node as HTMLSelectElement).form!).get("role"))).toBe("engineering");
+  });
+
+  test("rejected select changes restore the unchanged prop before form submission", async ({ page }) => {
+    const select = page.getByLabel("Held role", { exact: true });
+    await select.selectOption("engineering");
+    await expect(select).toHaveValue("all");
+    await expect(page.getByRole("status", { name: "Held role state" })).toHaveText("All roles");
+    expect(await select.evaluate((node) => new FormData((node as HTMLSelectElement).form!).get("held-role"))).toBe("all");
+  });
+
+  test("external select value changes remain authoritative after rejection", async ({ page }) => {
+    const select = page.getByLabel("Held role", { exact: true });
+    await page.getByRole("button", { name: "Select engineering externally" }).click();
+    await expect(select).toHaveValue("engineering");
+    await select.selectOption("all");
+    await expect(select).toHaveValue("engineering");
+    await page.getByRole("button", { name: "Select all externally" }).click();
+    await expect(select).toHaveValue("all");
+    expect(await select.evaluate((node) => new FormData((node as HTMLSelectElement).form!).get("held-role"))).toBe("all");
+  });
+
+  test("dialog border box stays inside a narrow and short viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 240 });
+    await page.getByRole("button", { name: "Keyboard cases", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Keyboard cases", exact: true });
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(16);
+    expect(bounds!.y).toBeGreaterThanOrEqual(16);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(304);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(224);
+    await page.getByRole("button", { name: "Close keyboard cases" }).focus();
+    await expect(page.getByRole("button", { name: "Close keyboard cases" })).toBeInViewport();
+  });
 });

@@ -17,7 +17,8 @@
     "@tanstack/solid-router": "2.0.0-rc.8",
     "@tanstack/solid-start": "2.0.0-rc.8",
     "relay-runtime": "20.1.1",
-    "solid-js": "2.0.0-rc.9"
+    "solid-js": "2.0.0-rc.9",
+    "tabbable": "6.5.0"
   },
   "devDependencies": {
     "@kobalte/core": "2.0.0-alpha.2",

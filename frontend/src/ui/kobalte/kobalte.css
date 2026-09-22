@@ -15,6 +15,7 @@
 }
 
 .ui-dialog {
+  box-sizing: border-box;
   max-inline-size: min(32rem, calc(100vw - 2rem));
   max-block-size: calc(100dvh - 2rem);
   overflow: auto;

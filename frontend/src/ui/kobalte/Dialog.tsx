@@ -1,5 +1,6 @@
 import type { JSX } from "@solidjs/web";
-import { createEffect, createSignal, createUniqueId, onCleanup } from "solid-js";
+import { createEffect, createSignal, createUniqueId, onCleanup, onSettled } from "solid-js";
+import { tabbable } from "tabbable";
 
 import "./kobalte.css";
 
@@ -27,18 +28,26 @@ export function Dialog(props: DialogProps): JSX.Element {
   }
 
   function keepFocusInside(event: KeyboardEvent) {
-    if (event.key !== "Tab") return;
-    const controls = [...dialog.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]")]
-      .filter((element) => element.tabIndex >= 0 && !element.matches(":disabled")
-        && !element.closest("[inert]") && element.getClientRects().length > 0);
+    if (event.key !== "Tab" || event.defaultPrevented) return;
+    const controls = tabbable(dialog);
     if (controls.length === 0) return;
     // Explicit traversal also respects the contract on macOS browsers whose
     // system preference excludes buttons from the ordinary Tab sequence.
-    const current = controls.indexOf(document.activeElement as HTMLElement);
-    const next = current < 0 ? (event.shiftKey ? controls.length - 1 : 0)
-      : (current + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
-    event.preventDefault();
-    controls[next].focus();
+    const original = document.activeElement;
+    const current = controls.indexOf(original as HTMLElement);
+    const start = current < 0 ? (event.shiftKey ? 0 : -1) : current;
+    const direction = event.shiftKey ? -1 : 1;
+    for (let offset = 1; offset <= controls.length; offset++) {
+      const next = controls[(start + direction * offset + controls.length) % controls.length];
+      if (next === original && controls.length > 1) continue;
+      next.focus();
+      if (document.activeElement === next) {
+        event.preventDefault();
+        return;
+      }
+    }
+    // A focus listener can redirect focus, or a candidate can become hidden.
+    // Leave the browser's default traversal available if no candidate accepts it.
   }
 
   createEffect(isOpen, (open) => {
@@ -68,7 +77,16 @@ export function Dialog(props: DialogProps): JSX.Element {
         onClose={() => {
           if (!dialog.open) {
             if (isOpen()) requestOpen(false);
-            trigger.focus();
+            onSettled(() => {
+              if (!dialog.isConnected) return;
+              // Native method=dialog closes before notifying us. The parent can
+              // decline that request without changing its controlled prop.
+              if (isOpen()) {
+                if (!dialog.open) dialog.showModal();
+              } else {
+                trigger.focus();
+              }
+            });
           }
         }}>
         <h2 id={`${id}-title`}>{props.title}</h2>

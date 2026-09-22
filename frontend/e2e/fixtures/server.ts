@@ -38,7 +38,8 @@ async function bundle(server: boolean) {
 
 const [serverCode, clientCode] = await Promise.all([bundle(true), bundle(false)]);
 const { renderControls } = await import(`data:text/javascript;base64,${Buffer.from(serverCode).toString("base64")}`);
-const css = await readFile(new URL("../../src/ui/kobalte/kobalte.css", import.meta.url), "utf8");
+const css = await readFile(new URL("../../src/ui/kobalte/kobalte.css", import.meta.url), "utf8")
+  + await readFile(new URL("regression.css", import.meta.url), "utf8");
 
 const server = createServer((request, response) => {
   if (request.url === "/controls.css") {
