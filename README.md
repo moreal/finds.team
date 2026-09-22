@@ -36,8 +36,9 @@ pnpm frontend:check
 
 `pnpm frontend:check` is the canonical compatibility gate. It fails at the
 first error and runs Relay artifact validation, TypeScript, Vitest, the Kobalte
-and virtual-list Playwright specifications, and the production build in that
-order. On macOS, use the Linux Chromium server documented in
+and virtual-list Playwright specifications, the production build, and the
+built-handler security/artifact tests in that order. On macOS, use the Linux
+Chromium server documented in
 [`frontend/COMPATIBILITY.md`](frontend/COMPATIBILITY.md) for the native-select
 keyboard case, then run the same root command with
 `PW_TEST_CONNECT_WS_ENDPOINT` and `PW_TEST_CONNECT_EXPOSE_NETWORK` set.

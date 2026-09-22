@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@12.5.1",
   "scripts": {
-    "frontend:check": "pnpm --dir frontend relay:validate && pnpm --dir frontend typecheck && pnpm --dir frontend test --run && pnpm --dir frontend exec playwright test e2e/kobalte-hydration.spec.ts e2e/virtual-list.spec.ts && pnpm --dir frontend build",
+    "frontend:check": "pnpm --dir frontend relay:validate && pnpm --dir frontend typecheck && pnpm --dir frontend test --run && pnpm --dir frontend exec playwright test e2e/kobalte-hydration.spec.ts e2e/virtual-list.spec.ts && pnpm --dir frontend build && pnpm --dir frontend test:built",
     "frontend:typecheck": "pnpm --dir frontend typecheck",
     "frontend:test": "pnpm --dir frontend test",
     "frontend:build": "pnpm --dir frontend build"

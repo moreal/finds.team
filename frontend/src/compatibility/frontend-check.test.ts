@@ -11,6 +11,7 @@ const expectedSteps = [
   "--dir frontend test --run",
   "--dir frontend exec playwright test e2e/kobalte-hydration.spec.ts e2e/virtual-list.spec.ts",
   "--dir frontend build",
+  "--dir frontend test:built",
 ];
 
 async function runGate(failAt = "") {

@@ -96,8 +96,11 @@ pnpm frontend:check
 
 The gate order is Relay validation, TypeScript, Vitest, the two compatibility
 Playwright specs (`e2e/kobalte-hydration.spec.ts` and
-`e2e/virtual-list.spec.ts`), then the production build. The opt-in Kobalte and
-Solid Virtual failure reproductions below remain outside the passing gate.
+`e2e/virtual-list.spec.ts`), the production build, then `test:built` against the
+emitted artifacts. That final suite verifies nonce-only CSP, a unique nonce on
+every script, one hydration bootstrap, no dynamic evaluation, and no internal
+GraphQL endpoint in the client bundle. The opt-in Kobalte and Solid Virtual
+failure reproductions below remain outside the passing gate.
 
 ## KOBALTE-ALPHA2-SOLID-RC9
 
