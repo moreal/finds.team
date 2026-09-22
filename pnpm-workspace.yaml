@@ -1,4 +1,8 @@
 packages:
   - frontend
+peerDependencyRules:
+  allowedVersions:
+    '@kobalte/core>solid-js': 2.0.0-rc.9
+    '@kobalte/core>@solidjs/web': 2.0.0-rc.9
 patchedDependencies:
   '@tanstack/solid-start@2.0.0-rc.8': patches/@tanstack__solid-start@2.0.0-rc.8.patch
