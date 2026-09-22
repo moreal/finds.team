@@ -93,15 +93,15 @@ cd backend
 
 Deliverables:
 
-- [ ] Define repository, transaction, clock, source discovery, source fetch,
-      robots policy, and crawl lease ports.
-- [ ] Implement `RegisterCareerSite`, `SearchPostings`, `CrawlSite`,
+- [x] Define repository, clock, source discovery, source fetch, and crawl lease
+      ports, with atomic `SyncPlan` application as the transaction boundary.
+- [x] Implement `RegisterCareerSite`, `SearchPostings`, `CrawlSite`,
       `CrawlAllDue`, and `GetCrawlStatus` use cases.
-- [ ] Keep policy decisions in `domain`; application code only coordinates
+- [x] Keep policy decisions in `domain`; application code only coordinates
       ports and executes domain decisions.
-- [ ] Record every crawl attempt and its outcome without applying a sync plan
+- [x] Record every crawl attempt and its outcome without applying a sync plan
       after fetch or validation failure.
-- [ ] Add deterministic in-memory fakes in application test fixtures.
+- [x] Add deterministic in-memory fakes in application test fixtures.
 
 Exit criteria:
 
