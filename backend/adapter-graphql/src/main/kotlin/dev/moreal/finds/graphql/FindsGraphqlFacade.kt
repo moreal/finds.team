@@ -1,0 +1,149 @@
+package dev.moreal.finds.graphql
+
+import dev.moreal.finds.application.model.CrawlStatus
+import dev.moreal.finds.application.model.PageRequest
+import dev.moreal.finds.application.model.SearchPage
+import dev.moreal.finds.application.usecase.CrawlSite
+import dev.moreal.finds.application.usecase.CrawlSiteCommand
+import dev.moreal.finds.application.usecase.CrawlSiteResult
+import dev.moreal.finds.application.usecase.CrawlTrigger
+import dev.moreal.finds.application.usecase.GetCrawlStatus
+import dev.moreal.finds.application.usecase.RegisterCareerSite
+import dev.moreal.finds.application.usecase.RegisterCareerSiteCommand
+import dev.moreal.finds.application.usecase.RegisterCareerSiteResult
+import dev.moreal.finds.application.usecase.SearchPostings
+import dev.moreal.finds.domain.career.CareerSite
+import dev.moreal.finds.domain.career.CareerSiteId
+import dev.moreal.finds.domain.career.SourceProvider
+import dev.moreal.finds.domain.search.Filter
+
+enum class ApiErrorCode {
+  INVALID_INPUT, INVALID_URL, UNSUPPORTED_PROVIDER, AMBIGUOUS_PROVIDER,
+  DISCOVERY_FAILED, ALREADY_REGISTERED, NOT_FOUND, NOT_DUE, DISABLED, BUSY,
+  CRAWL_FAILED, INTERNAL,
+}
+
+data class ApiErrorDto(
+  val code: ApiErrorCode,
+  val message: String,
+  val providers: List<SourceProvider> = emptyList(),
+)
+
+data class CareerSiteDto(
+  val id: String,
+  val canonicalBaseUrl: String,
+  val host: String,
+  val provider: SourceProvider,
+  val displayName: String,
+  val enabled: Boolean,
+  val successfulIntervalSeconds: Int,
+)
+
+data class RegisterCareerSiteInput(val url: String, val displayName: String)
+data class RegisterCareerSitePayload(val site: CareerSiteDto?, val error: ApiErrorDto?)
+
+enum class CrawlTriggerOutcome {
+  SUCCEEDED, FAILED, NOT_FOUND, NOT_DUE, DISABLED, BUSY, INFRASTRUCTURE_FAILURE,
+}
+
+data class TriggerCrawlPayload(
+  val outcome: CrawlTriggerOutcome,
+  val runId: String? = null,
+  val counts: dev.moreal.finds.application.model.CrawlChangeCounts? = null,
+  val nextEligibleAt: String? = null,
+  val error: ApiErrorDto? = null,
+)
+
+data class CrawlStatusDto(
+  val careerSiteId: String,
+  val runId: String?,
+  val outcome: dev.moreal.finds.domain.crawl.CrawlOutcome?,
+  val finishedAt: String?,
+  val error: ApiErrorDto?,
+)
+
+class FindsGraphqlFacade(
+  private val searchHandler: (Filter, PageRequest) -> SearchPage,
+  private val registerHandler: suspend (RegisterCareerSiteCommand) -> RegisterCareerSiteResult,
+  private val crawlHandler: suspend (CrawlSiteCommand) -> CrawlSiteResult,
+  private val statusHandler: () -> List<CrawlStatus>,
+) {
+  constructor(
+    search: SearchPostings,
+    register: RegisterCareerSite,
+    crawl: CrawlSite,
+    statuses: GetCrawlStatus,
+  ) : this(search::execute, register::execute, crawl::execute, statuses::execute)
+
+  fun jobPostings(filter: PostingFilterInput?, first: Int?, after: String?): JobPostingConnectionDto =
+    PostingGraphqlMapping.connection(
+      searchHandler(PostingGraphqlMapping.filter(filter), PostingGraphqlMapping.page(first, after)),
+    )
+
+  suspend fun registerCareerSite(input: RegisterCareerSiteInput): RegisterCareerSitePayload =
+    when (val result = registerHandler(RegisterCareerSiteCommand(input.url, input.displayName))) {
+      is RegisterCareerSiteResult.Registered -> RegisterCareerSitePayload(result.site.toDto(), null)
+      is RegisterCareerSiteResult.AlreadyRegistered -> RegisterCareerSitePayload(
+        result.site.toDto(), ApiErrorDto(ApiErrorCode.ALREADY_REGISTERED, "Career site already registered"),
+      )
+      is RegisterCareerSiteResult.InvalidUrl -> errorPayload(ApiErrorCode.INVALID_URL, result.reason)
+      is RegisterCareerSiteResult.InvalidDisplayName -> errorPayload(ApiErrorCode.INVALID_INPUT, result.reason)
+      RegisterCareerSiteResult.UnsupportedProvider -> errorPayload(
+        ApiErrorCode.UNSUPPORTED_PROVIDER, "Unsupported career-site provider",
+      )
+      is RegisterCareerSiteResult.AmbiguousProvider -> RegisterCareerSitePayload(
+        null,
+        ApiErrorDto(ApiErrorCode.AMBIGUOUS_PROVIDER, "Multiple providers matched", result.providers.sortedBy { it.name }),
+      )
+      is RegisterCareerSiteResult.DiscoveryFailed -> errorPayload(ApiErrorCode.DISCOVERY_FAILED, result.reason)
+    }
+
+  suspend fun triggerCrawl(careerSiteId: String): TriggerCrawlPayload {
+    val id = careerSiteId.toLongOrNull()?.takeIf { it > 0 }
+      ?: return TriggerCrawlPayload(
+        CrawlTriggerOutcome.NOT_FOUND,
+        error = ApiErrorDto(ApiErrorCode.INVALID_INPUT, "ID must be a positive integer"),
+      )
+    return when (val result = crawlHandler(CrawlSiteCommand(CareerSiteId(id), CrawlTrigger.MANUAL))) {
+      is CrawlSiteResult.Succeeded -> TriggerCrawlPayload(
+        CrawlTriggerOutcome.SUCCEEDED, result.runId.value.toString(), result.counts,
+      )
+      is CrawlSiteResult.Failed -> TriggerCrawlPayload(
+        CrawlTriggerOutcome.FAILED, result.runId.value.toString(),
+        error = ApiErrorDto(ApiErrorCode.CRAWL_FAILED, result.failure.message),
+      )
+      CrawlSiteResult.NotFound -> simpleCrawlError(CrawlTriggerOutcome.NOT_FOUND, ApiErrorCode.NOT_FOUND)
+      is CrawlSiteResult.NotDue -> TriggerCrawlPayload(
+        CrawlTriggerOutcome.NOT_DUE, nextEligibleAt = result.nextEligibleAt.toString(),
+        error = ApiErrorDto(ApiErrorCode.NOT_DUE, "Career site is not due"),
+      )
+      CrawlSiteResult.Disabled -> simpleCrawlError(CrawlTriggerOutcome.DISABLED, ApiErrorCode.DISABLED)
+      CrawlSiteResult.Busy -> simpleCrawlError(CrawlTriggerOutcome.BUSY, ApiErrorCode.BUSY)
+      is CrawlSiteResult.InfrastructureFailure -> TriggerCrawlPayload(
+        CrawlTriggerOutcome.INFRASTRUCTURE_FAILURE,
+        error = ApiErrorDto(ApiErrorCode.INTERNAL, result.message),
+      )
+    }
+  }
+
+  fun crawlStatuses(): List<CrawlStatusDto> = statusHandler().map { status ->
+    CrawlStatusDto(
+      status.careerSiteId.value.toString(), status.runId?.value?.toString(), status.outcome,
+      status.finishedAt?.toString(), status.failure?.let {
+        ApiErrorDto(ApiErrorCode.CRAWL_FAILED, it.message)
+      },
+    )
+  }
+
+  private fun CareerSite.toDto() = CareerSiteDto(
+    id.value.toString(), canonicalBaseUrl.value.toString(), canonicalBaseUrl.host.value,
+    provider, displayName, crawlSettings.enabled,
+    Math.toIntExact(crawlSettings.successfulInterval.seconds),
+  )
+
+  private fun errorPayload(code: ApiErrorCode, message: String) =
+    RegisterCareerSitePayload(null, ApiErrorDto(code, message))
+
+  private fun simpleCrawlError(outcome: CrawlTriggerOutcome, code: ApiErrorCode) =
+    TriggerCrawlPayload(outcome, error = ApiErrorDto(code, code.name.lowercase().replace('_', ' ')))
+}

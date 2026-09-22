@@ -6,6 +6,7 @@ dependencies {
   implementation(libs.graphql.java)
   testImplementation(libs.kotlin.test.junit5)
   testImplementation(libs.junit.jupiter)
+  testImplementation(libs.kotlinx.coroutines.test)
   testRuntimeOnly(libs.junit.platform.launcher)
 }
 
