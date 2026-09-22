@@ -12,7 +12,7 @@ sealed interface SiteUrlResult {
 @ConsistentCopyVisibility
 data class SiteUrl private constructor(
   val value: URI,
-  val host: String,
+  val host: SiteHost,
 ) {
   companion object {
     fun parse(value: String): SiteUrlResult = runCatching {
@@ -35,9 +35,7 @@ data class SiteUrl private constructor(
         authority.lowercase(),
         IDN.USE_STD3_ASCII_RULES,
       )
-      require(normalizedHost.isNotBlank()) { "URL must contain a host" }
-      require('.' in normalizedHost) { "URL host must be a public DNS name" }
-      require(!IPV4_PATTERN.matches(normalizedHost)) { "URL host must not be an IP address" }
+      val siteHost = SiteHost(normalizedHost)
 
       val normalizedPath = parsed.path.orEmpty().let { path ->
         if (path.length > 1) path.trimEnd('/') else path
@@ -51,14 +49,32 @@ data class SiteUrl private constructor(
         parsed.query,
         null,
       )
-      SiteUrl(canonical, normalizedHost)
+      SiteUrl(canonical, siteHost)
     }.fold(
       onSuccess = SiteUrlResult::Valid,
       onFailure = { error ->
         SiteUrlResult.Invalid(error.message ?: "Invalid career-site URL")
       },
     )
+  }
+}
 
-    private val IPV4_PATTERN = Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}")
+@JvmInline
+value class SiteHost(val value: String) {
+  init {
+    val normalized = runCatching {
+      IDN.toASCII(value.lowercase(), IDN.USE_STD3_ASCII_RULES)
+    }.getOrNull()
+    require(value.isNotBlank() && value == normalized) {
+      "Site host must be a normalized ASCII DNS name"
+    }
+    require('.' in value && ':' !in value && '%' !in value) {
+      "Site host must be a public DNS name"
+    }
+    require(!IPV4_PATTERN.matches(value)) { "Site host must not be an IP address" }
+  }
+
+  private companion object {
+    val IPV4_PATTERN = Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}")
   }
 }

@@ -47,15 +47,15 @@ bootstrap -> adapter-* -> application -> domain
 
 Deliverables:
 
-- [ ] Convert `backend` to a Gradle multi-project build.
-- [ ] Add a version catalog and centralize plugin/dependency versions.
-- [ ] Add empty `domain`, `application`, `adapter-source`,
+- [x] Convert `backend` to a Gradle multi-project build.
+- [x] Add a version catalog and centralize plugin/dependency versions.
+- [x] Add empty `domain`, `application`, `adapter-source`,
       `adapter-persistence`, `adapter-graphql`, and `bootstrap` modules.
-- [ ] Add an architecture test that prevents framework, database, HTTP, and
+- [x] Add an architecture test that prevents framework, database, HTTP, and
       Spring imports from entering `domain`.
-- [ ] Add ADRs for jOOQ/Flyway, error modeling, provider detection, and crawl
+- [x] Add ADRs for jOOQ/Flyway, error modeling, provider detection, and crawl
       policy ownership.
-- [ ] Add CI-compatible `check` tasks for every module.
+- [x] Add CI-compatible `check` tasks for every module.
 
 Exit criteria:
 
@@ -68,19 +68,19 @@ cd backend
 
 Deliverables:
 
-- [ ] Model `CareerSite`, `SiteHost`, `SourceProvider`, `JobPosting`,
+- [x] Model `CareerSite`, `SiteHost`, `SourceProvider`, `JobPosting`,
       `PostingStatus`, identifiers, and normalized posting content as immutable
       Kotlin values.
-- [ ] Validate absolute HTTPS URLs, normalized hosts, and provider-independent
+- [x] Validate absolute HTTPS URLs, normalized hosts, and provider-independent
       posting identity.
-- [ ] Implement the composable `Filter` algebra and in-memory reference
+- [x] Implement the composable `Filter` algebra and in-memory reference
       semantics.
-- [ ] Implement crawl eligibility, retry/backoff, freshness, and close-grace
+- [x] Implement crawl eligibility, retry/backoff, freshness, and close-grace
       policies as pure decisions.
-- [ ] Implement snapshot reconciliation producing a `SyncPlan` with insert,
+- [x] Implement snapshot reconciliation producing a `SyncPlan` with insert,
       update, touch, close, and reopen operations.
-- [ ] Reject suspicious empty snapshots when previously open postings exist.
-- [ ] Unit- and property-test all domain decisions without Spring or a database.
+- [x] Reject suspicious empty snapshots when previously open postings exist.
+- [x] Unit- and property-test all domain decisions without Spring or a database.
 
 Exit criteria:
 

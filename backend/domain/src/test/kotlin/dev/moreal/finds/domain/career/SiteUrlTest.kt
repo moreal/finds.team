@@ -13,7 +13,7 @@ class SiteUrlTest {
 
     val url = assertIs<SiteUrlResult.Valid>(result).url
     assertEquals("https", url.value.scheme)
-    assertEquals("xn--oo5bn6h.example", url.host)
+    assertEquals("xn--oo5bn6h.example", url.host.value)
     assertEquals("/path", url.value.path)
     assertEquals("https://xn--oo5bn6h.example/path", url.value.toASCIIString())
   }
@@ -61,5 +61,13 @@ class SiteUrlTest {
         displayName = " ",
       )
     }
+  }
+
+  @Test
+  fun `site host only accepts normalized public DNS names`() {
+    assertEquals("jobs.example", SiteHost("jobs.example").value)
+    assertFailsWith<IllegalArgumentException> { SiteHost("JOBS.EXAMPLE") }
+    assertFailsWith<IllegalArgumentException> { SiteHost("127.0.0.1") }
+    assertFailsWith<IllegalArgumentException> { SiteHost("localhost") }
   }
 }
