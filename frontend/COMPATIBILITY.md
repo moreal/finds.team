@@ -113,3 +113,69 @@ docker run --rm --init --publish 127.0.0.1:3300:3000 mcr.microsoft.com/playwrigh
 # In another terminal; choose a free local port if 3300 is occupied.
 PW_TEST_CONNECT_WS_ENDPOINT=ws://127.0.0.1:3300/ PW_TEST_CONNECT_EXPOSE_NETWORK='<loopback>' pnpm --dir frontend exec playwright test e2e/kobalte-hydration.spec.ts
 ```
+
+## SOLID-VIRTUAL3-SOLID-RC9
+
+`src/ui/virtual/VirtualList.tsx` uses `@tanstack/virtual-core@3.17.11` with
+Solid 2's `onSettled` lifecycle and two-phase effects. Product code imports only
+this local component. Its public `VirtualListProps<T>` exposes local props and
+Solid JSX types, with no TanStack types. Pass readonly `items`, a positive
+`estimateSize(index)` in pixels, stable unique `getKey(item)` values, and a
+`children(item, index)` renderer.
+
+The exact `@tanstack/solid-virtual@3.13.40` candidate declares `solid-js@^1.3.0`.
+With the package-scoped peer allowance resolving it to `2.0.0-rc.9`, the actual
+production SSR/client browser harness fails during bundling: `"./store" is not
+exported` by Solid 2. The adapter also imports removed `createComputed`,
+`mergeProps`, and `onMount` APIs. It cannot reach hydration on this baseline;
+this is a build incompatibility, not a passing hydration result. No Solid 1
+shim or downgraded runtime is introduced.
+
+The failed adapter is retained only as an exact development dependency and
+reproduction fixture in `src/ui/virtual/__tests__/solid/`. Reproduce the failure:
+
+```sh
+SOLID_VIRTUAL_COMPATIBILITY=1 pnpm --dir frontend exec playwright test e2e/virtual-list.spec.ts
+```
+
+Remove that fixture, development dependency, and scoped peer allowance when a
+Solid 2 adapter passes the same gate. The allowance does not assert production
+compatibility. The existing unrelated peer diagnostics remain unchanged.
+
+The local contract is:
+
+- SSR renders at most the first 20 items in normal flow, with list semantics and
+  full-set positions. It never estimates or measures row geometry, emits inline
+  styles, or creates a virtualizer. Hydration uses those same keys and nodes.
+- After hydration settles, `enabled` still defaults to false. Disabled lists
+  render all supplied items. Callers enable only collections their product
+  measurements justify; the adapter additionally requires more than 20 rows and
+  more than three viewportfuls, computed from actual average rendered row height.
+  Empty, hidden, and unmeasurable lists remain disabled until measurable.
+- Resize observation rechecks the threshold after container/content changes.
+  The core measures variable-height rows and positions them only after activation.
+  Styles use an external stylesheet plus browser CSSOM property assignments,
+  preserving the existing nonce-only CSP. The scroll container has a default
+  `max-height: min(70vh, 40rem)`; a containing stylesheet can size
+  `.ui-virtual-list` for its layout.
+- Keys preserve row DOM across scroll/measurement updates. Five overscan rows
+  surround the visible range. The focused row and its five neighbours on each
+  side remain mounted even when pointer scrolling moves the viewport away;
+  leaving the list releases that retained range. The initial page remains
+  mounted while scrolled to the top.
+- Server pagination remains the caller's responsibility. The initial SSR bound
+  is not a substitute for a server connection page or its continuation controls.
+
+Run the local gate:
+
+```sh
+pnpm --dir frontend test --run src/ui/virtual
+pnpm --dir frontend exec playwright test e2e/virtual-list.spec.ts
+```
+
+The six real-browser cases pass on macOS Chromium and Linux Chromium. They cover
+retained SSR nodes with no diagnostics, caller/measurement gating, growth and
+shrink, disabling, initially empty data, resizing, variable-height end/back
+scrolling, and forward/backward keyboard traversal through 35 rows. All browser
+console warnings/errors fail the gate. The shared fixture also keeps all 16
+native-control browser cases passing on Linux Chromium.

@@ -1,0 +1,5 @@
+.ui-virtual-list { height: 240px; }
+.fixture-row { display: block; box-sizing: border-box; width: 100%; height: 60px; }
+.fixture-height-1 { height: 100px; }
+.fixture-height-2 { height: 140px; }
+.fixture-compact { height: 2px; overflow: hidden; }

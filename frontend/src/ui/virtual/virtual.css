@@ -1,0 +1,14 @@
+.ui-virtual-list {
+  overflow: auto;
+  max-height: min(70vh, 40rem);
+  overflow-anchor: none;
+}
+
+.ui-virtual-canvas { position: relative; }
+.ui-virtual-row { display: flow-root; }
+.ui-virtual-list[data-virtualized="true"] .ui-virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
