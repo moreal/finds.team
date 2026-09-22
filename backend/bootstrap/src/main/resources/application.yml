@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: finds.team
+  datasource:
+    url: ${FINDS_DB_URL:jdbc:postgresql://localhost:5432/finds_team}
+    username: ${FINDS_DB_USER:finds}
+    password: ${FINDS_DB_PASSWORD:finds}
+  flyway:
+    locations: classpath:db/migration
+  task:
+    scheduling:
+      pool:
+        size: 1
+      thread-name-prefix: finds-scheduler-
+
+server:
+  error:
+    whitelabel:
+      enabled: false
+  max-http-request-header-size: 16KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+finds:
+  source:
+    user-agent-product: ${FINDS_USER_AGENT_PRODUCT:finds.team}
+    contact-url: ${FINDS_CONTACT_URL:https://finds.team/contact}
+    connect-timeout: 5s
+    request-timeout: 20s
+    site-timeout: 2m
+    minimum-host-spacing: 1s
+    maximum-response-bytes: 5242880
+    maximum-redirects: 5
+    retry-delays: [1s, 3s]
+    robots-success-ttl: 1h
+    robots-failure-ttl: 5m
+    sitemap-maximum-depth: 4
+    sitemap-maximum-documents: 100
+    sitemap-maximum-urls: 50000
+  crawl:
+    scan-interval: 1m
+    success-interval: 6h
+    failure-retry-interval: 30m
+    lease-duration: 10m
+    dispatch-limit: 100
+    global-concurrency: 4
+    close-after-misses: 2
+

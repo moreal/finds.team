@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: finds_team
+      POSTGRES_USER: finds
+      POSTGRES_PASSWORD: finds
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finds -d finds_team"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - finds-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  finds-postgres-data:
