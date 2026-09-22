@@ -14,7 +14,7 @@ interface CareerSiteRepository {
 
   fun insert(site: NewCareerSite): InsertCareerSiteResult
 
-  fun findEnabled(limit: Int): List<CareerSite>
+  fun findEnabled(): List<CareerSite>
 }
 
 sealed interface InsertCareerSiteResult {

@@ -33,7 +33,7 @@ class FakeCareerSiteRepository(
   initialSites: List<CareerSite> = emptyList(),
 ) : CareerSiteRepository {
   val sites: MutableList<CareerSite> = initialSites.toMutableList()
-  val enabledLimits = mutableListOf<Int>()
+  var enabledQueries: Int = 0
   var nextInsertResult: InsertCareerSiteResult? = null
   private var nextId = (initialSites.maxOfOrNull { it.id.value } ?: 0) + 1
 
@@ -59,9 +59,9 @@ class FakeCareerSiteRepository(
     return InsertCareerSiteResult.Inserted(inserted)
   }
 
-  override fun findEnabled(limit: Int): List<CareerSite> {
-    enabledLimits += limit
-    return sites.filter { it.crawlSettings.enabled }.take(limit)
+  override fun findEnabled(): List<CareerSite> {
+    enabledQueries += 1
+    return sites.filter { it.crawlSettings.enabled }
   }
 }
 
