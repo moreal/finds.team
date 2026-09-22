@@ -114,20 +114,20 @@ cd backend
 
 Deliverables:
 
-- [ ] Implement an RFC 9309 robots.txt client with bounded caching and explicit
+- [x] Implement an RFC 9309 robots.txt client with bounded caching and explicit
       allow/deny/unavailable decisions.
-- [ ] Implement sitemap URL-set and sitemap-index parsing, including recursive
+- [x] Implement sitemap URL-set and sitemap-index parsing, including recursive
       indexes, same-site validation, limits, and optional `lastmod` metadata.
-- [ ] Implement per-host request serialization, minimum request spacing,
+- [x] Implement per-host request serialization, minimum request spacing,
       timeouts, response-size limits, redirects, and an identifying User-Agent.
-- [ ] Migrate Flex parsing to `FlexSourceAdapter` returning `RawPosting` values.
-- [ ] Migrate Greeting parsing to `GreetingSourceAdapter` returning
+- [x] Migrate Flex parsing to `FlexSourceAdapter` returning `RawPosting` values.
+- [x] Migrate Greeting parsing to `GreetingSourceAdapter` returning
       `RawPosting` values.
-- [ ] Implement `NinehireSourceAdapter` for `*.ninehire.site`, including
+- [x] Implement `NinehireSourceAdapter` for `*.ninehire.site`, including
       `/job_posting/{externalKey}` URLs and custom-domain fingerprinting.
-- [ ] Store sanitized response fixtures and keep live network tests excluded
+- [x] Store sanitized response fixtures and keep live network tests excluded
       from normal CI.
-- [ ] Make provider adapters incapable of deciding crawl cadence, retries, or
+- [x] Make provider adapters incapable of deciding crawl cadence, retries, or
       posting closure.
 
 Exit criteria:
@@ -188,6 +188,8 @@ Deliverables:
       controls each site's actual recrawl cadence.
 - [ ] Bound global and per-host concurrency and acquire database-backed crawl
       leases before fetching.
+- [ ] Enforce deployment-level outbound network policy as defense in depth
+      against DNS rebinding, in addition to source-layer DNS validation.
 - [ ] Expose configuration for crawl interval, timeouts, concurrency, request
       spacing, close grace, User-Agent, and contact URL.
 - [ ] Provide Docker Compose for local PostgreSQL and documented run commands.
