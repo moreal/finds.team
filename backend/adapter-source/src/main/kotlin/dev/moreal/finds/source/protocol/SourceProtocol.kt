@@ -27,7 +27,7 @@ data class SourceProtocolSettings(
       "Response byte limit must be between 1 and $MAX_RESPONSE_BYTES"
     }
     require(maxRedirects in 0..10) { "Redirect limit must be between 0 and 10" }
-    requirePositiveBounded(robotsSuccessTtl, Duration.ofDays(7), "Robots success TTL")
+    requirePositiveBounded(robotsSuccessTtl, Duration.ofHours(24), "Robots success TTL")
     requirePositiveBounded(
       robotsUnavailableTtl,
       Duration.ofHours(1),
