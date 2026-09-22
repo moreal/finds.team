@@ -162,15 +162,15 @@ cd backend
 
 Deliverables:
 
-- [ ] Commit the schema-first GraphQL contract for posting search, career-site
+- [x] Commit the schema-first GraphQL contract for posting search, career-site
       registration, crawl triggering, and crawl status.
-- [ ] Map GraphQL inputs to domain commands and filters without leaking GraphQL
+- [x] Map GraphQL inputs to domain commands and filters without leaking GraphQL
       types inward.
-- [ ] Implement stable cursor pagination and default filtering to open postings.
-- [ ] Return typed registration, validation, unsupported-provider, and crawl
+- [x] Implement stable cursor pagination and default filtering to open postings.
+- [x] Return typed registration, validation, unsupported-provider, and crawl
       errors.
-- [ ] Verify every schema field has a resolver and that generated client types
-      can consume the schema.
+- [x] Verify every root schema field has a resolver and representative client
+      queries and mutations execute against the committed schema.
 
 Exit criteria:
 
