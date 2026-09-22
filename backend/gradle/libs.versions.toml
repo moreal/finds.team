@@ -23,6 +23,8 @@ spring-boot-data-jpa-test = { module = "org.springframework.boot:spring-boot-dat
 h2 = { module = "com.h2database:h2" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+ktor-client-encoding = { module = "io.ktor:ktor-client-encoding", version.ref = "ktor" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 
