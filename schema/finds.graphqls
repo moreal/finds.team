@@ -1,0 +1,115 @@
+scalar DateTime
+
+enum SourceProvider { FLEX GREETING NINEHIRE }
+enum PostingStatus { OPEN CLOSED }
+enum CrawlOutcome { SUCCESS FAILED }
+
+enum ApiErrorCode {
+  INVALID_INPUT
+  INVALID_URL
+  UNSUPPORTED_PROVIDER
+  AMBIGUOUS_PROVIDER
+  DISCOVERY_FAILED
+  ALREADY_REGISTERED
+  NOT_FOUND
+  NOT_DUE
+  DISABLED
+  BUSY
+  CRAWL_FAILED
+  INTERNAL
+}
+
+type ApiError {
+  code: ApiErrorCode!
+  message: String!
+  providers: [SourceProvider!]!
+}
+
+input PostingFilterInput {
+  atSite: ID
+  textContains: String
+  hasStatus: PostingStatus
+  updatedAfter: DateTime
+  not: PostingFilterInput
+  all: [PostingFilterInput!]
+  any: [PostingFilterInput!]
+}
+
+type JobPosting {
+  id: ID!
+  careerSiteId: ID!
+  externalKey: String!
+  title: String!
+  descriptionText: String!
+  canonicalUrl: String!
+  status: PostingStatus!
+  employmentHint: String
+  locationHint: String
+  remoteHint: String
+  sourceUpdatedAt: DateTime
+  firstSeenAt: DateTime!
+  lastSeenAt: DateTime!
+  updatedAt: DateTime!
+  closedAt: DateTime
+}
+
+type JobPostingEdge { cursor: String!, node: JobPosting! }
+type PageInfo { hasNextPage: Boolean!, endCursor: String }
+type JobPostingConnection {
+  edges: [JobPostingEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type CareerSite {
+  id: ID!
+  canonicalBaseUrl: String!
+  host: String!
+  provider: SourceProvider!
+  displayName: String!
+  enabled: Boolean!
+  successfulIntervalSeconds: Int!
+}
+
+input RegisterCareerSiteInput { url: String!, displayName: String! }
+type RegisterCareerSitePayload { site: CareerSite, error: ApiError }
+
+enum CrawlTriggerOutcome {
+  SUCCEEDED FAILED NOT_FOUND NOT_DUE DISABLED BUSY INFRASTRUCTURE_FAILURE
+}
+
+type CrawlChangeCounts {
+  fetched: Int!
+  inserted: Int!
+  updated: Int!
+  touched: Int!
+  missing: Int!
+  closed: Int!
+  reopened: Int!
+}
+
+type TriggerCrawlPayload {
+  outcome: CrawlTriggerOutcome!
+  runId: ID
+  counts: CrawlChangeCounts
+  nextEligibleAt: DateTime
+  error: ApiError
+}
+
+type CrawlStatus {
+  careerSiteId: ID!
+  runId: ID
+  outcome: CrawlOutcome
+  finishedAt: DateTime
+  error: ApiError
+}
+
+type Query {
+  jobPostings(filter: PostingFilterInput, first: Int = 20, after: String): JobPostingConnection!
+  crawlStatuses: [CrawlStatus!]!
+}
+
+type Mutation {
+  registerCareerSite(input: RegisterCareerSiteInput!): RegisterCareerSitePayload!
+  triggerCrawl(careerSiteId: ID!): TriggerCrawlPayload!
+}
