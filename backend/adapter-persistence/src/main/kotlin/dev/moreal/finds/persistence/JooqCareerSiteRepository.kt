@@ -14,8 +14,6 @@ import dev.moreal.finds.persistence.jooq.generated.tables.records.CareerSitesRec
 import dev.moreal.finds.persistence.jooq.generated.tables.references.CAREER_SITES
 import java.time.Duration
 import org.jooq.DSLContext
-import org.jooq.exception.DataAccessException
-import org.postgresql.util.PSQLException
 
 class JooqCareerSiteRepository(
   private val context: DSLContext,
@@ -32,28 +30,26 @@ class JooqCareerSiteRepository(
       .fetchOne()
       ?.toDomain()
 
-  override fun insert(site: NewCareerSite): InsertCareerSiteResult = try {
-    val record = requireNotNull(
-      context.insertInto(CAREER_SITES)
-        .set(CAREER_SITES.CANONICAL_BASE_URL, site.canonicalBaseUrl.value.toString())
-        .set(CAREER_SITES.HOST, site.canonicalBaseUrl.host.value)
-        .set(CAREER_SITES.PROVIDER, site.provider.name)
-        .set(CAREER_SITES.DISPLAY_NAME, site.displayName)
-        .set(CAREER_SITES.ENABLED, site.crawlSettings.enabled)
-        .set(
-          CAREER_SITES.SUCCESSFUL_INTERVAL_SECONDS,
-          site.crawlSettings.successfulInterval.seconds,
-        )
-        .returning()
-        .fetchOne(),
-    ) { "Career-site insert returned no row" }
-    InsertCareerSiteResult.Inserted(record.toDomain())
-  } catch (error: DataAccessException) {
-    if (error.constraintName() != HOST_UNIQUE_CONSTRAINT) throw error
+  override fun insert(site: NewCareerSite): InsertCareerSiteResult {
+    val record = context.insertInto(CAREER_SITES)
+      .set(CAREER_SITES.CANONICAL_BASE_URL, site.canonicalBaseUrl.value.toString())
+      .set(CAREER_SITES.HOST, site.canonicalBaseUrl.host.value)
+      .set(CAREER_SITES.PROVIDER, site.provider.name)
+      .set(CAREER_SITES.DISPLAY_NAME, site.displayName)
+      .set(CAREER_SITES.ENABLED, site.crawlSettings.enabled)
+      .set(
+        CAREER_SITES.SUCCESSFUL_INTERVAL_SECONDS,
+        site.crawlSettings.successfulInterval.seconds,
+      )
+      .onConflict(CAREER_SITES.HOST)
+      .doNothing()
+      .returning()
+      .fetchOne()
+    if (record != null) return InsertCareerSiteResult.Inserted(record.toDomain())
     val existing = requireNotNull(findByHost(site.canonicalBaseUrl.host)) {
       "Host uniqueness failed but existing career site was not found"
     }
-    InsertCareerSiteResult.Duplicate(existing)
+    return InsertCareerSiteResult.Duplicate(existing)
   }
 
   override fun findEnabled(): List<CareerSite> =
@@ -76,15 +72,4 @@ class JooqCareerSiteRepository(
       enabled = requireNotNull(enabled),
     ),
   )
-
-  private fun DataAccessException.constraintName(): String? =
-    generateSequence<Throwable>(this) { it.cause }
-      .filterIsInstance<PSQLException>()
-      .firstOrNull()
-      ?.serverErrorMessage
-      ?.constraint
-
-  private companion object {
-    const val HOST_UNIQUE_CONSTRAINT = "uq_career_sites_host"
-  }
 }

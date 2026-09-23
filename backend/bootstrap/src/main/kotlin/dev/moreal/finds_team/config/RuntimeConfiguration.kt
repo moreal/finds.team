@@ -8,6 +8,8 @@ import dev.moreal.finds.application.port.PostingRepository
 import dev.moreal.finds.application.port.SourceDiscoveryPort
 import dev.moreal.finds.application.port.SourceFetchPort
 import dev.moreal.finds.application.port.SuccessfulCrawlPort
+import dev.moreal.finds.application.port.TransactionPort
+import dev.moreal.finds.application.port.MailPayloadCrypto
 import dev.moreal.finds.application.usecase.CrawlAllDue
 import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
@@ -23,6 +25,7 @@ import dev.moreal.finds.persistence.JooqCrawlLeasePort
 import dev.moreal.finds.persistence.JooqCrawlRunRepository
 import dev.moreal.finds.persistence.JooqPostingRepository
 import dev.moreal.finds.persistence.JooqSuccessfulCrawlAdapter
+import dev.moreal.finds.persistence.JooqTransactionAdapter
 import dev.moreal.finds.source.SourceGateway
 import dev.moreal.finds.source.protocol.DestinationPolicy
 import dev.moreal.finds.source.protocol.JvmHostResolver
@@ -47,6 +50,7 @@ import org.jooq.impl.DSL
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.DependsOn
+import org.springframework.beans.factory.ObjectProvider
 import java.time.Instant
 import javax.sql.DataSource
 
@@ -58,6 +62,10 @@ class RuntimeConfiguration {
 
   @Bean
   fun careerSites(context: DSLContext): CareerSiteRepository = JooqCareerSiteRepository(context)
+
+  @Bean
+  fun transactions(context: DSLContext, crypto: ObjectProvider<MailPayloadCrypto>): TransactionPort =
+    JooqTransactionAdapter(context) { crypto.getIfAvailable() }
 
   @Bean
   fun postings(context: DSLContext): PostingRepository = JooqPostingRepository(context)

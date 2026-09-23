@@ -12,6 +12,7 @@ dependencies {
   implementation(libs.flyway.core)
   implementation(libs.flyway.postgresql)
   implementation(libs.postgresql)
+  implementation(libs.kotlinx.serialization.json)
   testImplementation(libs.kotlin.test.junit5)
   testImplementation(libs.junit.jupiter)
   testImplementation(libs.postgresql)

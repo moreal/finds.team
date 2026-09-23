@@ -5,6 +5,7 @@ import dev.moreal.finds.application.port.ProviderDiscoveryResult
 import dev.moreal.finds.application.port.SourceDiscoveryPort
 import dev.moreal.finds.application.port.SourceFetchPort
 import dev.moreal.finds.application.port.SourceFetchResult
+import dev.moreal.finds.application.port.TransactionPort
 import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
 import dev.moreal.finds.application.usecase.RegisterCareerSite
@@ -58,6 +59,7 @@ class BootstrapVerticalSliceTest {
         "--finds.crawl.scan-interval=1h",
       )
       .use { context ->
+        context.getBean(TransactionPort::class.java).execute { it.careerSites.findEnabled() }
         val result = context.getBean(graphql.GraphQL::class.java).execute(
           "{ jobPostings { totalCount } crawlStatuses { careerSiteId } }",
         ).requireSuccess()
