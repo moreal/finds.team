@@ -76,6 +76,9 @@ test("ArrowDown and Enter commit a typed select value after hydration", async ({
   // Kobalte's first ArrowDown opens its listbox at the current selection;
   // a native select moves to the next option immediately on Linux.
   if (info.project.name === "kobalte-alpha") await page.keyboard.press("ArrowDown");
+  // macOS headless Chromium does not navigate its native popup with arrows
+  // (also reproduced with a plain HTML select). Native typeahead still works.
+  if (process.platform === "darwin" && info.project.name !== "kobalte-alpha") await page.keyboard.press("e");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("status", { name: "Selected role" })).toHaveText("Engineering");
   expect(await control.evaluate((node) => new FormData((node as HTMLSelectElement).form!).get("role"))).toBe("engineering");

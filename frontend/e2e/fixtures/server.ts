@@ -19,6 +19,8 @@ async function bundle(server: boolean, fixture = "controls") {
         "../../src/ui/virtual/VirtualList": resolve(import.meta.dirname, "../../src/ui/virtual/__tests__/solid/VirtualList.tsx"),
       } : {}),
       ...(process.env.KOBALTE_COMPATIBILITY === "1" ? {
+        "./kobalte/Dialog": resolve(import.meta.dirname, "../../src/ui/kobalte/__tests__/alpha/Dialog.tsx"),
+        "./kobalte/Select": resolve(import.meta.dirname, "../../src/ui/kobalte/__tests__/alpha/Select.tsx"),
         "../../src/ui/kobalte/Dialog": resolve(import.meta.dirname, "../../src/ui/kobalte/__tests__/alpha/Dialog.tsx"),
         "../../src/ui/kobalte/Select": resolve(import.meta.dirname, "../../src/ui/kobalte/__tests__/alpha/Select.tsx"),
       } : {}),
@@ -44,6 +46,9 @@ const { renderControls } = await import(`data:text/javascript;base64,${Buffer.fr
 const [virtualServerCode, virtualClientCode] = await Promise.all([bundle(true, "virtual"), bundle(false, "virtual")]);
 const { renderControls: renderVirtual } = await import(`data:text/javascript;base64,${Buffer.from(virtualServerCode).toString("base64")}`);
 const css = await readFile(new URL("../../src/ui/kobalte/kobalte.css", import.meta.url), "utf8")
+  + await readFile(new URL("../../src/ui/tokens.css", import.meta.url), "utf8")
+  + (await readFile(new URL("../../src/ui/foundations.css", import.meta.url), "utf8")).replace(/@import[^;]+;/g, "")
+  + (await readFile(new URL("../../src/ui/composites.css", import.meta.url), "utf8")).replace(/@import[^;]+;/g, "")
   + await readFile(new URL("regression.css", import.meta.url), "utf8");
 const virtualCss = await readFile(new URL("../../src/ui/virtual/virtual.css", import.meta.url), "utf8")
   + await readFile(new URL("virtual.css", import.meta.url), "utf8");

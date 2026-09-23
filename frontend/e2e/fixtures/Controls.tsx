@@ -1,7 +1,8 @@
 import { createSignal } from "solid-js";
 
-import { Dialog } from "../../src/ui/kobalte/Dialog";
-import { Select } from "../../src/ui/kobalte/Select";
+import { Dialog } from "../../src/ui/Dialog";
+import { Select } from "../../src/ui/Select";
+import { CompositeControls } from "./CompositeControls";
 import { RegressionControls } from "./RegressionControls";
 
 export function Controls() {
@@ -29,6 +30,7 @@ export function Controls() {
       <output aria-label="Controlled dialog state">{open() ? "open" : "closed"}</output>
       <button type="button">After controls</button>
       <RegressionControls />
+      <CompositeControls />
     </main>
   );
 }
