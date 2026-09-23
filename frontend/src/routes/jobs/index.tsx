@@ -1,9 +1,10 @@
-import { createFileRoute, useRouter } from "@tanstack/solid-router";
+import { createFileRoute, useLocation, useRouter } from "@tanstack/solid-router";
 import { createSignal, For, onSettled } from "solid-js";
 import { FilterBuilder } from "../../features/postings/FilterBuilder";
 import { JobsConnection } from "../../features/postings/JobsConnection";
 import { loadJobsPage } from "../../features/postings/JobsPageQuery";
 import { parseJobSearch } from "../../features/postings/filterCodec";
+import type { ParseResult } from "../../features/postings/filterSchema";
 import { Dialog } from "../../ui/Dialog";
 import { Link } from "../../ui/Link";
 import { AsyncState } from "../../ui/AsyncState";
@@ -41,8 +42,12 @@ export const Route = createFileRoute("/jobs/")({
 function JobsPage() {
   const result = Route.useLoaderData();
   const router = useRouter();
+  const location = useLocation();
   const [open, setOpen] = createSignal(false);
-  const [corrections] = createSignal(result().corrections.join(" "));
+  const corrections = () => {
+    const state = location().state as { jobsCorrections?: string[] };
+    return (state.jobsCorrections ?? result().corrections).join(" ");
+  };
   const constraints = () => [...new URLSearchParams(result().canonicalSearch)].filter(([key]) => key !== "order");
   const labels: Record<string, string> = { q: "검색어", skill: "기술", role: "직무", employment: "고용 형태", remote: "원격 근무", site: "회사", updated: "업데이트" };
   function remove(index: number) {
@@ -52,10 +57,13 @@ function JobsPage() {
     const next = new URLSearchParams(entries.filter(([key, value]) => key !== target[0] || value !== target[1])).toString();
     return `/jobs${next ? `?${next}` : ""}`;
   }
-  function navigate(search: string) {
+  function navigate(search: string, corrections: string[] = []) {
     setOpen(false);
-    void router.navigate({ href: `/jobs${search}`, resetScroll: false });
+    void router.navigate({ href: `/jobs${search}`, resetScroll: false,
+      state: previous => ({ ...previous, jobsCorrections: corrections }),
+    });
   }
+  const apply = (parsed: ParseResult) => navigate(parsed.canonicalSearch, parsed.corrections);
   onSettled(() => {
     if (window.location.search !== result().canonicalSearch) {
       // Repair the address without reloading the already validated operation.
@@ -64,12 +72,12 @@ function JobsPage() {
   });
   return <main class="jobs-page">
     <header class="jobs-header"><Link href="/jobs">finds.team</Link><h1>다음 기회를 발견하세요.</h1><p>관심 있는 기술과 일하는 방식으로 채용 공고를 찾아보세요.</p></header>
-    <p role="status" aria-live="polite" class="jobs-correction">{corrections()}</p>
+    <p role="status" aria-live="polite" aria-atomic="true" class="jobs-correction">{corrections()}</p>
     <div class="jobs-mobile-filter"><Dialog trigger="필터 열기" title="공고 필터" closeLabel="닫기" open={open()} onOpenChange={setOpen}>
-      <FilterBuilder state={result().state} onApply={navigate} />
+      <FilterBuilder state={result().state} onApply={apply} />
     </Dialog></div>
     <div class="jobs-layout">
-      <aside class="jobs-desktop-filter" aria-label="공고 필터"><h2>필터</h2><FilterBuilder state={result().state} onApply={navigate} /></aside>
+      <aside class="jobs-desktop-filter" aria-label="공고 필터"><h2>필터</h2><FilterBuilder state={result().state} onApply={apply} /></aside>
       <div class="jobs-results">
         <ul class="jobs-constraints" aria-label="적용한 조건"><For each={constraints()}>{([key, value], index) => <li><Link href={remove(index())}>{labels[key] ?? key}: {value} 해제</Link></li>}</For></ul>
         <JobsConnection variables={result().variables} failure={result().failure} constraints={constraints().map(([key, value]) => `${labels[key]}: ${value}`).join(" · ")} onClear={() => navigate("")} />

@@ -2,7 +2,7 @@ import type { JSX } from "@solidjs/web";
 import { Button } from "./Button";
 import { Skeleton } from "./Skeleton";
 
-export type AsyncStateKind = "pending" | "pagination-pending" | "empty" | "filtered-empty" | "error" | "unauthorized" | "forbidden" | "data";
+export type AsyncStateKind = "pending" | "pagination-pending" | "empty" | "filtered-empty" | "validation" | "error" | "unauthorized" | "forbidden" | "data";
 export interface AsyncStateProps {
   state: AsyncStateKind;
   children?: JSX.Element;
@@ -19,6 +19,7 @@ const messages = {
   "pagination-pending": "공고를 더 불러오는 중이에요.",
   empty: "아직 공고가 없어요.",
   "filtered-empty": "선택한 조건에 맞는 공고가 없어요.",
+  validation: "검색 조건을 확인해 주세요.",
   error: "공고를 불러오지 못했어요.",
   unauthorized: "로그인이 필요해요.",
   forbidden: "접근 권한이 없어요.",
@@ -31,10 +32,11 @@ export function AsyncState(props: AsyncStateProps) {
     {props.state !== "data" && <div class="ui-async-message" role="status" aria-live="polite" aria-atomic="true">
       <p>{messages[props.state]}</p>
       {props.state === "filtered-empty" && <p class="ui-muted">{props.constraints}</p>}
+      {props.state === "validation" && <p class="ui-muted">조건을 수정하거나 해제한 뒤 다시 검색해 주세요.</p>}
       {props.state === "error" && props.correlationId && <p class="ui-muted">문의 번호: <code>{props.correlationId}</code></p>}
     </div>}
     {props.state === "pending" && (props.skeleton ?? <Skeleton shape="card" />)}
     {props.state === "error" && props.onRetry && <Button variant="secondary" onClick={props.onRetry}>다시 시도</Button>}
-    {props.state === "filtered-empty" && props.onClearFilters && <Button variant="secondary" onClick={props.onClearFilters}>조건 해제</Button>}
+    {(props.state === "filtered-empty" || props.state === "validation") && props.onClearFilters && <Button variant="secondary" onClick={props.onClearFilters}>조건 해제</Button>}
   </div>;
 }

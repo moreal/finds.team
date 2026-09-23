@@ -22,5 +22,11 @@ it("submitting controls removes empty values and keeps repeated skills", () => {
   data.set("remote", "");
   data.append("skill", "kotlin:required");
   data.append("skill", "-java");
-  expect(jobSearchFromForm(data)).toBe("?q=platform&skill=kotlin%3Arequired&skill=-java");
+  expect(jobSearchFromForm(data).canonicalSearch).toBe("?q=platform&skill=kotlin%3Arequired&skill=-java");
+});
+
+it("keeps invalid skill corrections alongside the canonical form destination", () => {
+  const data = new FormData();
+  data.set("skill", "kotlin:invalid");
+  expect(jobSearchFromForm(data)).toMatchObject({ canonicalSearch: "", corrections: ["Removed an invalid skill filter."] });
 });

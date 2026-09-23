@@ -115,3 +115,42 @@ test("authorization and invalid-filter errors have distinct safe states", async 
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, follow");
   await expect(page.getByText("Private diagnostic")).toHaveCount(0);
 });
+
+for (const mobile of [false, true]) {
+  test(`${mobile ? "mobile" : "desktop"} announces subsequent invalid form corrections and clears stale notices`, async ({ page }) => {
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/jobs");
+    const controls = mobile ? page.getByRole("dialog", { name: "공고 필터" }) : page.getByRole("complementary");
+    const submit = async (skill: string, text: string) => {
+      if (mobile) await page.getByRole("button", { name: "필터 열기" }).click();
+      await controls.getByLabel("기술 추가", { exact: true }).fill(skill);
+      await controls.getByLabel("검색어", { exact: true }).fill(text);
+      await controls.getByRole("button", { name: "필터 적용", exact: true }).click();
+    };
+    const notice = page.getByRole("status").filter({ hasText: "Removed an invalid skill filter." });
+    await submit("kotlin:invalid", "");
+    await expect(page).toHaveURL(/\/jobs$/);
+    await expect(notice).toBeVisible();
+    await submit("", "valid");
+    await expect(page).toHaveURL(/\?q=valid$/);
+    await expect(notice).toHaveCount(0);
+    await submit("java:invalid", "changed");
+    await expect(page).toHaveURL(/\?q=changed$/);
+    await expect(notice).toBeVisible();
+    if (mobile) await expect(page.getByRole("button", { name: "필터 열기" })).toBeFocused();
+  });
+}
+
+for (const code of ["INVALID_FILTER", "UNKNOWN_SKILL", "INVALID_INPUT"]) {
+  test(`${code} explains validation and offers condition removal without a network retry`, async ({ page }) => {
+    await page.goto(`/jobs?q=${code}`);
+    await expect(page.getByText("검색 조건을 확인해 주세요.", { exact: true })).toBeVisible();
+    await expect(page.getByText("공고를 불러오지 못했어요.", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "다시 시도", exact: true })).toHaveCount(0);
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, follow");
+    await expect(page.getByText("Private diagnostic")).toHaveCount(0);
+    await page.getByRole("button", { name: "조건 해제", exact: true }).click();
+    await expect(page).toHaveURL(/\/jobs$/);
+    await expect(page.getByRole("heading", { name: "Backend engineer 1", exact: true })).toBeVisible();
+  });
+}

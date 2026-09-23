@@ -60,6 +60,26 @@ test("the built jobs document renders Relay data from the internal endpoint", as
   assert.doesNotMatch(html, /session=built-ssr/);
 });
 
+for (const code of ["INVALID_FILTER", "UNKNOWN_SKILL", "INVALID_INPUT"]) {
+  test(`the built jobs document renders ${code} as actionable validation`, async (t) => {
+    const previous = process.env.FINDS_INTERNAL_GRAPHQL_URL;
+    process.env.FINDS_INTERNAL_GRAPHQL_URL = "http://jobs-backend.test/graphql";
+    t.after(() => { if (previous === undefined) delete process.env.FINDS_INTERNAL_GRAPHQL_URL; else process.env.FINDS_INTERNAL_GRAPHQL_URL = previous; });
+    t.mock.method(globalThis, "fetch", async () => Response.json({ data: { jobPostings: {
+      edges: [], totalCount: 0, error: { code, message: "Private provider detail" },
+      pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null },
+    } } }));
+    const response = await handleRequest(new Request(`https://finds.team/jobs?q=${code}`));
+    const document = new JSDOM(await response.text()).window.document;
+    assert.match(document.querySelector('section[aria-label="검색 결과"]')?.textContent ?? "", /검색 조건을 확인해 주세요/);
+    const actions = [...document.querySelectorAll("button")].map(button => button.textContent);
+    assert.ok(actions.includes("조건 해제"));
+    assert.ok(!actions.includes("다시 시도"));
+    assert.doesNotMatch(document.querySelector("main")?.textContent ?? "", /Private provider detail|공고를 불러오지 못했어요/);
+    assert.equal(document.querySelector('meta[name="robots"]')?.getAttribute("content"), "noindex, follow");
+  });
+}
+
 test("the built handler applies a unique strict CSP nonce to every script", async () => {
   const [first, second] = await Promise.all([renderRoot(), renderRoot()]);
   const firstPolicy = first.response.headers.get("content-security-policy");

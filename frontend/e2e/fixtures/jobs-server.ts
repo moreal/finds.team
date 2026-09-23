@@ -16,9 +16,10 @@ createServer(async (req, res) => {
     if (text === "network-failure") { res.writeHead(503); res.end(); return; }
     if (text === "pagination-failure" && variables.after) { res.writeHead(503); res.end(); return; }
     if (text === "unauthorized" || text === "forbidden") { res.writeHead(text === "unauthorized" ? 401 : 403); res.end(); return; }
-    if (text === "invalid" || (text === "retry-connection" && requests.filter(entry => entry.variables.filter?.all?.some((part: any) => part.textContains === text)).length === 1)) {
+    const validationCode = ["INVALID_FILTER", "UNKNOWN_SKILL", "INVALID_INPUT"].includes(text) ? text : text === "invalid" ? "INVALID_FILTER" : undefined;
+    if (validationCode || (text === "retry-connection" && requests.filter(entry => entry.variables.filter?.all?.some((part: any) => part.textContains === text)).length === 1)) {
       res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ data: { jobPostings: { edges: [], totalCount: 0, error: { code: text === "invalid" ? "INVALID_FILTER" : "INTERNAL", message: "Private diagnostic" }, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null } } } }));
+      res.end(JSON.stringify({ data: { jobPostings: { edges: [], totalCount: 0, error: { code: validationCode ?? "INTERNAL", message: "Private diagnostic" }, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null } } } }));
       return;
     }
     const empty = text === "nothing" || text === "empty" || req.headers.cookie?.includes("jobs-empty=1");

@@ -5,7 +5,8 @@ import { VirtualList } from "../../ui/virtual/VirtualList";
 import type { DiscoveryOperations_job$data } from "../../__generated__/DiscoveryOperations_job.graphql";
 import { ConnectionList } from "./ConnectionList";
 import { PostingCard } from "./PostingCard";
-import { fetchJobs, jobsFailure, jobsOperation, readJobs, type JobsVariables, type JobsFailure } from "./JobsPageQuery";
+import { fetchJobs, jobsFailure, jobsConnectionFailure, jobsOperation, readJobs, type JobsVariables, type JobsFailure } from "./JobsPageQuery";
+import { AsyncState } from "../../ui/AsyncState";
 
 function JobCard(props: { item: DiscoveryOperations_job$data }) {
   const employment: Record<string, string> = { FULL_TIME: "정규직", PART_TIME: "시간제", CONTRACT: "계약직", INTERNSHIP: "인턴", UNKNOWN: "고용 형태 미분류" };
@@ -51,7 +52,7 @@ export function JobsConnection(props: { variables: JobsVariables; failure?: Jobs
       await fetchJobs(environment(), { ...variables, ...(retry ? {} : { after: data().connection?.pageInfo.endCursor }) }, true);
       if (!disposed && variables === props.variables) {
         const code = readJobs(environment(), variables).connection?.error?.code;
-        if (code) setFailure(code === "FORBIDDEN" ? { kind: "forbidden" } : jobsFailure(code));
+        if (code) setFailure(jobsConnectionFailure(code));
       }
     } catch (error) { if (!disposed && variables === props.variables) setFailure(jobsFailure(error)); }
     finally { if (!disposed && variables === props.variables) { setPending(false); setRevision(value => value + 1); } }
@@ -69,8 +70,10 @@ export function JobsConnection(props: { variables: JobsVariables; failure?: Jobs
           {item => <JobCard item={item()} />}
         </VirtualList> : undefined} />
     </div>
-    {hasError() && data().items.length > 0 && <div role="status"><p>다음 공고를 불러오지 못했어요. 기존 결과는 유지돼요.</p>
+    {hasError() && data().items.length > 0 && (failure()?.kind === "validation"
+      ? <AsyncState state="validation" onClearFilters={props.onClear} />
+      : <div role="status"><p>다음 공고를 불러오지 못했어요. 기존 결과는 유지돼요.</p>
       {failure()?.correlationId && <p>문의 번호: <code>{failure()!.correlationId}</code></p>}
-      <Button variant="secondary" onClick={() => void loadMore()}>다시 시도</Button></div>}
+      <Button variant="secondary" onClick={() => void loadMore()}>다시 시도</Button></div>)}
   </section>;
 }

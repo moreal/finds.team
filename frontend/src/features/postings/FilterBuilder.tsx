@@ -2,12 +2,12 @@ import { createUniqueId, For } from "solid-js";
 import { Button } from "../../ui/Button";
 import { TextField } from "../../ui/TextField";
 import { parseJobSearch, serializeJobSearch } from "./filterCodec";
-import type { JobSearchState } from "./filterSchema";
+import type { JobSearchState, ParseResult } from "./filterSchema";
 
-export function jobSearchFromForm(data: FormData): string {
+export function jobSearchFromForm(data: FormData): ParseResult {
   const params = new URLSearchParams();
   for (const [key, value] of data) if (typeof value === "string" && value.trim()) params.append(key, value);
-  return parseJobSearch(params.toString()).canonicalSearch;
+  return parseJobSearch(params.toString());
 }
 
 const choices = [
@@ -18,7 +18,7 @@ const choices = [
   ["order", "정렬", ["updated-desc"], ["최근 업데이트순"]],
 ] as const;
 
-export function FilterBuilder(props: { state: JobSearchState; onApply?: (search: string) => void }) {
+export function FilterBuilder(props: { state: JobSearchState; onApply?: (result: ParseResult) => void }) {
   const id = createUniqueId();
   const params = () => new URLSearchParams(serializeJobSearch(props.state));
   return <form method="get" action="/jobs" class="jobs-filter" onSubmit={(event) => {

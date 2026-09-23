@@ -13,7 +13,13 @@ export function jobsOperation(variables: JobsVariables) {
   return createOperationDescriptor(getRequest(jobsQuery), variables);
 }
 
-export type JobsFailure = { kind: "error" | "unauthorized" | "forbidden"; correlationId?: string };
+export type JobsFailure = { kind: "error" | "unauthorized" | "forbidden" | "validation"; correlationId?: string };
+export function jobsConnectionFailure(code: string | undefined): JobsFailure | undefined {
+  if (!code) return undefined;
+  if (code === "INVALID_FILTER" || code === "UNKNOWN_SKILL" || code === "INVALID_INPUT") return { kind: "validation" };
+  if (code === "FORBIDDEN") return { kind: "forbidden" };
+  return jobsFailure(code);
+}
 export function jobsFailure(error: unknown): JobsFailure {
   if (error instanceof GraphQLRequestError) {
     return { kind: error.status === 401 ? "unauthorized" : error.status === 403 ? "forbidden" : "error", correlationId: error.correlationId };
@@ -37,9 +43,8 @@ export async function loadJobsPage(environment: Environment, search: string) {
   let failure: JobsFailure | undefined;
   try { await fetchJobs(environment, variables); } catch (error) { failure = jobsFailure(error); }
   const code = readJobs(environment, variables).connection?.error?.code;
-  const noindex = code === "INVALID_FILTER" || code === "UNKNOWN_SKILL" || code === "INVALID_INPUT";
-  if (code === "FORBIDDEN") failure = { kind: "forbidden" };
-  else if (code && !noindex) failure = jobsFailure(code);
+  failure = jobsConnectionFailure(code) ?? failure;
+  const noindex = failure?.kind === "validation";
   return { ...parsed, variables, failure, noindex };
 }
 
