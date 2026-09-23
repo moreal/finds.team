@@ -116,15 +116,28 @@ export function parseJobSearch(search: string): ParseResult {
 export function serializeJobSearch(state: JobSearchState): string {
   const params = new URLSearchParams();
   if (state.text?.trim()) params.set("q", state.text.trim());
-  for (const skill of [...state.skills].sort(compareSkills)) {
+  const seenSkills = new Set<string>();
+  const skills = state.skills.flatMap((skill) => {
+    const parsed = parseSkill(`${skill.exclude ? "-" : ""}${skill.slug}${skill.level ? `:${skill.level.toLowerCase()}` : ""}`);
+    if (!parsed) return [];
+    const identity = `${Number(parsed.exclude)}\0${parsed.slug}\0${parsed.level ?? ""}`;
+    if (seenSkills.has(identity)) return [];
+    seenSkills.add(identity);
+    return [parsed];
+  });
+  for (const skill of skills.sort(compareSkills)) {
     params.append("skill", `${skill.exclude ? "-" : ""}${skill.slug}${skill.level ? `:${skill.level.toLowerCase()}` : ""}`);
   }
-  if (state.role) params.set("role", enumKey(state.role, roles) ?? "");
-  if (state.employment) params.set("employment", enumKey(state.employment, employments) ?? "");
-  if (state.remote) params.set("remote", enumKey(state.remote, remotes) ?? "");
+  const role = state.role && enumKey(state.role, roles);
+  if (role) params.set("role", role);
+  const employment = state.employment && enumKey(state.employment, employments);
+  if (employment) params.set("employment", employment);
+  const remote = state.remote && enumKey(state.remote, remotes);
+  if (remote) params.set("remote", remote);
   if (state.siteId?.trim()) params.set("site", state.siteId.trim());
-  if (state.updatedWithin) params.set("updated", state.updatedWithin);
-  if (state.order) params.set("order", enumKey(state.order, orders) ?? "");
+  if (state.updatedWithin && windows.has(state.updatedWithin)) params.set("updated", state.updatedWithin);
+  const order = state.order && enumKey(state.order, orders);
+  if (order) params.set("order", order);
   const body = params.toString();
   return body ? `?${body}` : "";
 }

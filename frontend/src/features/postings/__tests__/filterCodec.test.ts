@@ -68,6 +68,20 @@ describe("job search URL codec", () => {
     expect(parseJobSearch(search).state).toEqual(state);
   });
 
+  it("deduplicates and validates skills when serializing state directly", () => {
+    const state: JobSearchState = { skills: [
+      { slug: "go", exclude: false },
+      { slug: "go", exclude: false },
+      { slug: "go", level: "REQUIRED", exclude: false },
+      { slug: "go", exclude: true },
+      { slug: "", exclude: false },
+      { slug: "rust:expert", exclude: false },
+    ] };
+    const search = serializeJobSearch(state);
+    expect(search).toBe("?skill=go&skill=go%3Arequired&skill=-go");
+    expect(parseJobSearch(search).canonicalSearch).toBe(search);
+  });
+
   it("is idempotent across a table of mixed search strings", () => {
     for (const input of ["", "?skill=b&skill=a&skill=-a", "?q=%E2%9C%93&unknown=x", "?remote=onsite&employment=internship", "?skill=go:required&skill=go:preferred"]) {
       const once = parseJobSearch(input).canonicalSearch;

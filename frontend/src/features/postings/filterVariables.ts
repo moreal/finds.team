@@ -2,7 +2,7 @@ import type { DiscoveryOperationsJobsQuery$variables, PostingFilterInput } from 
 import type { JobSearchState } from "./filterSchema";
 
 export function toPostingFilterInput(state: JobSearchState, now?: Date): DiscoveryOperationsJobsQuery$variables {
-  const all: PostingFilterInput[] = [];
+  const all: PostingFilterInput[] = [{ hasStatus: "OPEN" }];
   if (state.text) all.push({ textContains: state.text });
   if (state.siteId) all.push({ atSite: state.siteId });
   if (state.role) all.push({ hasRole: state.role });
@@ -22,7 +22,7 @@ export function toPostingFilterInput(state: JobSearchState, now?: Date): Discove
     all.push({ not: filter });
   }
   return {
-    ...(all.length ? { filter: { all } } : {}),
+    filter: { all },
     ...(state.order ? { orderBy: state.order } : {}),
   };
 }
