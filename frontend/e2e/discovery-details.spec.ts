@@ -88,3 +88,37 @@ test("company continuation failure keeps existing postings and offers retry", as
   await expect(page.getByRole("button", { name: "다시 시도" })).toBeVisible();
   await expect(page.getByText(/문의 번호:/)).toBeVisible();
 });
+
+for (const phase of ["initial", "next"]) {
+  for (const code of ["FORBIDDEN", "INVALID_CURSOR", "INVALID_INPUT", "INTERNAL"]) {
+    test(`HTTP 200 ${phase} connection ${code} has a safe actionable state`, async ({ page }) => {
+      const response = await page.goto(`/companies/connection-${phase}-${code}`);
+      if (phase === "next") await page.getByRole("button", { name: "공고 더 보기", exact: true }).click();
+      if (code === "FORBIDDEN") {
+        await expect(page.getByText("접근 권한이 없어요.", { exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "다시 시도", exact: true })).toHaveCount(0);
+      } else if (code.startsWith("INVALID")) {
+        await expect(page.getByText("목록을 새로 불러와 주세요.", { exact: true })).toBeVisible();
+        const restart = page.getByRole("button", { name: "처음부터 다시 불러오기", exact: true });
+        await expect(restart).toBeVisible();
+        await expect(page.getByRole("button", { name: "다시 시도", exact: true })).toHaveCount(0);
+        if (phase === "next") {
+          const request = page.waitForRequest(req => req.url().endsWith("/graphql") && !req.postDataJSON().variables.after);
+          await restart.click(); await request;
+          await expect(page.getByRole("button", { name: "공고 더 보기", exact: true })).toBeVisible();
+        }
+      } else {
+        const diagnostic = page.getByText(/문의 번호:/);
+        await expect(diagnostic).toBeVisible();
+        const before = await diagnostic.textContent();
+        if (phase === "initial") expect(await response!.text()).toContain(await diagnostic.locator("code").innerText());
+        const retried = page.waitForResponse(response => response.url().endsWith("/graphql"));
+        await page.getByRole("button", { name: "다시 시도", exact: true }).click(); await retried;
+        await expect(page.getByRole("region", { name: "채용 중인 공고" })).toHaveAttribute("aria-busy", "false");
+        await expect(diagnostic).toHaveText(before!);
+      }
+      if (phase === "next") await expect(page.getByRole("heading", { name: "Backend engineer 1", exact: true })).toBeAttached();
+      await expect(page.getByText(/Private diagnostic/)).toHaveCount(0);
+    });
+  }
+}

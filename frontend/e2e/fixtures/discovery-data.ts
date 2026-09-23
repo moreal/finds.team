@@ -20,7 +20,7 @@ export function detailData(operation: string, variables: Record<string, any>) {
   if (operation === "DiscoveryOperationsJobQuery") return { jobPosting: variables.id === "missing" ? null : posting(1) };
   if (operation === "DiscoveryOperationsCompanyQuery") return { careerSite: variables.slug === "missing" ? null : {
     __typename: "CareerSite", id: variables.slug === "acme" ? "site-1" : `site-${variables.slug}`, slug: variables.slug, displayName: "Acme", canonicalBaseUrl: "https://example.com", provider: "GREENHOUSE",
-    crawlSummary: { outcome: "SUCCESS", finishedAt: "2026-09-20T00:00:00Z" }, openPostings: connection(variables.after, posting),
+    crawlSummary: { outcome: "SUCCESS", finishedAt: "2026-09-20T00:00:00Z" }, openPostings: companyConnection(variables),
   } };
   if (operation === "DiscoveryOperationsSkillQuery") return { skill: variables.slug === "missing" ? null : {
     __typename: "Skill", id: "skill-1", slug: "kotlin", displayName: "Kotlin",
@@ -28,4 +28,13 @@ export function detailData(operation: string, variables: Record<string, any>) {
     openPostings: connection(variables.after, posting), requirementCounts: { required: 18, preferred: 3, mentioned: 1 },
     relatedSkills: connection(variables.relatedAfter, id => ({ __typename: "Skill", id: `related-skill-${id}`, slug: `related-${id}`, displayName: `Related ${id}` })),
   } };
+}
+
+function companyConnection(variables: Record<string, any>) {
+  const match = /^connection-(initial|next)-(FORBIDDEN|INVALID_CURSOR|INVALID_INPUT|INTERNAL)$/.exec(variables.slug);
+  if (match && (match[1] === "initial" || variables.after)) return {
+    edges: [], totalCount: 22, error: { code: match[2], message: "Private diagnostic must never be shown" },
+    pageInfo: { hasNextPage: false, hasPreviousPage: !!variables.after, startCursor: null, endCursor: null },
+  };
+  return connection(variables.after, posting);
 }

@@ -1,4 +1,5 @@
 import { useRouter } from "@tanstack/solid-router";
+import { createMemo } from "solid-js";
 import { AsyncState } from "../../ui/AsyncState";
 import { Link } from "../../ui/Link";
 import type { Environment, GraphQLTaggedNode, Variables } from "relay-runtime";
@@ -12,9 +13,12 @@ export function DetailNotFound() {
 export function DetailPending() {
   return <main class="detail-page"><h1>채용 정보</h1><AsyncState state="pending" /></main>;
 }
-export function DetailError() {
+export function DetailError(props: { error: unknown }) {
   const router = useRouter();
-  return <main class="detail-page"><h1>채용 정보</h1><AsyncState state="error" onRetry={() => void router.invalidate()} /></main>;
+  // Solid serializes the memo's initial value for hydration. Re-renders reuse
+  // the same reference; only a different caught error creates a new diagnostic.
+  const failure = createMemo(() => jobsFailure(props.error));
+  return <main class="detail-page"><h1>채용 정보</h1><AsyncState state={failure().kind} correlationId={failure().correlationId} onRetry={() => void router.invalidate()} /></main>;
 }
 export function DetailFailure(props: { failure: JobsFailure }) {
   const router = useRouter();
