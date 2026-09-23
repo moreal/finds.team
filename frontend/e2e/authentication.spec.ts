@@ -119,6 +119,15 @@ async function verifyEmail(page: Page, mode = 'join') {
   if (mode === 'recover') await page.getByLabel('저장한 복구 코드').fill('saved-recovery');
   await page.getByRole('button', { name: '인증 확인' }).click();
 }
+async function submitTwice(page: Page, label: string) {
+  await page.evaluate(label => {
+    const input = [...document.querySelectorAll('input')].find(input => input.labels?.[0]?.textContent?.includes(label));
+    const form = input?.closest('form');
+    if (!form) throw new Error(`Missing form for ${label}`);
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }, label);
+}
 test('enrollment uses a real virtual Passkey and keeps recovery material ephemeral until acknowledged', async ({ page }) => {
   const fixture = await authFixture(page);
   await verifyEmail(page);
@@ -392,6 +401,81 @@ test('lost rotation response retries one command and never reveals plaintext on 
   await expect(page.getByText('이미 발급된 복구 코드는 다시 표시할 수 없어요. 필요한 경우 새로 발급해 주세요.')).toBeVisible();
   expect(commands[1]).toEqual(commands[0]);
   await expect(page.getByText(recoveryCode)).toHaveCount(0);
+});
+
+test('same-turn duplicate rename owns one command and uncertain retry keeps its input', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  const commands: { passkeyId: string; label: string; idempotencyKey: string }[] = [];
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/graphql', route => {
+    const body = route.request().postDataJSON();
+    if (body.operationName !== 'AccountOperationsRenameMutation') return route.fulfill({ json: accountResponse });
+    commands.push(body.variables.input);
+    if (commands.length === 1) return route.abort('failed');
+    return route.fulfill({ json: { data: { renamePasskey: { outcome: 'CHANGED', error: null, clientMutationId: null } } } });
+  });
+  await page.goto('/account/security');
+  await page.getByLabel('Laptop 이름').fill('Travel');
+  await submitTwice(page, 'Laptop 이름');
+  await expect(page.getByRole('alert')).toBeVisible();
+  expect(commands).toHaveLength(1);
+  await page.getByRole('button', { name: '같은 변경 다시 시도' }).click();
+  await expect(page.getByRole('status')).toContainText('변경했어요');
+  expect(commands).toHaveLength(2);
+  expect(commands[0]).toEqual({ passkeyId: 'key-1', label: 'Travel', idempotencyKey: commands[0].idempotencyKey });
+  expect(commands[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+  expect(commands[1]).toEqual(commands[0]);
+});
+
+test('same-turn duplicate rotation confirmation owns one command and retries the same key', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  const commands: { idempotencyKey: string }[] = [];
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/graphql', route => {
+    const body = route.request().postDataJSON();
+    if (body.operationName !== 'AccountOperationsRotateMutation') return route.fulfill({ json: accountResponse });
+    commands.push(body.variables.input);
+    if (commands.length === 1) return route.abort('failed');
+    return route.fulfill({ json: { data: { rotateRecoveryCode: { outcome: 'ALREADY_ROTATED', recoveryCode: null, error: null, clientMutationId: null } } } });
+  });
+  await page.goto('/account/security');
+  await page.getByRole('button', { name: '복구 코드 새로 발급' }).click();
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')].find(button => button.textContent?.includes('발급 확인'));
+    if (!button) throw new Error('Missing rotation confirmation');
+    button.click(); button.click();
+  });
+  await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible();
+  expect(commands).toHaveLength(1);
+  await page.getByRole('button', { name: '같은 변경 다시 시도' }).click();
+  await expect(page.getByRole('status')).toContainText('이미 발급된');
+  expect(commands).toHaveLength(2);
+  expect(commands[0].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+  expect(commands[1]).toEqual(commands[0]);
+});
+
+test('same-turn duplicate additional Passkey submission starts one ceremony', async ({ page }) => {
+  const fixture = await authFixture(page);
+  await verifyEmail(page);
+  await page.getByRole('button', { name: 'Passkey 등록', exact: true }).click();
+  await page.getByLabel('복구 코드를 안전한 곳에 저장했어요').check();
+  await page.getByRole('button', { name: '계속' }).click();
+  await page.getByRole('button', { name: 'Passkey로 로그인' }).click();
+  await expect(page).toHaveURL(/account\/security/);
+  await page.evaluate(() => {
+    const original = navigator.credentials.create.bind(navigator.credentials);
+    (window as typeof window & { ceremonyCount: number }).ceremonyCount = 0;
+    navigator.credentials.create = options => {
+      (window as typeof window & { ceremonyCount: number }).ceremonyCount++;
+      return original(options);
+    };
+  });
+  await page.getByLabel('새 Passkey 이름').fill('Travel key');
+  await submitTwice(page, '새 Passkey 이름');
+  await expect(page.getByRole('status')).toContainText('추가했어요');
+  expect(fixture.begins).toHaveLength(1);
+  expect(fixture.completions).toHaveLength(1);
+  expect(await page.evaluate(() => (window as typeof window & { ceremonyCount: number }).ceremonyCount)).toBe(1);
 });
 
 for (const status of [401, 403]) test(`HTTP ${status} after an authenticated mutation clears the account and dialog`, async ({ page }) => {

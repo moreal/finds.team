@@ -48,11 +48,15 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
   const [newLabel, setNewLabel] = createSignal('');
   const [registration, setRegistration] = createSignal<AccountRegistration>();
   const [cancelRecovery, setCancelRecovery] = createSignal(false);
-  const controlsDisabled = () => !ready() || pending() || !!unresolved() || !!registration();
+  let busy = false;
+  let ownedCommand: PendingCommand | undefined;
+  let ownedRegistration: AccountRegistration | undefined;
+  const controlsDisabled = () => !ready() || pending() || busy || !!unresolved() || !!registration();
   let disposed = false;
   onCleanup(() => { disposed = true; });
   onSettled(() => { setReady(true); });
   function clearProtectedState() {
+    ownedCommand = undefined; ownedRegistration = undefined;
     setViewer(undefined); setCode(''); setConfirmation(undefined); setUnresolved(undefined); setMessage('');
     clearAccountRecords(environment());
   }
@@ -74,7 +78,9 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
         throw new AccountActionError(accountFailureMessage({ status: 403 }));
       }
       if (next.passkeys.error || next.sessions.error) throw new AccountActionError(mutationError(next.passkeys.error?.code ?? next.sessions.error?.code));
-      const loaded = kind && current ? { ...current, [kind]: { ...next[kind], edges: [...current[kind].edges, ...next[kind].edges] } } : next;
+      const sameAccount = !current || accountId(current) === accountId(next);
+      if (!sameAccount) clearProtectedState();
+      const loaded = kind && current && sameAccount ? { ...current, [kind]: { ...next[kind], edges: [...current[kind].edges, ...next[kind].edges] } } : next;
       setViewer(loaded);
       return loaded;
     }
@@ -87,19 +93,22 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     return error instanceof AccountActionError ? error.message : '요청을 완료하지 못했어요. 다시 시도해 주세요.';
   }
   async function refresh(kind?: 'passkeys' | 'sessions') {
-    if (pending()) return; setPending(true); setError('');
-    try { await load(kind); } catch (error) { setError(failure(error)); } finally { setPending(false); }
+    if (busy || ownedCommand || ownedRegistration) return;
+    busy = true; setPending(true); setError('');
+    try { await load(kind); } catch (error) { setError(failure(error)); } finally { busy = false; setPending(false); }
   }
   function mutate(document: GraphQLTaggedNode, field: string, input: Variables) {
-    if (pending() || unresolved()) return;
+    if (busy || ownedCommand || ownedRegistration) return;
     // Immutable logical command: all uncertain transport retries keep both
     // this UUID and the exact input. A separate explicit action starts a new one.
     const command = { document, field, input: { ...structuredClone(input), idempotencyKey: crypto.randomUUID() } };
+    ownedCommand = command;
     setUnresolved(command);
     void executeCommand(command);
   }
   async function executeCommand(command: PendingCommand) {
-    if (pending()) return; setPending(true); setError(''); setMessage('');
+    if (busy || ownedCommand !== command) return;
+    busy = true; setPending(true); setError(''); setMessage('');
     try {
       // Execute the compiled Relay operation through its network, without normalizing
       // a one-time recovery secret into Relay's long-lived store or devtools records.
@@ -107,7 +116,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
       if (!result || !('data' in result) || ('errors' in result && result.errors?.length)) throw new Error('요청을 완료하지 못했어요. 다시 시도해 주세요.');
       const payload = result.data?.[command.field] as Payload | undefined;
       // A semantic response resolves the command; a network failure does not.
-      if (payload) setUnresolved(undefined);
+      if (payload) { ownedCommand = undefined; setUnresolved(undefined); }
       if (!payload || payload.error || payload.outcome === 'REJECTED') throw new AccountActionError(mutationError(payload?.error?.code));
       setConfirmation(undefined);
       if (payload.recoveryCode) setCode(payload.recoveryCode);
@@ -115,16 +124,17 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
       else setMessage('변경했어요.');
       if (payload.outcome === 'SIGNED_OUT') { clearProtectedState(); setError('이 세션이 종료되었어요. 다시 로그인해 주세요.'); }
       else await load();
-    } catch (error) { setError(failure(error)); } finally { setPending(false); }
+    } catch (error) { setError(failure(error)); } finally { busy = false; setPending(false); }
   }
-  function abandonCommand() { setUnresolved(undefined); setConfirmation(undefined); setError(''); }
+  function abandonCommand() { if (busy) return; ownedCommand = undefined; setUnresolved(undefined); setConfirmation(undefined); setError(''); }
   async function addPasskey(cancel = false) {
-    if (pending() || unresolved()) return;
-    const command = registration() ?? { ...additionalPasskeyCommand(newLabel().trim()), accountId: accountId(viewer()!) };
+    if (busy || ownedCommand) return;
+    const command = ownedRegistration ?? { ...additionalPasskeyCommand(newLabel().trim()), accountId: accountId(viewer()!) };
+    ownedRegistration = command; busy = true;
     setRegistration(command); setPending(true); setError(''); setMessage('');
     try {
       const result = cancel ? (await cancelAdditionalPasskey(command), 'cancelled') : await beginAdditionalPasskey(command);
-      setRegistration(undefined); setCancelRecovery(false);
+      ownedRegistration = undefined; setRegistration(undefined); setCancelRecovery(false);
       if (result === 'added') {
         setNewLabel('');
         // The ceremony is acknowledged. A viewer failure must never restore it
@@ -146,14 +156,14 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
         } catch (error) { setError(failure(error)); }
       } else setMessage('Passkey 등록을 취소했어요. 계정 관리를 계속할 수 있어요.');
     } catch (error) {
-      setRegistration({ ...command });
+      ownedRegistration = { ...command }; setRegistration(ownedRegistration);
       setCancelRecovery(command.stage === 'cancel');
       if (error instanceof SecurityRequestError && error.status === 403) {
         // A rejected retry does not prove that an earlier lost response failed
         // to enter restricted scope. Retain the key until cancel is acknowledged.
         setError('최근 Passkey 인증이 필요해요. Passkey로 다시 로그인해 주세요.');
       } else setError(securityError(error));
-    } finally { setPending(false); }
+    } finally { busy = false; setPending(false); }
   }
   return <main class="security-page" data-account-id={viewer() ? readFragment<AccountOperations_user$key>(environment(), operations.user, viewer()!.user).id : undefined}><h1>계정 보안</h1>
     {code() ? <RecoveryCodeDisplay code={code()} onDone={() => setCode('')} /> : <>
@@ -191,7 +201,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
         {unresolved() && !confirmation() && <section aria-label="완료되지 않은 변경"><p>응답을 받지 못했어요. 이미 처리되었을 수 있으니 같은 요청을 다시 확인해 주세요.</p><Button disabled={pending()} onClick={() => void executeCommand(unresolved()!)}>같은 변경 다시 시도</Button><Button variant="ghost" disabled={pending()} onClick={abandonCommand}>현재 요청의 재시도 중단</Button></section>}
         {error() && !unresolved() && !registration() && <div class="security-actions"><Button variant="secondary" disabled={pending()} onClick={() => void refresh()}>다시 불러오기</Button><Link href="/login">Passkey로 다시 인증</Link></div>}
       </>}
-      {confirmation() && <Dialog trigger="변경 확인" title={confirmation()!.title} description={confirmation()!.description} closeLabel="취소" open onOpenChange={open => { if (!open && !pending()) setConfirmation(undefined); }}>
+      {confirmation() && <Dialog trigger="변경 확인" title={confirmation()!.title} description={confirmation()!.description} closeLabel="취소" open onOpenChange={open => { if (!open && !busy) setConfirmation(undefined); }}>
         {error() && <p role="alert">{error()}</p>}{unresolved() && <p>이미 처리되었을 수 있어요. 같은 요청을 다시 확인해도 새 코드를 중복 발급하지 않아요.</p>}
         <Button variant="danger-confirm" loading={pending()} onClick={() => { const retry = unresolved(); if (retry) void executeCommand(retry); else { const command = confirmation()!; mutate(command.document, command.field, command.input); } }}>{unresolved() ? '같은 변경 다시 시도' : confirmation()!.button}</Button>
       </Dialog>}
