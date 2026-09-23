@@ -5,7 +5,8 @@ export default defineConfig({
   fullyParallel: true,
   use: { baseURL: "http://127.0.0.1:4174" },
   projects: [
-    { name: "chromium", testIgnore: "ui-catalog.spec.ts", use: { ...devices["Desktop Chrome"] } },
+    { name: "chromium", testIgnore: ["ui-catalog.spec.ts", "jobs-list.spec.ts"], use: { ...devices["Desktop Chrome"] } },
+    { name: "jobs", testMatch: "jobs-list.spec.ts", use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4176" } },
     ...(["light", "dark"] as const).flatMap((colorScheme) => ([
       { name: `catalog-desktop-${colorScheme}`, testMatch: "ui-catalog.spec.ts", use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4175", colorScheme } },
       { name: `catalog-mobile-${colorScheme}`, testMatch: "ui-catalog.spec.ts", use: { ...devices["Pixel 7"], baseURL: "http://127.0.0.1:4175", colorScheme } },
@@ -22,8 +23,12 @@ export default defineConfig({
     url: "http://127.0.0.1:4174",
     reuseExistingServer: false,
   }, {
-    command: "pnpm dev --host 127.0.0.1 --port 4175 --strictPort",
+    command: "FINDS_INTERNAL_GRAPHQL_URL=http://127.0.0.1:4176/graphql pnpm dev --host 127.0.0.1 --port 4175 --strictPort",
     url: "http://127.0.0.1:4175",
+    reuseExistingServer: false,
+  }, {
+    command: "node e2e/fixtures/jobs-server.ts",
+    url: "http://127.0.0.1:4176/__requests",
     reuseExistingServer: false,
   }],
 });

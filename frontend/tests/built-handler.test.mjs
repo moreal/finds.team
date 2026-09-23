@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { JSDOM } from "jsdom";
 
 const server = await import("../dist/server/server.js");
 const handleRequest = server.handleRequest ?? server.default?.fetch;
@@ -26,9 +27,38 @@ function nonceFrom(policy) {
 }
 
 async function renderRoot() {
-  const response = await handleRequest(new Request("https://finds.team/"));
+  const response = await handleRequest(new Request("https://finds.team/jobs"));
   return { response, html: await response.text() };
 }
+
+test("the built root permanently redirects to jobs", async () => {
+  const response = await handleRequest(new Request("https://finds.team/"));
+  assert.equal(response.status, 308);
+  assert.equal(response.headers.get("location"), "/jobs");
+});
+
+test("the built jobs document renders Relay data from the internal endpoint", async (t) => {
+  const previous = process.env.FINDS_INTERNAL_GRAPHQL_URL;
+  process.env.FINDS_INTERNAL_GRAPHQL_URL = "http://jobs-backend.test/graphql";
+  t.after(() => { if (previous === undefined) delete process.env.FINDS_INTERNAL_GRAPHQL_URL; else process.env.FINDS_INTERNAL_GRAPHQL_URL = previous; });
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    assert.equal(url, "http://jobs-backend.test/graphql");
+    assert.equal(init.headers.get("cookie"), "session=built-ssr");
+    assert.deepEqual(JSON.parse(init.body).variables.filter.all, [{ hasStatus: "OPEN" }, { textContains: "production" }]);
+    return Response.json({ data: { jobPostings: {
+      edges: [{ cursor: "one", node: { __typename: "JobPosting", id: "built-job", title: "Production SSR engineer", canonicalUrl: "https://example.com/job", status: "OPEN", updatedAt: "2026-09-20T00:00:00Z", careerSite: { id: "built-site", slug: "built-company", displayName: "Built Company" }, classification: null } }],
+      totalCount: 1, error: null, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: "one", endCursor: "one" },
+    } } });
+  });
+  const response = await handleRequest(new Request("https://finds.team/jobs?q=production", { headers: { cookie: "session=built-ssr" } }));
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  const document = new JSDOM(html).window.document;
+  assert.equal(document.querySelector('a[href="/jobs/built-job"]')?.textContent, "Production SSR engineer");
+  assert.equal(document.querySelector('a[href="/companies/built-company"]')?.textContent, "Built Company");
+  assert.match(html, /relayRecords/);
+  assert.doesNotMatch(html, /session=built-ssr/);
+});
 
 test("the built handler applies a unique strict CSP nonce to every script", async () => {
   const [first, second] = await Promise.all([renderRoot(), renderRoot()]);

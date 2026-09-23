@@ -32,9 +32,14 @@ it("restores the router's Relay records before consumers execute the initial que
 it("serializes only records through the nonce-protected Start document boundary", async () => {
   vi.stubEnv("FINDS_INTERNAL_GRAPHQL_URL", "http://backend.test/graphql");
   const marker = '</script><script id="injected">globalThis.compromised=true</script>';
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(probeResponse(marker))));
+  vi.stubGlobal("fetch", vi.fn().mockImplementation((_url, init) => {
+    const operation = JSON.parse(init.body).operationName;
+    return Promise.resolve(Response.json(operation === "RelayProbeQuery" ? probeResponse(marker) : {
+      data: { jobPostings: { edges: [], totalCount: 0, error: null, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null } } },
+    }));
+  }));
   const router = getRouter(new Request("https://finds.team/", { headers: { cookie: "private-session" } }));
-  router.update({ context: router.options.context, history: createMemoryHistory({ initialEntries: ["/"] }) });
+  router.update({ context: router.options.context, history: createMemoryHistory({ initialEntries: ["/jobs"] }) });
   attachRouterServerSsrUtils({ router, manifest: undefined });
   await router.load();
   await fetchQuery(router.options.context!.relayEnvironment, probeQuery, {}).toPromise();

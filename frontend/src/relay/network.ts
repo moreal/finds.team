@@ -1,5 +1,11 @@
 import { Network, type FetchFunction, type RequestParameters, type Variables } from "relay-runtime";
 
+export class GraphQLRequestError extends Error {
+  constructor(readonly status: number, readonly correlationId: string) {
+    super(`GraphQL request failed (${status})`);
+  }
+}
+
 async function fetchGraphQL(
   url: string,
   operation: RequestParameters,
@@ -7,13 +13,16 @@ async function fetchGraphQL(
   headers: Headers,
   credentials?: RequestCredentials,
 ) {
-  const response = await fetch(url, {
+  const requestId = headers.get("x-request-id") ?? crypto.randomUUID();
+  headers.set("x-request-id", requestId);
+  let response: Response;
+  try { response = await fetch(url, {
     method: "POST",
     credentials,
     headers,
     body: JSON.stringify({ query: operation.text, variables, operationName: operation.name }),
-  });
-  if (!response.ok) throw new Error(`GraphQL request failed (${response.status})`);
+  }); } catch { throw new GraphQLRequestError(0, requestId); }
+  if (!response.ok) throw new GraphQLRequestError(response.status, response.headers.get("x-request-id") ?? requestId);
   return response.json();
 }
 

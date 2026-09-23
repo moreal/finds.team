@@ -49,3 +49,10 @@ it("rejects a failed HTTP response instead of accepting its body as query data",
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })));
   await expect(createBrowserNetwork().execute(query, {}, {}).toPromise()).rejects.toThrow("503");
 });
+
+it("preserves HTTP authorization status and correlation id for safe route error states", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("private provider detail", { status: 403, headers: { "x-request-id": "request-forbidden" } })));
+  await expect(createBrowserNetwork().execute(query, {}, {}).toPromise()).rejects.toMatchObject({
+    status: 403, correlationId: "request-forbidden",
+  });
+});

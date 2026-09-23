@@ -20,10 +20,10 @@ import { getRouter } from "./router";
 import { getCspNonce } from "./security/csp";
 
 async function renderRootRoute() {
-  const router = getRouter(new Request("https://finds.team/"));
+  const router = getRouter(new Request("https://finds.team/jobs"));
   router.update({
     context: router.options.context,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries: ["/jobs"] }),
   });
   await router.load();
 
@@ -36,13 +36,13 @@ async function renderRootRoute() {
 }
 
 describe("the root route", () => {
-  it("renders the jobs entry point at /", async () => {
+  it("renders the jobs discovery document", async () => {
     const { document } = await renderRootRoute();
     const page = within(document.body);
 
     expect(page.getByRole("main")).toBeInTheDocument();
     expect(
-      page.getByRole("link", { name: "공고 보기" }),
+      page.getByRole("link", { name: "finds.team" }),
     ).toHaveAttribute("href", "/jobs");
   });
 });

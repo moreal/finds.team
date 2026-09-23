@@ -15,6 +15,25 @@ export function getRouter(request?: Request) {
   return createRouter({
     routeTree,
     context,
+    // Discovery URLs use ordinary repeated parameters, never JSON arrays.
+    parseSearch: (search) => {
+      const params = new URLSearchParams(search);
+      const values: Record<string, string | string[]> = {};
+      for (const key of new Set(params.keys())) {
+        const entries = params.getAll(key);
+        Object.defineProperty(values, key, { value: entries.length > 1 ? entries : entries[0], enumerable: true });
+      }
+      return values;
+    },
+    stringifySearch: (search) => {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(search)) {
+        if (value === undefined) continue;
+        for (const entry of Array.isArray(value) ? value : [value]) params.append(key, String(entry));
+      }
+      const body = params.toString();
+      return body ? `?${body}` : "";
+    },
     scrollRestoration: true,
     ssr: { nonce: getCspNonce() },
     // Only normalized records cross Start's escaped, nonce-protected boundary.
