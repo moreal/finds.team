@@ -1,5 +1,12 @@
 scalar DateTime
 
+interface Node { id: ID! }
+
+type User implements Node { id: ID! }
+type Skill implements Node { id: ID! }
+type CrawlRun implements Node { id: ID! }
+type AuditEvent implements Node { id: ID! }
+
 enum SourceProvider { FLEX GREETING NINEHIRE }
 enum PostingStatus { OPEN CLOSED }
 enum CrawlOutcome { SUCCESS FAILED }
@@ -37,7 +44,7 @@ input PostingFilterInput {
   any: [PostingFilterInput!]
 }
 
-type JobPosting {
+type JobPosting implements Node {
   id: ID!
   careerSiteId: ID!
   externalKey: String!
@@ -56,14 +63,19 @@ type JobPosting {
 }
 
 type JobPostingEdge { cursor: String!, node: JobPosting! }
-type PageInfo { hasNextPage: Boolean!, endCursor: String }
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
 type JobPostingConnection {
   edges: [JobPostingEdge!]!
   pageInfo: PageInfo!
   totalCount: Int!
 }
 
-type CareerSite {
+type CareerSite implements Node {
   id: ID!
   canonicalBaseUrl: String!
   host: String!
@@ -108,6 +120,8 @@ type CrawlStatus {
 }
 
 type Query {
+  node(id: ID!): Node
+  jobPosting(id: ID!): JobPosting
   jobPostings(filter: PostingFilterInput, first: Int = 20, after: String): JobPostingConnection!
   crawlStatuses: [CrawlStatus!]!
 }

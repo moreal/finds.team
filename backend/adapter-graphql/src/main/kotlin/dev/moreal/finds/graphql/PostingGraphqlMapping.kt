@@ -40,7 +40,12 @@ data class JobPostingDto(
 )
 
 data class JobPostingEdgeDto(val cursor: String, val node: JobPostingDto)
-data class PageInfoDto(val hasNextPage: Boolean, val endCursor: String?)
+data class PageInfoDto(
+  val hasNextPage: Boolean,
+  val endCursor: String?,
+  val hasPreviousPage: Boolean = false,
+  val startCursor: String? = null,
+)
 data class JobPostingConnectionDto(
   val edges: List<JobPostingEdgeDto>,
   val pageInfo: PageInfoDto,
@@ -65,7 +70,9 @@ object PostingGraphqlMapping {
     }
     return JobPostingConnectionDto(
       edges,
-      PageInfoDto(page.next != null, edges.lastOrNull()?.cursor),
+      // The current forward-only repository cannot efficiently prove a previous edge.
+      // Relay permits false in this case; Tasks 4–5 add richer connection metadata.
+      PageInfoDto(page.next != null, edges.lastOrNull()?.cursor, startCursor = edges.firstOrNull()?.cursor),
       Math.toIntExact(page.totalCount),
     )
   }
@@ -78,7 +85,7 @@ object PostingGraphqlMapping {
     )
     require(operators.size == 1) { "Posting filter must specify exactly one operator" }
     return when (operators.single()) {
-      "atSite" -> Filter.AtSite(CareerSiteId(requirePositiveId(requireNotNull(atSite))))
+      "atSite" -> Filter.AtSite(CareerSiteId(GlobalIdCodec.decode(NodeType.CareerSite, requireNotNull(atSite)).toLong()))
       "textContains" -> Filter.TextContains(requireNotNull(textContains))
       "hasStatus" -> Filter.HasStatus(requireNotNull(hasStatus))
       "updatedAfter" -> Filter.UpdatedAfter(Instant.parse(requireNotNull(updatedAfter)))
@@ -90,15 +97,12 @@ object PostingGraphqlMapping {
   }
 
   private fun JobPosting.toDto() = JobPostingDto(
-    id.value.toString(), careerSiteId.value.toString(), raw.externalKey, raw.title,
+    GlobalIdCodec.encode(NodeType.JobPosting, id.value), GlobalIdCodec.encode(NodeType.CareerSite, careerSiteId.value), raw.externalKey, raw.title,
     raw.descriptionText, raw.canonicalUrl.value.toString(), status,
     raw.employmentHint, raw.locationHint, raw.remoteHint, raw.sourceUpdatedAt?.toString(),
     firstSeenAt.toString(), lastSeenAt.toString(), updatedAt.toString(), closedAt?.toString(),
   )
 
-  private fun requirePositiveId(value: String): Long =
-    value.toLongOrNull()?.takeIf { it > 0 }
-      ?: throw IllegalArgumentException("ID must be a positive integer")
 }
 
 object CursorCodec {

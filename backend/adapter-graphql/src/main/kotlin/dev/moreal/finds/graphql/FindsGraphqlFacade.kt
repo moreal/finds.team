@@ -132,22 +132,25 @@ class FindsGraphqlFacade(
     } catch (_: IllegalArgumentException) {
       return simpleCrawlError(CrawlTriggerOutcome.INVALID_INPUT, ApiErrorCode.INVALID_INPUT)
     }
-    val id = careerSiteId.toLongOrNull()?.takeIf { it > 0 }
-      ?: return TriggerCrawlPayload(
+    val id = try {
+      GlobalIdCodec.decode(NodeType.CareerSite, careerSiteId).toLong()
+    } catch (_: GlobalIdException) {
+      return TriggerCrawlPayload(
         CrawlTriggerOutcome.INVALID_INPUT,
-        error = ApiErrorDto(ApiErrorCode.INVALID_INPUT, "ID must be a positive integer"),
+        error = ApiErrorDto(ApiErrorCode.INVALID_INPUT, "Invalid global ID"),
       )
+    }
     return when (val result = crawlHandler(CrawlSiteCommand(CareerSiteId(id), CrawlTrigger.MANUAL,
       principal.actor, metadata, principal.sessionId))) {
-      is CrawlSiteResult.Triggered -> TriggerCrawlPayload(CrawlTriggerOutcome.TRIGGERED, result.runId.value.toString())
+      is CrawlSiteResult.Triggered -> TriggerCrawlPayload(CrawlTriggerOutcome.TRIGGERED, GlobalIdCodec.encode(NodeType.CrawlRun, result.runId.value))
       CrawlSiteResult.Forbidden -> simpleCrawlError(CrawlTriggerOutcome.FORBIDDEN, ApiErrorCode.FORBIDDEN)
       CrawlSiteResult.InvalidIdempotencyKey -> simpleCrawlError(CrawlTriggerOutcome.INVALID_INPUT, ApiErrorCode.INVALID_INPUT)
       CrawlSiteResult.IdempotencyConflict -> simpleCrawlError(CrawlTriggerOutcome.IDEMPOTENCY_CONFLICT, ApiErrorCode.IDEMPOTENCY_CONFLICT)
       is CrawlSiteResult.Succeeded -> TriggerCrawlPayload(
-        CrawlTriggerOutcome.SUCCEEDED, result.runId.value.toString(), result.counts,
+        CrawlTriggerOutcome.SUCCEEDED, GlobalIdCodec.encode(NodeType.CrawlRun, result.runId.value), result.counts,
       )
       is CrawlSiteResult.Failed -> TriggerCrawlPayload(
-        CrawlTriggerOutcome.FAILED, result.runId.value.toString(),
+        CrawlTriggerOutcome.FAILED, GlobalIdCodec.encode(NodeType.CrawlRun, result.runId.value),
         error = ApiErrorDto(ApiErrorCode.CRAWL_FAILED, "Crawl failed"),
       )
       CrawlSiteResult.NotFound -> simpleCrawlError(CrawlTriggerOutcome.NOT_FOUND, ApiErrorCode.NOT_FOUND)
@@ -166,7 +169,8 @@ class FindsGraphqlFacade(
 
   fun crawlStatuses(): List<CrawlStatusDto> = statusHandler().map { status ->
     CrawlStatusDto(
-      status.careerSiteId.value.toString(), status.runId?.value?.toString(), status.outcome,
+      GlobalIdCodec.encode(NodeType.CareerSite, status.careerSiteId.value),
+      status.runId?.let { GlobalIdCodec.encode(NodeType.CrawlRun, it.value) }, status.outcome,
       status.finishedAt?.toString(), status.failure?.let {
         ApiErrorDto(ApiErrorCode.CRAWL_FAILED, "Crawl failed")
       },
@@ -176,7 +180,7 @@ class FindsGraphqlFacade(
   private fun anonymousMetadata() = CommandMetadata(UUID.randomUUID(), UUID.randomUUID())
 
   private fun CareerSite.toDto() = CareerSiteDto(
-    id.value.toString(), canonicalBaseUrl.value.toString(), canonicalBaseUrl.host.value,
+    GlobalIdCodec.encode(NodeType.CareerSite, id.value), canonicalBaseUrl.value.toString(), canonicalBaseUrl.host.value,
     provider, displayName, crawlSettings.enabled,
     Math.toIntExact(crawlSettings.successfulInterval.seconds),
   )

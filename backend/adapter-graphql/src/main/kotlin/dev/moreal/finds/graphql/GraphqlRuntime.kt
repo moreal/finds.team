@@ -26,8 +26,24 @@ object GraphqlRuntime {
       .build()
     val wiring = RuntimeWiring.newRuntimeWiring()
       .scalar(dateTime)
+      .type("Node") { type ->
+        type.typeResolver { environment ->
+          val name = when (environment.getObject<Any>()) {
+            is JobPostingDto -> "JobPosting"
+            is CareerSiteDto -> "CareerSite"
+            else -> null
+          }
+          name?.let(environment.schema::getObjectType)
+        }
+      }
       .type("Query") { type ->
-        type.dataFetcher("jobPostings") { environment ->
+        type.dataFetcher("node") { environment ->
+          val id = GlobalIdCodec.decode(requireNotNull(environment.getArgument<String>("id")))
+          unavailableNode(id)
+        }.dataFetcher("jobPosting") { environment ->
+          val id = GlobalIdCodec.decode(NodeType.JobPosting, requireNotNull(environment.getArgument<String>("id")))
+          unavailableNode(GlobalId(NodeType.JobPosting, id))
+        }.dataFetcher("jobPostings") { environment ->
           facade.jobPostings(
             environment.getArgument<Map<String, Any?>>("filter")?.toFilterInput(),
             environment.getArgument("first"),
@@ -59,15 +75,25 @@ object GraphqlRuntime {
       .build()
     return GraphQL.newGraphQL(SchemaGenerator().makeExecutableSchema(registry, wiring))
       .defaultDataFetcherExceptionHandler { parameters ->
+        val exception = parameters.exception
+        val expected = exception as? GraphqlRequestException
         val error = GraphqlErrorBuilder.newError(parameters.dataFetchingEnvironment)
-          .message("Request failed")
-          .extensions(mapOf("code" to "INTERNAL"))
+          .message(expected?.message ?: "Request failed")
+          .extensions(mapOf("code" to (expected?.code?.name ?: "INTERNAL")))
           .build()
         CompletableFuture.completedFuture(DataFetcherExceptionHandlerResult.newResult().error(error).build())
       }.build()
   }
 
   const val SESSION_PRINCIPAL = "sessionPrincipal"
+
+  // Tasks 5–6 replace each branch with an authorized, bounded application lookup.
+  // A known identity must never silently resolve as another node type.
+  private fun unavailableNode(id: GlobalId): Nothing = when (id.type) {
+    NodeType.JobPosting, NodeType.CareerSite, NodeType.User,
+    NodeType.Skill, NodeType.CrawlRun, NodeType.AuditEvent ->
+      throw GraphqlRequestException(ApiErrorCode.NOT_FOUND, "Node is not available")
+  }
 
   @Suppress("UNCHECKED_CAST")
   private fun Map<String, Any?>.toFilterInput(): PostingFilterInput = PostingFilterInput(

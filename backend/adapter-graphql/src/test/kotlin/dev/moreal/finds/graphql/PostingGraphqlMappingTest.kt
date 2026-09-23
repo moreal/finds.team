@@ -22,7 +22,7 @@ class PostingGraphqlMappingTest {
     val mapped = PostingGraphqlMapping.filter(
       PostingFilterInput(
         all = listOf(
-          PostingFilterInput(atSite = "7"),
+          PostingFilterInput(atSite = "djE6Q2FyZWVyU2l0ZTo3"),
           PostingFilterInput(not = PostingFilterInput(hasStatus = PostingStatus.CLOSED)),
           PostingFilterInput(any = emptyList()),
         ),
@@ -57,6 +57,15 @@ class PostingGraphqlMappingTest {
     assertEquals(true, dto.pageInfo.hasNextPage)
     assertEquals(posting.raw.title, dto.edges.single().node.title)
     assertEquals(dto.edges.single().cursor, dto.pageInfo.endCursor)
+    assertEquals(dto.edges.single().cursor, dto.pageInfo.startCursor)
+    assertEquals(false, dto.pageInfo.hasPreviousPage)
+    assertEquals("djE6Sm9iUG9zdGluZzox", dto.edges.single().node.id)
+    assertEquals("djE6Q2FyZWVyU2l0ZTox", dto.edges.single().node.careerSiteId)
+  }
+
+  @Test fun `empty connection has complete page info without fabricated cursors`() {
+    val dto = PostingGraphqlMapping.connection(SearchPage(emptyList(), null, 0))
+    assertEquals(PageInfoDto(false, null, false, null), dto.pageInfo)
   }
 
   private fun posting(): JobPosting {

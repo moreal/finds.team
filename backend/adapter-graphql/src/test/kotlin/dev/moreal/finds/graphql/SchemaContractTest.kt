@@ -8,6 +8,8 @@ import graphql.schema.idl.SchemaParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import graphql.schema.GraphQLInterfaceType
+import graphql.schema.GraphQLObjectType
 
 class SchemaContractTest {
   @Test
@@ -20,10 +22,11 @@ class SchemaContractTest {
       .build()
     val schema = SchemaGenerator().makeExecutableSchema(
       registry,
-      RuntimeWiring.newRuntimeWiring().scalar(dateTime).build(),
+      RuntimeWiring.newRuntimeWiring().scalar(dateTime)
+        .type("Node") { it.typeResolver { null } }.build(),
     )
 
-    assertEquals(setOf("jobPostings", "crawlStatuses"), schema.queryType.fieldDefinitions.map { it.name }.toSet())
+    assertEquals(setOf("node", "jobPosting", "jobPostings", "crawlStatuses"), schema.queryType.fieldDefinitions.map { it.name }.toSet())
     assertEquals(
       setOf("registerCareerSite", "triggerCrawl"),
       requireNotNull(schema.mutationType).fieldDefinitions.map { it.name }.toSet(),
@@ -31,5 +34,15 @@ class SchemaContractTest {
     assertNotNull(schema.getType("PostingFilterInput"))
     assertNotNull(schema.getType("JobPostingConnection"))
     assertNotNull(schema.getType("ApiErrorCode"))
+    val node = schema.getType("Node") as? GraphQLInterfaceType
+    assertNotNull(node)
+    for (name in listOf("JobPosting", "CareerSite", "User", "Skill", "CrawlRun", "AuditEvent")) {
+      val type = schema.getType(name) as? GraphQLObjectType
+      assertNotNull(type, name)
+      assertEquals(listOf("Node"), type.interfaces.map { it.name })
+      assertNotNull(type.getFieldDefinition("id"))
+    }
+    assertEquals(setOf("hasNextPage", "hasPreviousPage", "startCursor", "endCursor"),
+      (schema.getType("PageInfo") as GraphQLObjectType).fieldDefinitions.map { it.name }.toSet())
   }
 }

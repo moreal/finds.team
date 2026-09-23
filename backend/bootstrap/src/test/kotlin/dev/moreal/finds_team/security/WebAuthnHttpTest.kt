@@ -285,7 +285,7 @@ class WebAuthnHttpTest {
     assertEquals(0, discoveries.get())
     val first = register(session)
     assertTrue(first["error"].isNull)
-    val siteId = first["site"]["id"].asText()
+    val siteId = dev.moreal.finds.graphql.GlobalIdCodec.decode(dev.moreal.finds.graphql.NodeType.CareerSite, first["site"]["id"].asText())
     assertEquals(first, register(session, reverse = true))
     assertEquals("IDEMPOTENCY_CONFLICT", register(session, "Changed")["error"]["code"].asText())
     assertEquals(1, discoveries.get())
@@ -370,7 +370,8 @@ class WebAuthnHttpTest {
         dev.moreal.finds.domain.career.SourceProvider.FLEX, "Crawl"))).site }
     val database = context.getBean(org.jooq.DSLContext::class.java)
     val key = UUID.randomUUID()
-    val query = """mutation Crawl { ...Trigger } fragment Trigger on Mutation { aliased: triggerCrawl(careerSiteId: "${site.id.value}", idempotencyKey: "$key") { runId outcome error { code } } }"""
+    val siteGlobalId = dev.moreal.finds.graphql.GlobalIdCodec.encode(dev.moreal.finds.graphql.NodeType.CareerSite, site.id.value)
+    val query = """mutation Crawl { ...Trigger } fragment Trigger on Mutation { aliased: triggerCrawl(careerSiteId: "$siteGlobalId", idempotencyKey: "$key") { runId outcome error { code } } }"""
     val body = json.writeValueAsString(mapOf("query" to query))
     val beforeEvents = database.fetchValue("SELECT count(*)::int FROM security_events WHERE action = 'crawl.trigger_denied'") as Int
     fun trigger(session: MockHttpSession?): JsonNode {
@@ -398,7 +399,7 @@ class WebAuthnHttpTest {
     assertEquals("TRIGGERED", first["outcome"].asText())
     assertEquals(first, trigger(session))
     assertEquals(1, fetches.get())
-    val runId = first["runId"].asText().toLong()
+    val runId = dev.moreal.finds.graphql.GlobalIdCodec.decode(dev.moreal.finds.graphql.NodeType.CrawlRun, first["runId"].asText()).toLong()
     assertEquals("SUCCESS", database.fetchValue("SELECT outcome FROM crawl_runs WHERE id = ?", runId))
     assertEquals(1, database.fetchValue("SELECT count(*)::int FROM audit_events WHERE action = 'crawl.manually_triggered' AND target_id = ?", runId.toString()))
     now = now.plusSeconds(301)

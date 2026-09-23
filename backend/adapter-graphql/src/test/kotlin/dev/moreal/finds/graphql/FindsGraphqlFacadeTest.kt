@@ -52,9 +52,10 @@ class FindsGraphqlFacadeTest {
     for (key in listOf("", "1-1-1-1-1", "secret"))
       assertEquals(ApiErrorCode.INVALID_INPUT, facade.triggerCrawl("1", key, principal).error?.code)
     kotlin.test.assertNull(command)
-    val result = facade.triggerCrawl("1", input().idempotencyKey, principal)
+    val result = facade.triggerCrawl("djE6Q2FyZWVyU2l0ZTox", input().idempotencyKey, principal)
     assertEquals(CrawlTriggerOutcome.TRIGGERED, result.outcome)
-    assertEquals("7", result.runId)
+    assertEquals("7", GlobalIdCodec.decode(NodeType.CrawlRun, requireNotNull(result.runId)))
+    assertEquals(CareerSiteId(1), command?.siteId)
     assertSame(principal.actor, command?.actor)
     assertEquals(principal.sessionId, command?.sessionId)
     assertEquals(UUID.fromString(input().idempotencyKey), command?.metadata?.idempotencyKey)
@@ -91,7 +92,7 @@ class FindsGraphqlFacadeTest {
   @Test fun `registration variants map to stable payload codes`() = runTest {
     var result: RegisterCareerSiteResult = RegisterCareerSiteResult.Registered(site())
     val facade = facade(register = { result })
-    assertEquals("1", facade.registerCareerSite(input(), principal).site?.id)
+    assertEquals("djE6Q2FyZWVyU2l0ZTox", facade.registerCareerSite(input(), principal).site?.id)
 
     result = RegisterCareerSiteResult.AmbiguousProvider(setOf(SourceProvider.NINEHIRE, SourceProvider.FLEX))
     val ambiguous = facade.registerCareerSite(input(), principal)
@@ -107,16 +108,18 @@ class FindsGraphqlFacadeTest {
       CrawlRunId(2), CrawlChangeCounts(1, 1, 0, 0, 0, 0, 0),
     )
     val facade = facade(crawl = { result })
-    assertEquals(CrawlTriggerOutcome.SUCCEEDED, facade.triggerCrawl("1", input().idempotencyKey, principal).outcome)
+    assertEquals(CrawlTriggerOutcome.SUCCEEDED, facade.triggerCrawl("djE6Q2FyZWVyU2l0ZTox", input().idempotencyKey, principal).outcome)
 
     result = CrawlSiteResult.Failed(
       CrawlRunId(3), CrawlFailure(CrawlFailureCode.ROBOTS_DENIED, "denied"),
     )
-    val failed = facade.triggerCrawl("1", input().idempotencyKey, principal)
+    val failed = facade.triggerCrawl("djE6Q2FyZWVyU2l0ZTox", input().idempotencyKey, principal)
     assertEquals(ApiErrorCode.CRAWL_FAILED, failed.error?.code)
     assertEquals("Crawl failed", failed.error?.message)
 
     assertEquals(ApiErrorCode.INVALID_INPUT, facade.triggerCrawl("bad", input().idempotencyKey, principal).error?.code)
+    assertEquals(ApiErrorCode.INVALID_INPUT, facade.triggerCrawl("1", input().idempotencyKey, principal).error?.code)
+    assertEquals(ApiErrorCode.INVALID_INPUT, facade.triggerCrawl("djE6Sm9iUG9zdGluZzox", input().idempotencyKey, principal).error?.code)
   }
 
   private fun facade(
