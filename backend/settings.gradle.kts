@@ -19,6 +19,7 @@ include(
   "mail-transport-retry",
   "mail-transport-pool",
   "mail-observability",
+  "mail-transport-smtp",
   "adapter-source",
   "adapter-persistence",
   "adapter-graphql",
