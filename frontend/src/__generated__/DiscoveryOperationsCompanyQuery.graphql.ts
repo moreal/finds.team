@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<23e733f8eba9cbc17acef300fc07a009>>
+ * @generated SignedSource<<638b1a8e482aebbb820dd996ae570bfa>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -13,17 +13,19 @@ import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
 export type ApiErrorCode = "ALREADY_REGISTERED" | "AMBIGUOUS_PROVIDER" | "BUSY" | "CRAWL_FAILED" | "DISABLED" | "DISCOVERY_FAILED" | "FORBIDDEN" | "IDEMPOTENCY_CONFLICT" | "INTERNAL" | "INVALID_CURSOR" | "INVALID_FILTER" | "INVALID_INPUT" | "INVALID_PAGE" | "INVALID_URL" | "LAST_CREDENTIAL" | "NOT_DUE" | "NOT_FOUND" | "UNKNOWN_SKILL" | "UNSUPPORTED_PROVIDER" | "%future added value";
 export type CrawlOutcome = "FAILED" | "SUCCESS" | "%future added value";
+export type PostingOrder = "UPDATED_DESC" | "%future added value";
 export type SourceProvider = "FLEX" | "GREETING" | "NINEHIRE" | "%future added value";
 export type DiscoveryOperationsCompanyQuery$variables = {
   after?: string | null | undefined;
   first?: number | null | undefined;
+  orderBy?: PostingOrder | null | undefined;
   slug: string;
 };
 export type DiscoveryOperationsCompanyQuery$data = {
   readonly careerSite: {
     readonly canonicalBaseUrl: string;
     readonly crawlSummary: {
-      readonly finishedAt: any | null | undefined;
+      readonly finishedAt: string | null | undefined;
       readonly outcome: CrawlOutcome | null | undefined;
     } | null | undefined;
     readonly displayName: string;
@@ -68,53 +70,58 @@ v1 = {
   "name": "first"
 },
 v2 = {
+  "defaultValue": "UPDATED_DESC",
+  "kind": "LocalArgument",
+  "name": "orderBy"
+},
+v3 = {
   "defaultValue": null,
   "kind": "LocalArgument",
   "name": "slug"
 },
-v3 = [
+v4 = [
   {
     "kind": "Variable",
     "name": "slug",
     "variableName": "slug"
   }
 ],
-v4 = {
+v5 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "id",
   "storageKey": null
 },
-v5 = {
+v6 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "slug",
   "storageKey": null
 },
-v6 = {
+v7 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "displayName",
   "storageKey": null
 },
-v7 = {
+v8 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "canonicalBaseUrl",
   "storageKey": null
 },
-v8 = {
+v9 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "provider",
   "storageKey": null
 },
-v9 = {
+v10 = {
   "alias": null,
   "args": null,
   "concreteType": "CrawlSummary",
@@ -139,26 +146,26 @@ v9 = {
   ],
   "storageKey": null
 },
-v10 = {
-  "kind": "Literal",
-  "name": "orderBy",
-  "value": "UPDATED_DESC"
-},
 v11 = {
+  "kind": "Variable",
+  "name": "orderBy",
+  "variableName": "orderBy"
+},
+v12 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "cursor",
   "storageKey": null
 },
-v12 = {
+v13 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "__typename",
   "storageKey": null
 },
-v13 = {
+v14 = {
   "alias": null,
   "args": null,
   "concreteType": "PageInfo",
@@ -197,14 +204,14 @@ v13 = {
   ],
   "storageKey": null
 },
-v14 = {
+v15 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "totalCount",
   "storageKey": null
 },
-v15 = {
+v16 = {
   "alias": null,
   "args": null,
   "concreteType": "DiscoveryError",
@@ -229,7 +236,7 @@ v15 = {
   ],
   "storageKey": null
 },
-v16 = [
+v17 = [
   {
     "kind": "Variable",
     "name": "after",
@@ -240,14 +247,14 @@ v16 = [
     "name": "first",
     "variableName": "first"
   },
-  (v10/*: any*/)
-],
-v17 = [
-  (v4/*: any*/),
-  (v5/*: any*/),
-  (v6/*: any*/)
+  (v11/*: any*/)
 ],
 v18 = [
+  (v5/*: any*/),
+  (v6/*: any*/),
+  (v7/*: any*/)
+],
+v19 = [
   {
     "alias": null,
     "args": null,
@@ -268,7 +275,8 @@ return {
     "argumentDefinitions": [
       (v0/*: any*/),
       (v1/*: any*/),
-      (v2/*: any*/)
+      (v2/*: any*/),
+      (v3/*: any*/)
     ],
     "kind": "Fragment",
     "metadata": null,
@@ -276,22 +284,22 @@ return {
     "selections": [
       {
         "alias": null,
-        "args": (v3/*: any*/),
+        "args": (v4/*: any*/),
         "concreteType": "CareerSite",
         "kind": "LinkedField",
         "name": "careerSite",
         "plural": false,
         "selections": [
-          (v4/*: any*/),
           (v5/*: any*/),
           (v6/*: any*/),
           (v7/*: any*/),
           (v8/*: any*/),
           (v9/*: any*/),
+          (v10/*: any*/),
           {
             "alias": "openPostings",
             "args": [
-              (v10/*: any*/)
+              (v11/*: any*/)
             ],
             "concreteType": "JobPostingConnection",
             "kind": "LinkedField",
@@ -306,7 +314,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v11/*: any*/),
+                  (v12/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -320,18 +328,18 @@ return {
                         "kind": "FragmentSpread",
                         "name": "DiscoveryOperations_job"
                       },
-                      (v12/*: any*/)
+                      (v13/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v13/*: any*/),
               (v14/*: any*/),
-              (v15/*: any*/)
+              (v15/*: any*/),
+              (v16/*: any*/)
             ],
-            "storageKey": "__DiscoveryOperationsCompany_openPostings_connection(orderBy:\"UPDATED_DESC\")"
+            "storageKey": null
           }
         ],
         "storageKey": null
@@ -343,6 +351,7 @@ return {
   "kind": "Request",
   "operation": {
     "argumentDefinitions": [
+      (v3/*: any*/),
       (v2/*: any*/),
       (v1/*: any*/),
       (v0/*: any*/)
@@ -352,21 +361,21 @@ return {
     "selections": [
       {
         "alias": null,
-        "args": (v3/*: any*/),
+        "args": (v4/*: any*/),
         "concreteType": "CareerSite",
         "kind": "LinkedField",
         "name": "careerSite",
         "plural": false,
         "selections": [
-          (v4/*: any*/),
           (v5/*: any*/),
           (v6/*: any*/),
           (v7/*: any*/),
           (v8/*: any*/),
           (v9/*: any*/),
+          (v10/*: any*/),
           {
             "alias": null,
-            "args": (v16/*: any*/),
+            "args": (v17/*: any*/),
             "concreteType": "JobPostingConnection",
             "kind": "LinkedField",
             "name": "openPostings",
@@ -380,7 +389,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v11/*: any*/),
+                  (v12/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -389,7 +398,7 @@ return {
                     "name": "node",
                     "plural": false,
                     "selections": [
-                      (v4/*: any*/),
+                      (v5/*: any*/),
                       {
                         "alias": null,
                         "args": null,
@@ -425,7 +434,7 @@ return {
                         "kind": "LinkedField",
                         "name": "careerSite",
                         "plural": false,
-                        "selections": (v17/*: any*/),
+                        "selections": (v18/*: any*/),
                         "storageKey": null
                       },
                       {
@@ -450,7 +459,7 @@ return {
                             "kind": "LinkedField",
                             "name": "role",
                             "plural": false,
-                            "selections": (v18/*: any*/),
+                            "selections": (v19/*: any*/),
                             "storageKey": null
                           },
                           {
@@ -460,7 +469,7 @@ return {
                             "kind": "LinkedField",
                             "name": "employment",
                             "plural": false,
-                            "selections": (v18/*: any*/),
+                            "selections": (v19/*: any*/),
                             "storageKey": null
                           },
                           {
@@ -470,7 +479,7 @@ return {
                             "kind": "LinkedField",
                             "name": "remote",
                             "plural": false,
-                            "selections": (v18/*: any*/),
+                            "selections": (v19/*: any*/),
                             "storageKey": null
                           },
                           {
@@ -481,7 +490,7 @@ return {
                             "name": "location",
                             "plural": false,
                             "selections": [
-                              (v6/*: any*/),
+                              (v7/*: any*/),
                               {
                                 "alias": null,
                                 "args": null,
@@ -507,7 +516,7 @@ return {
                                 "kind": "LinkedField",
                                 "name": "skill",
                                 "plural": false,
-                                "selections": (v17/*: any*/),
+                                "selections": (v18/*: any*/),
                                 "storageKey": null
                               },
                               {
@@ -530,22 +539,22 @@ return {
                         ],
                         "storageKey": null
                       },
-                      (v12/*: any*/)
+                      (v13/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v13/*: any*/),
               (v14/*: any*/),
-              (v15/*: any*/)
+              (v15/*: any*/),
+              (v16/*: any*/)
             ],
             "storageKey": null
           },
           {
             "alias": null,
-            "args": (v16/*: any*/),
+            "args": (v17/*: any*/),
             "filters": [
               "orderBy"
             ],
@@ -560,7 +569,7 @@ return {
     ]
   },
   "params": {
-    "cacheID": "52b33adb45edee5c36955d22b2989f6b",
+    "cacheID": "ed1fb792618fe6660223dcef6902e489",
     "id": null,
     "metadata": {
       "connection": [
@@ -577,11 +586,11 @@ return {
     },
     "name": "DiscoveryOperationsCompanyQuery",
     "operationKind": "query",
-    "text": "query DiscoveryOperationsCompanyQuery(\n  $slug: String!\n  $first: Int = 20\n  $after: String\n) {\n  careerSite(slug: $slug) {\n    id\n    slug\n    displayName\n    canonicalBaseUrl\n    provider\n    crawlSummary {\n      outcome\n      finishedAt\n    }\n    openPostings(first: $first, after: $after, orderBy: UPDATED_DESC) {\n      edges {\n        cursor\n        node {\n          ...DiscoveryOperations_job\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment DiscoveryOperations_job on JobPosting {\n  id\n  title\n  canonicalUrl\n  status\n  updatedAt\n  careerSite {\n    id\n    slug\n    displayName\n  }\n  classification {\n    taxonomyVersion\n    role {\n      value\n      rawValue\n    }\n    employment {\n      value\n      rawValue\n    }\n    remote {\n      value\n      rawValue\n    }\n    location {\n      displayName\n      searchValue\n    }\n    skills {\n      skill {\n        id\n        slug\n        displayName\n      }\n      text\n      level\n    }\n  }\n}\n"
+    "text": "query DiscoveryOperationsCompanyQuery(\n  $slug: String!\n  $orderBy: PostingOrder = UPDATED_DESC\n  $first: Int = 20\n  $after: String\n) {\n  careerSite(slug: $slug) {\n    id\n    slug\n    displayName\n    canonicalBaseUrl\n    provider\n    crawlSummary {\n      outcome\n      finishedAt\n    }\n    openPostings(first: $first, after: $after, orderBy: $orderBy) {\n      edges {\n        cursor\n        node {\n          ...DiscoveryOperations_job\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment DiscoveryOperations_job on JobPosting {\n  id\n  title\n  canonicalUrl\n  status\n  updatedAt\n  careerSite {\n    id\n    slug\n    displayName\n  }\n  classification {\n    taxonomyVersion\n    role {\n      value\n      rawValue\n    }\n    employment {\n      value\n      rawValue\n    }\n    remote {\n      value\n      rawValue\n    }\n    location {\n      displayName\n      searchValue\n    }\n    skills {\n      skill {\n        id\n        slug\n        displayName\n      }\n      text\n      level\n    }\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "24c020d68a07b051c44fb944c9d3c7c6";
+(node as any).hash = "7141969223b89a95bc3f6cfb55c8b078";
 
 export default node;

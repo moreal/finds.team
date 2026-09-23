@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<76ba890d704c0bc50792a91a9b475d49>>
+ * @generated SignedSource<<daf1aa2e03aa7fc9fc6918729d736ce4>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -26,7 +26,7 @@ export type AdminOperations_audit$data = {
     readonly role: UserRole | null | undefined;
   };
   readonly id: string;
-  readonly occurredAt: any;
+  readonly occurredAt: string;
   readonly outcome: AuditOutcome;
   readonly targetId: string;
   readonly targetType: string;

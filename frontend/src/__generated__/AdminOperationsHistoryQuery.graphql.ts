@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<3cba20fa88abf2691e6fd41549e9e036>>
+ * @generated SignedSource<<c351376754f3a7af580708d97c048293>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -40,7 +40,7 @@ export type AdminOperationsHistoryQuery$data = {
       readonly totalCount: number;
     };
     readonly crawlSummary: {
-      readonly finishedAt: any | null | undefined;
+      readonly finishedAt: string | null | undefined;
       readonly outcome: CrawlOutcome | null | undefined;
     } | null | undefined;
     readonly id: string;

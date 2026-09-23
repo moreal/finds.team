@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<fe3ad4a59f175d6729ab4a508153ca70>>
+ * @generated SignedSource<<1d6b74daaa2af95ad0ffca9a18a01d36>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -12,9 +12,19 @@
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
 export type ApiErrorCode = "ALREADY_REGISTERED" | "AMBIGUOUS_PROVIDER" | "BUSY" | "CRAWL_FAILED" | "DISABLED" | "DISCOVERY_FAILED" | "FORBIDDEN" | "IDEMPOTENCY_CONFLICT" | "INTERNAL" | "INVALID_CURSOR" | "INVALID_FILTER" | "INVALID_INPUT" | "INVALID_PAGE" | "INVALID_URL" | "LAST_CREDENTIAL" | "NOT_DUE" | "NOT_FOUND" | "UNKNOWN_SKILL" | "UNSUPPORTED_PROVIDER" | "%future added value";
+export type CareerSiteOrder = "ID_ASC" | "%future added value";
+export type PostingOrder = "UPDATED_DESC" | "%future added value";
+export type SkillOrder = "SLUG_ASC" | "%future added value";
 export type DiscoveryOperationsSkillQuery$variables = {
   after?: string | null | undefined;
+  companiesAfter?: string | null | undefined;
+  companiesFirst?: number | null | undefined;
+  companiesOrder?: CareerSiteOrder | null | undefined;
   first?: number | null | undefined;
+  postingsOrder?: PostingOrder | null | undefined;
+  relatedAfter?: string | null | undefined;
+  relatedFirst?: number | null | undefined;
+  relatedOrder?: SkillOrder | null | undefined;
   slug: string;
 };
 export type DiscoveryOperationsSkillQuery$data = {
@@ -102,69 +112,104 @@ var v0 = {
   "name": "after"
 },
 v1 = {
+  "defaultValue": null,
+  "kind": "LocalArgument",
+  "name": "companiesAfter"
+},
+v2 = {
+  "defaultValue": 20,
+  "kind": "LocalArgument",
+  "name": "companiesFirst"
+},
+v3 = {
+  "defaultValue": "ID_ASC",
+  "kind": "LocalArgument",
+  "name": "companiesOrder"
+},
+v4 = {
   "defaultValue": 20,
   "kind": "LocalArgument",
   "name": "first"
 },
-v2 = {
+v5 = {
+  "defaultValue": "UPDATED_DESC",
+  "kind": "LocalArgument",
+  "name": "postingsOrder"
+},
+v6 = {
+  "defaultValue": null,
+  "kind": "LocalArgument",
+  "name": "relatedAfter"
+},
+v7 = {
+  "defaultValue": 20,
+  "kind": "LocalArgument",
+  "name": "relatedFirst"
+},
+v8 = {
+  "defaultValue": "SLUG_ASC",
+  "kind": "LocalArgument",
+  "name": "relatedOrder"
+},
+v9 = {
   "defaultValue": null,
   "kind": "LocalArgument",
   "name": "slug"
 },
-v3 = [
+v10 = [
   {
     "kind": "Variable",
     "name": "slug",
     "variableName": "slug"
   }
 ],
-v4 = {
+v11 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "id",
   "storageKey": null
 },
-v5 = {
+v12 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "slug",
   "storageKey": null
 },
-v6 = {
+v13 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "displayName",
   "storageKey": null
 },
-v7 = {
-  "kind": "Literal",
+v14 = {
+  "kind": "Variable",
   "name": "orderBy",
-  "value": "ID_ASC"
+  "variableName": "companiesOrder"
 },
-v8 = {
+v15 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "cursor",
   "storageKey": null
 },
-v9 = {
+v16 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "__typename",
   "storageKey": null
 },
-v10 = [
-  (v4/*: any*/),
-  (v5/*: any*/),
-  (v6/*: any*/),
-  (v9/*: any*/)
+v17 = [
+  (v11/*: any*/),
+  (v12/*: any*/),
+  (v13/*: any*/),
+  (v16/*: any*/)
 ],
-v11 = {
+v18 = {
   "alias": null,
   "args": null,
   "concreteType": "PageInfo",
@@ -203,14 +248,14 @@ v11 = {
   ],
   "storageKey": null
 },
-v12 = {
+v19 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "totalCount",
   "storageKey": null
 },
-v13 = {
+v20 = {
   "alias": null,
   "args": null,
   "concreteType": "DiscoveryError",
@@ -235,7 +280,7 @@ v13 = {
   ],
   "storageKey": null
 },
-v14 = [
+v21 = [
   {
     "alias": null,
     "args": null,
@@ -244,7 +289,7 @@ v14 = [
     "name": "edges",
     "plural": true,
     "selections": [
-      (v8/*: any*/),
+      (v15/*: any*/),
       {
         "alias": null,
         "args": null,
@@ -252,22 +297,22 @@ v14 = [
         "kind": "LinkedField",
         "name": "node",
         "plural": false,
-        "selections": (v10/*: any*/),
+        "selections": (v17/*: any*/),
         "storageKey": null
       }
     ],
     "storageKey": null
   },
-  (v11/*: any*/),
-  (v12/*: any*/),
-  (v13/*: any*/)
+  (v18/*: any*/),
+  (v19/*: any*/),
+  (v20/*: any*/)
 ],
-v15 = {
-  "kind": "Literal",
+v22 = {
+  "kind": "Variable",
   "name": "orderBy",
-  "value": "UPDATED_DESC"
+  "variableName": "postingsOrder"
 },
-v16 = {
+v23 = {
   "alias": null,
   "args": null,
   "concreteType": "SkillRequirementCounts",
@@ -299,12 +344,12 @@ v16 = {
   ],
   "storageKey": null
 },
-v17 = {
-  "kind": "Literal",
+v24 = {
+  "kind": "Variable",
   "name": "orderBy",
-  "value": "SLUG_ASC"
+  "variableName": "relatedOrder"
 },
-v18 = [
+v25 = [
   {
     "alias": null,
     "args": null,
@@ -313,7 +358,7 @@ v18 = [
     "name": "edges",
     "plural": true,
     "selections": [
-      (v8/*: any*/),
+      (v15/*: any*/),
       {
         "alias": null,
         "args": null,
@@ -321,29 +366,33 @@ v18 = [
         "kind": "LinkedField",
         "name": "node",
         "plural": false,
-        "selections": (v10/*: any*/),
+        "selections": (v17/*: any*/),
         "storageKey": null
       }
     ],
     "storageKey": null
   },
-  (v11/*: any*/),
-  (v12/*: any*/),
-  (v13/*: any*/)
-],
-v19 = {
-  "kind": "Literal",
-  "name": "first",
-  "value": 20
-},
-v20 = [
+  (v18/*: any*/),
   (v19/*: any*/),
-  (v7/*: any*/)
+  (v20/*: any*/)
 ],
-v21 = [
+v26 = [
+  {
+    "kind": "Variable",
+    "name": "after",
+    "variableName": "companiesAfter"
+  },
+  {
+    "kind": "Variable",
+    "name": "first",
+    "variableName": "companiesFirst"
+  },
+  (v14/*: any*/)
+],
+v27 = [
   "orderBy"
 ],
-v22 = [
+v28 = [
   {
     "kind": "Variable",
     "name": "after",
@@ -354,14 +403,14 @@ v22 = [
     "name": "first",
     "variableName": "first"
   },
-  (v15/*: any*/)
+  (v22/*: any*/)
 ],
-v23 = [
-  (v4/*: any*/),
-  (v5/*: any*/),
-  (v6/*: any*/)
+v29 = [
+  (v11/*: any*/),
+  (v12/*: any*/),
+  (v13/*: any*/)
 ],
-v24 = [
+v30 = [
   {
     "alias": null,
     "args": null,
@@ -377,16 +426,32 @@ v24 = [
     "storageKey": null
   }
 ],
-v25 = [
-  (v19/*: any*/),
-  (v17/*: any*/)
+v31 = [
+  {
+    "kind": "Variable",
+    "name": "after",
+    "variableName": "relatedAfter"
+  },
+  {
+    "kind": "Variable",
+    "name": "first",
+    "variableName": "relatedFirst"
+  },
+  (v24/*: any*/)
 ];
 return {
   "fragment": {
     "argumentDefinitions": [
       (v0/*: any*/),
       (v1/*: any*/),
-      (v2/*: any*/)
+      (v2/*: any*/),
+      (v3/*: any*/),
+      (v4/*: any*/),
+      (v5/*: any*/),
+      (v6/*: any*/),
+      (v7/*: any*/),
+      (v8/*: any*/),
+      (v9/*: any*/)
     ],
     "kind": "Fragment",
     "metadata": null,
@@ -394,31 +459,31 @@ return {
     "selections": [
       {
         "alias": null,
-        "args": (v3/*: any*/),
+        "args": (v10/*: any*/),
         "concreteType": "Skill",
         "kind": "LinkedField",
         "name": "skill",
         "plural": false,
         "selections": [
-          (v4/*: any*/),
-          (v5/*: any*/),
-          (v6/*: any*/),
+          (v11/*: any*/),
+          (v12/*: any*/),
+          (v13/*: any*/),
           {
             "alias": "companies",
             "args": [
-              (v7/*: any*/)
+              (v14/*: any*/)
             ],
             "concreteType": "CareerSiteConnection",
             "kind": "LinkedField",
             "name": "__DiscoveryOperationsSkill_companies_connection",
             "plural": false,
-            "selections": (v14/*: any*/),
-            "storageKey": "__DiscoveryOperationsSkill_companies_connection(orderBy:\"ID_ASC\")"
+            "selections": (v21/*: any*/),
+            "storageKey": null
           },
           {
             "alias": "openPostings",
             "args": [
-              (v15/*: any*/)
+              (v22/*: any*/)
             ],
             "concreteType": "JobPostingConnection",
             "kind": "LinkedField",
@@ -433,7 +498,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v8/*: any*/),
+                  (v15/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -447,31 +512,31 @@ return {
                         "kind": "FragmentSpread",
                         "name": "DiscoveryOperations_job"
                       },
-                      (v9/*: any*/)
+                      (v16/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v11/*: any*/),
-              (v12/*: any*/),
-              (v13/*: any*/)
+              (v18/*: any*/),
+              (v19/*: any*/),
+              (v20/*: any*/)
             ],
-            "storageKey": "__DiscoveryOperationsSkill_openPostings_connection(orderBy:\"UPDATED_DESC\")"
+            "storageKey": null
           },
-          (v16/*: any*/),
+          (v23/*: any*/),
           {
             "alias": "relatedSkills",
             "args": [
-              (v17/*: any*/)
+              (v24/*: any*/)
             ],
             "concreteType": "SkillConnection",
             "kind": "LinkedField",
             "name": "__DiscoveryOperations_relatedSkills_connection",
             "plural": false,
-            "selections": (v18/*: any*/),
-            "storageKey": "__DiscoveryOperations_relatedSkills_connection(orderBy:\"SLUG_ASC\")"
+            "selections": (v25/*: any*/),
+            "storageKey": null
           }
         ],
         "storageKey": null
@@ -483,38 +548,45 @@ return {
   "kind": "Request",
   "operation": {
     "argumentDefinitions": [
+      (v9/*: any*/),
+      (v4/*: any*/),
+      (v0/*: any*/),
+      (v5/*: any*/),
       (v2/*: any*/),
       (v1/*: any*/),
-      (v0/*: any*/)
+      (v3/*: any*/),
+      (v7/*: any*/),
+      (v6/*: any*/),
+      (v8/*: any*/)
     ],
     "kind": "Operation",
     "name": "DiscoveryOperationsSkillQuery",
     "selections": [
       {
         "alias": null,
-        "args": (v3/*: any*/),
+        "args": (v10/*: any*/),
         "concreteType": "Skill",
         "kind": "LinkedField",
         "name": "skill",
         "plural": false,
         "selections": [
-          (v4/*: any*/),
-          (v5/*: any*/),
-          (v6/*: any*/),
+          (v11/*: any*/),
+          (v12/*: any*/),
+          (v13/*: any*/),
           {
             "alias": null,
-            "args": (v20/*: any*/),
+            "args": (v26/*: any*/),
             "concreteType": "CareerSiteConnection",
             "kind": "LinkedField",
             "name": "companies",
             "plural": false,
-            "selections": (v14/*: any*/),
-            "storageKey": "companies(first:20,orderBy:\"ID_ASC\")"
+            "selections": (v21/*: any*/),
+            "storageKey": null
           },
           {
             "alias": null,
-            "args": (v20/*: any*/),
-            "filters": (v21/*: any*/),
+            "args": (v26/*: any*/),
+            "filters": (v27/*: any*/),
             "handle": "connection",
             "key": "DiscoveryOperationsSkill_companies",
             "kind": "LinkedHandle",
@@ -522,7 +594,7 @@ return {
           },
           {
             "alias": null,
-            "args": (v22/*: any*/),
+            "args": (v28/*: any*/),
             "concreteType": "JobPostingConnection",
             "kind": "LinkedField",
             "name": "openPostings",
@@ -536,7 +608,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v8/*: any*/),
+                  (v15/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -545,7 +617,7 @@ return {
                     "name": "node",
                     "plural": false,
                     "selections": [
-                      (v4/*: any*/),
+                      (v11/*: any*/),
                       {
                         "alias": null,
                         "args": null,
@@ -581,7 +653,7 @@ return {
                         "kind": "LinkedField",
                         "name": "careerSite",
                         "plural": false,
-                        "selections": (v23/*: any*/),
+                        "selections": (v29/*: any*/),
                         "storageKey": null
                       },
                       {
@@ -606,7 +678,7 @@ return {
                             "kind": "LinkedField",
                             "name": "role",
                             "plural": false,
-                            "selections": (v24/*: any*/),
+                            "selections": (v30/*: any*/),
                             "storageKey": null
                           },
                           {
@@ -616,7 +688,7 @@ return {
                             "kind": "LinkedField",
                             "name": "employment",
                             "plural": false,
-                            "selections": (v24/*: any*/),
+                            "selections": (v30/*: any*/),
                             "storageKey": null
                           },
                           {
@@ -626,7 +698,7 @@ return {
                             "kind": "LinkedField",
                             "name": "remote",
                             "plural": false,
-                            "selections": (v24/*: any*/),
+                            "selections": (v30/*: any*/),
                             "storageKey": null
                           },
                           {
@@ -637,7 +709,7 @@ return {
                             "name": "location",
                             "plural": false,
                             "selections": [
-                              (v6/*: any*/),
+                              (v13/*: any*/),
                               {
                                 "alias": null,
                                 "args": null,
@@ -663,7 +735,7 @@ return {
                                 "kind": "LinkedField",
                                 "name": "skill",
                                 "plural": false,
-                                "selections": (v23/*: any*/),
+                                "selections": (v29/*: any*/),
                                 "storageKey": null
                               },
                               {
@@ -686,43 +758,43 @@ return {
                         ],
                         "storageKey": null
                       },
-                      (v9/*: any*/)
+                      (v16/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v11/*: any*/),
-              (v12/*: any*/),
-              (v13/*: any*/)
+              (v18/*: any*/),
+              (v19/*: any*/),
+              (v20/*: any*/)
             ],
             "storageKey": null
           },
           {
             "alias": null,
-            "args": (v22/*: any*/),
-            "filters": (v21/*: any*/),
+            "args": (v28/*: any*/),
+            "filters": (v27/*: any*/),
             "handle": "connection",
             "key": "DiscoveryOperationsSkill_openPostings",
             "kind": "LinkedHandle",
             "name": "openPostings"
           },
-          (v16/*: any*/),
+          (v23/*: any*/),
           {
             "alias": null,
-            "args": (v25/*: any*/),
+            "args": (v31/*: any*/),
             "concreteType": "SkillConnection",
             "kind": "LinkedField",
             "name": "relatedSkills",
             "plural": false,
-            "selections": (v18/*: any*/),
-            "storageKey": "relatedSkills(first:20,orderBy:\"SLUG_ASC\")"
+            "selections": (v25/*: any*/),
+            "storageKey": null
           },
           {
             "alias": null,
-            "args": (v25/*: any*/),
-            "filters": (v21/*: any*/),
+            "args": (v31/*: any*/),
+            "filters": (v27/*: any*/),
             "handle": "connection",
             "key": "DiscoveryOperations_relatedSkills",
             "kind": "LinkedHandle",
@@ -734,13 +806,13 @@ return {
     ]
   },
   "params": {
-    "cacheID": "3cbebbec8540a0d3d7f970e6e4c129f0",
+    "cacheID": "3cef0e957876e3c116a8c424dec49f72",
     "id": null,
     "metadata": {
       "connection": [
         {
-          "count": null,
-          "cursor": null,
+          "count": "companiesFirst",
+          "cursor": "companiesAfter",
           "direction": "forward",
           "path": [
             "skill",
@@ -757,8 +829,8 @@ return {
           ]
         },
         {
-          "count": null,
-          "cursor": null,
+          "count": "relatedFirst",
+          "cursor": "relatedAfter",
           "direction": "forward",
           "path": [
             "skill",
@@ -769,11 +841,11 @@ return {
     },
     "name": "DiscoveryOperationsSkillQuery",
     "operationKind": "query",
-    "text": "query DiscoveryOperationsSkillQuery(\n  $slug: String!\n  $first: Int = 20\n  $after: String\n) {\n  skill(slug: $slug) {\n    id\n    slug\n    displayName\n    companies(first: 20, orderBy: ID_ASC) {\n      edges {\n        cursor\n        node {\n          id\n          slug\n          displayName\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n    openPostings(first: $first, after: $after, orderBy: UPDATED_DESC) {\n      edges {\n        cursor\n        node {\n          ...DiscoveryOperations_job\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n    requirementCounts {\n      required\n      preferred\n      mentioned\n    }\n    relatedSkills(first: 20, orderBy: SLUG_ASC) {\n      edges {\n        cursor\n        node {\n          id\n          slug\n          displayName\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment DiscoveryOperations_job on JobPosting {\n  id\n  title\n  canonicalUrl\n  status\n  updatedAt\n  careerSite {\n    id\n    slug\n    displayName\n  }\n  classification {\n    taxonomyVersion\n    role {\n      value\n      rawValue\n    }\n    employment {\n      value\n      rawValue\n    }\n    remote {\n      value\n      rawValue\n    }\n    location {\n      displayName\n      searchValue\n    }\n    skills {\n      skill {\n        id\n        slug\n        displayName\n      }\n      text\n      level\n    }\n  }\n}\n"
+    "text": "query DiscoveryOperationsSkillQuery(\n  $slug: String!\n  $first: Int = 20\n  $after: String\n  $postingsOrder: PostingOrder = UPDATED_DESC\n  $companiesFirst: Int = 20\n  $companiesAfter: String\n  $companiesOrder: CareerSiteOrder = ID_ASC\n  $relatedFirst: Int = 20\n  $relatedAfter: String\n  $relatedOrder: SkillOrder = SLUG_ASC\n) {\n  skill(slug: $slug) {\n    id\n    slug\n    displayName\n    companies(first: $companiesFirst, after: $companiesAfter, orderBy: $companiesOrder) {\n      edges {\n        cursor\n        node {\n          id\n          slug\n          displayName\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n    openPostings(first: $first, after: $after, orderBy: $postingsOrder) {\n      edges {\n        cursor\n        node {\n          ...DiscoveryOperations_job\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n    requirementCounts {\n      required\n      preferred\n      mentioned\n    }\n    relatedSkills(first: $relatedFirst, after: $relatedAfter, orderBy: $relatedOrder) {\n      edges {\n        cursor\n        node {\n          id\n          slug\n          displayName\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment DiscoveryOperations_job on JobPosting {\n  id\n  title\n  canonicalUrl\n  status\n  updatedAt\n  careerSite {\n    id\n    slug\n    displayName\n  }\n  classification {\n    taxonomyVersion\n    role {\n      value\n      rawValue\n    }\n    employment {\n      value\n      rawValue\n    }\n    remote {\n      value\n      rawValue\n    }\n    location {\n      displayName\n      searchValue\n    }\n    skills {\n      skill {\n        id\n        slug\n        displayName\n      }\n      text\n      level\n    }\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "a0a86b368abef25b7dbbe455d999e15b";
+(node as any).hash = "eeaecbe8100eea2f6e00c32ffb95b7be";
 
 export default node;

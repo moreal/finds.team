@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<0a798084eb956e50edb8e64d0a2f0c90>>
+ * @generated SignedSource<<8b6554a58d5f9c4184da8eef0c5d4bd2>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -23,10 +23,10 @@ export type AccountOperationsViewerQuery$data = {
       readonly edges: ReadonlyArray<{
         readonly cursor: string;
         readonly node: {
-          readonly createdAt: any;
+          readonly createdAt: string;
           readonly id: string;
           readonly label: string;
-          readonly lastUsedAt: any | null | undefined;
+          readonly lastUsedAt: string | null | undefined;
         };
       }>;
       readonly error: {
@@ -45,9 +45,9 @@ export type AccountOperationsViewerQuery$data = {
       readonly edges: ReadonlyArray<{
         readonly cursor: string;
         readonly node: {
-          readonly createdAt: any;
+          readonly createdAt: string;
           readonly current: boolean;
-          readonly expiresAt: any;
+          readonly expiresAt: string;
           readonly id: string;
         };
       }>;

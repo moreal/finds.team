@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<039c1be49fb77f22b691b2ef3c442020>>
+ * @generated SignedSource<<1a3d9833fa5b4f25bb34edb8e468d51b>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -18,10 +18,10 @@ export type AuditFilterInput = {
   action?: AuditAction | null | undefined;
   actorKind?: AuditActorKind | null | undefined;
   actorUserId?: string | null | undefined;
-  from?: any | null | undefined;
+  from?: string | null | undefined;
   targetId?: string | null | undefined;
   targetType?: string | null | undefined;
-  until?: any | null | undefined;
+  until?: string | null | undefined;
 };
 export type AdminOperationsAuditQuery$variables = {
   after?: string | null | undefined;

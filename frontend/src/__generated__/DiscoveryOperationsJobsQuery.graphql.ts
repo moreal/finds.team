@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<fcb9621bfe626c6efdebbd85676f78c6>>
+ * @generated SignedSource<<4f8ee83d42d9d45cc9330913273b377a>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -30,7 +30,7 @@ export type PostingFilterInput = {
   hasStatus?: PostingStatus | null | undefined;
   not?: PostingFilterInput | null | undefined;
   textContains?: string | null | undefined;
-  updatedAfter?: any | null | undefined;
+  updatedAfter?: string | null | undefined;
 };
 export type SkillFilterInput = {
   level?: SkillRequirementLevel | null | undefined;

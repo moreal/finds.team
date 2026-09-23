@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@12.5.1",
   "scripts": {
+    "relay:check": "pnpm --dir frontend relay:validate && pnpm --dir frontend test --run src/relay/__tests__/codegen.test.ts && cd backend && ./gradlew :domain:test :application:test :adapter-persistence:test :adapter-graphql:test :bootstrap:test",
     "frontend:check": "pnpm --dir frontend relay:validate && pnpm --dir frontend typecheck && pnpm --dir frontend test --run && pnpm --dir frontend exec playwright test e2e/kobalte-hydration.spec.ts e2e/virtual-list.spec.ts && pnpm --dir frontend build && pnpm --dir frontend test:built",
     "frontend:typecheck": "pnpm --dir frontend typecheck",
     "frontend:test": "pnpm --dir frontend test",

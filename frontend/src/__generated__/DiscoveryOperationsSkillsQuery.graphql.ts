@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<33ac6c64cfa9909e5e379a54d0dbdebe>>
+ * @generated SignedSource<<b248b8eb6842ca7906cc614023f9b217>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -11,24 +11,21 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 export type ApiErrorCode = "ALREADY_REGISTERED" | "AMBIGUOUS_PROVIDER" | "BUSY" | "CRAWL_FAILED" | "DISABLED" | "DISCOVERY_FAILED" | "FORBIDDEN" | "IDEMPOTENCY_CONFLICT" | "INTERNAL" | "INVALID_CURSOR" | "INVALID_FILTER" | "INVALID_INPUT" | "INVALID_PAGE" | "INVALID_URL" | "LAST_CREDENTIAL" | "NOT_DUE" | "NOT_FOUND" | "UNKNOWN_SKILL" | "UNSUPPORTED_PROVIDER" | "%future added value";
-export type CrawlOutcome = "FAILED" | "SUCCESS" | "%future added value";
-export type AdminOperationsStatusesQuery$variables = {
+export type SkillOrder = "SLUG_ASC" | "%future added value";
+export type DiscoveryOperationsSkillsQuery$variables = {
   after?: string | null | undefined;
   first?: number | null | undefined;
+  orderBy?: SkillOrder | null | undefined;
+  query?: string | null | undefined;
 };
-export type AdminOperationsStatusesQuery$data = {
-  readonly crawlStatuses: {
+export type DiscoveryOperationsSkillsQuery$data = {
+  readonly skills: {
     readonly edges: ReadonlyArray<{
       readonly cursor: string;
       readonly node: {
-        readonly careerSiteId: string;
-        readonly error: {
-          readonly code: ApiErrorCode;
-          readonly message: string;
-        } | null | undefined;
-        readonly finishedAt: string | null | undefined;
-        readonly outcome: CrawlOutcome | null | undefined;
-        readonly runId: string | null | undefined;
+        readonly displayName: string;
+        readonly id: string;
+        readonly slug: string;
       };
     }>;
     readonly error: {
@@ -44,9 +41,9 @@ export type AdminOperationsStatusesQuery$data = {
     readonly totalCount: number;
   };
 };
-export type AdminOperationsStatusesQuery = {
-  response: AdminOperationsStatusesQuery$data;
-  variables: AdminOperationsStatusesQuery$variables;
+export type DiscoveryOperationsSkillsQuery = {
+  response: DiscoveryOperationsSkillsQuery$data;
+  variables: DiscoveryOperationsSkillsQuery$variables;
 };
 
 const node: ConcreteRequest = (function(){
@@ -56,31 +53,35 @@ var v0 = {
   "name": "after"
 },
 v1 = {
-  "defaultValue": 50,
+  "defaultValue": 20,
   "kind": "LocalArgument",
   "name": "first"
 },
-v2 = [
+v2 = {
+  "defaultValue": "SLUG_ASC",
+  "kind": "LocalArgument",
+  "name": "orderBy"
+},
+v3 = {
+  "defaultValue": null,
+  "kind": "LocalArgument",
+  "name": "query"
+},
+v4 = {
+  "kind": "Variable",
+  "name": "orderBy",
+  "variableName": "orderBy"
+},
+v5 = {
+  "kind": "Variable",
+  "name": "query",
+  "variableName": "query"
+},
+v6 = [
   {
     "alias": null,
     "args": null,
-    "kind": "ScalarField",
-    "name": "code",
-    "storageKey": null
-  },
-  {
-    "alias": null,
-    "args": null,
-    "kind": "ScalarField",
-    "name": "message",
-    "storageKey": null
-  }
-],
-v3 = [
-  {
-    "alias": null,
-    "args": null,
-    "concreteType": "CrawlStatusEdge",
+    "concreteType": "SkillEdge",
     "kind": "LinkedField",
     "name": "edges",
     "plural": true,
@@ -95,7 +96,7 @@ v3 = [
       {
         "alias": null,
         "args": null,
-        "concreteType": "CrawlStatus",
+        "concreteType": "Skill",
         "kind": "LinkedField",
         "name": "node",
         "plural": false,
@@ -104,38 +105,21 @@ v3 = [
             "alias": null,
             "args": null,
             "kind": "ScalarField",
-            "name": "careerSiteId",
+            "name": "id",
             "storageKey": null
           },
           {
             "alias": null,
             "args": null,
             "kind": "ScalarField",
-            "name": "runId",
+            "name": "slug",
             "storageKey": null
           },
           {
             "alias": null,
             "args": null,
             "kind": "ScalarField",
-            "name": "outcome",
-            "storageKey": null
-          },
-          {
-            "alias": null,
-            "args": null,
-            "kind": "ScalarField",
-            "name": "finishedAt",
-            "storageKey": null
-          },
-          {
-            "alias": null,
-            "args": null,
-            "concreteType": "ApiError",
-            "kind": "LinkedField",
-            "name": "error",
-            "plural": false,
-            "selections": (v2/*: any*/),
+            "name": "displayName",
             "storageKey": null
           },
           {
@@ -204,11 +188,26 @@ v3 = [
     "kind": "LinkedField",
     "name": "error",
     "plural": false,
-    "selections": (v2/*: any*/),
+    "selections": [
+      {
+        "alias": null,
+        "args": null,
+        "kind": "ScalarField",
+        "name": "code",
+        "storageKey": null
+      },
+      {
+        "alias": null,
+        "args": null,
+        "kind": "ScalarField",
+        "name": "message",
+        "storageKey": null
+      }
+    ],
     "storageKey": null
   }
 ],
-v4 = [
+v7 = [
   {
     "kind": "Variable",
     "name": "after",
@@ -218,26 +217,33 @@ v4 = [
     "kind": "Variable",
     "name": "first",
     "variableName": "first"
-  }
+  },
+  (v4/*: any*/),
+  (v5/*: any*/)
 ];
 return {
   "fragment": {
     "argumentDefinitions": [
       (v0/*: any*/),
-      (v1/*: any*/)
+      (v1/*: any*/),
+      (v2/*: any*/),
+      (v3/*: any*/)
     ],
     "kind": "Fragment",
     "metadata": null,
-    "name": "AdminOperationsStatusesQuery",
+    "name": "DiscoveryOperationsSkillsQuery",
     "selections": [
       {
-        "alias": "crawlStatuses",
-        "args": null,
-        "concreteType": "CrawlStatusConnection",
+        "alias": "skills",
+        "args": [
+          (v4/*: any*/),
+          (v5/*: any*/)
+        ],
+        "concreteType": "SkillConnection",
         "kind": "LinkedField",
-        "name": "__AdminOperations_crawlStatuses_connection",
+        "name": "__DiscoveryOperations_skills_connection",
         "plural": false,
-        "selections": (v3/*: any*/),
+        "selections": (v6/*: any*/),
         "storageKey": null
       }
     ],
@@ -247,35 +253,40 @@ return {
   "kind": "Request",
   "operation": {
     "argumentDefinitions": [
+      (v3/*: any*/),
+      (v2/*: any*/),
       (v1/*: any*/),
       (v0/*: any*/)
     ],
     "kind": "Operation",
-    "name": "AdminOperationsStatusesQuery",
+    "name": "DiscoveryOperationsSkillsQuery",
     "selections": [
       {
         "alias": null,
-        "args": (v4/*: any*/),
-        "concreteType": "CrawlStatusConnection",
+        "args": (v7/*: any*/),
+        "concreteType": "SkillConnection",
         "kind": "LinkedField",
-        "name": "crawlStatuses",
+        "name": "skills",
         "plural": false,
-        "selections": (v3/*: any*/),
+        "selections": (v6/*: any*/),
         "storageKey": null
       },
       {
         "alias": null,
-        "args": (v4/*: any*/),
-        "filters": null,
+        "args": (v7/*: any*/),
+        "filters": [
+          "query",
+          "orderBy"
+        ],
         "handle": "connection",
-        "key": "AdminOperations_crawlStatuses",
+        "key": "DiscoveryOperations_skills",
         "kind": "LinkedHandle",
-        "name": "crawlStatuses"
+        "name": "skills"
       }
     ]
   },
   "params": {
-    "cacheID": "911a1ce9726dac444139cdf30a44da5d",
+    "cacheID": "261ca1edd4b181ae361b1ee54abd8f93",
     "id": null,
     "metadata": {
       "connection": [
@@ -284,18 +295,18 @@ return {
           "cursor": "after",
           "direction": "forward",
           "path": [
-            "crawlStatuses"
+            "skills"
           ]
         }
       ]
     },
-    "name": "AdminOperationsStatusesQuery",
+    "name": "DiscoveryOperationsSkillsQuery",
     "operationKind": "query",
-    "text": "query AdminOperationsStatusesQuery(\n  $first: Int = 50\n  $after: String\n) {\n  crawlStatuses(first: $first, after: $after) {\n    edges {\n      cursor\n      node {\n        careerSiteId\n        runId\n        outcome\n        finishedAt\n        error {\n          code\n          message\n        }\n        __typename\n      }\n    }\n    pageInfo {\n      hasNextPage\n      hasPreviousPage\n      startCursor\n      endCursor\n    }\n    totalCount\n    error {\n      code\n      message\n    }\n  }\n}\n"
+    "text": "query DiscoveryOperationsSkillsQuery(\n  $query: String\n  $orderBy: SkillOrder = SLUG_ASC\n  $first: Int = 20\n  $after: String\n) {\n  skills(query: $query, orderBy: $orderBy, first: $first, after: $after) {\n    edges {\n      cursor\n      node {\n        id\n        slug\n        displayName\n        __typename\n      }\n    }\n    pageInfo {\n      hasNextPage\n      hasPreviousPage\n      startCursor\n      endCursor\n    }\n    totalCount\n    error {\n      code\n      message\n    }\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "692cd2024d247dd4024ae7c1d0541fb6";
+(node as any).hash = "a9047857cdc60e0539f2f33cd950c8f8";
 
 export default node;

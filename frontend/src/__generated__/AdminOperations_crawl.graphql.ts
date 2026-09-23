@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<e4bb7a68b4244bc64ec0e084c8de2cb1>>
+ * @generated SignedSource<<80efb89b89b343ca6c7782e0ef404ced>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -28,10 +28,10 @@ export type AdminOperations_crawl$data = {
     readonly code: ApiErrorCode;
     readonly message: string;
   } | null | undefined;
-  readonly finishedAt: any | null | undefined;
+  readonly finishedAt: string | null | undefined;
   readonly id: string;
   readonly outcome: CrawlOutcome | null | undefined;
-  readonly startedAt: any;
+  readonly startedAt: string;
   readonly " $fragmentType": "AdminOperations_crawl";
 };
 export type AdminOperations_crawl$key = {

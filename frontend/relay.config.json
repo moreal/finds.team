@@ -2,6 +2,7 @@
   "src": "./src",
   "schema": "../schema/finds.graphqls",
   "language": "typescript",
+  "customScalarTypes": { "DateTime": "string" },
   "artifactDirectory": "./src/__generated__",
   "eagerEsModules": true,
   "noSourceControl": true,

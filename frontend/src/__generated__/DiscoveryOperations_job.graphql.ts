@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<3fd4a39b82c8dde6262b9e112fcb53ab>>
+ * @generated SignedSource<<f53be4a6fa3e5c4c351ea25fadd63efd>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -54,7 +54,7 @@ export type DiscoveryOperations_job$data = {
   readonly id: string;
   readonly status: PostingStatus;
   readonly title: string;
-  readonly updatedAt: any;
+  readonly updatedAt: string;
   readonly " $fragmentType": "DiscoveryOperations_job";
 };
 export type DiscoveryOperations_job$key = {

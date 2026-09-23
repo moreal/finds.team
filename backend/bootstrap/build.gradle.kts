@@ -44,6 +44,11 @@ dependencies {
   testRuntimeOnly(libs.junit.platform.launcher)
 }
 
+// Execute the exact committed Relay request text; resource inputs also invalidate test caching on drift.
+sourceSets.test {
+  resources.srcDir("../../frontend/src/__generated__")
+}
+
 // The browser gate needs frontend pnpm dependencies and Playwright Chromium in addition to Java/Docker.
 tasks.test {
   useJUnitPlatform {

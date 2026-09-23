@@ -380,6 +380,23 @@ does not replace application-level redirect and DNS-rebinding validation.
 
 ## Verification
 
+From the repository root, verify the shared Relay contract with:
+
+```sh
+pnpm relay:check
+```
+
+This checks committed Relay artifact freshness before any compiler-enabled test
+can refresh output, tests the byte-identical canonical `.graphqls` launcher, and
+runs the domain, application, persistence, GraphQL, and assembled Spring backend
+tests against PostgreSQL. `RelayVerticalSliceTest` sends the actual generated
+Relay request text through `/graphql`, including fragments and variables, to
+check public discovery, pagination, account isolation, administration, and
+mutation replay. Java 25, the locked frontend dependencies, and a
+Docker-compatible daemon are required. When schema or operation sources change,
+run `pnpm --dir frontend relay`, commit the generated artifacts, and rerun this
+gate. `pnpm frontend:check` remains the complete frontend compatibility gate.
+
 The checked-in Gradle 9.7.1 wrapper uses Java 25 from the Nix shell. Run all
 unit, architecture, fixture, PostgreSQL Testcontainers, and vertical-slice tests:
 
