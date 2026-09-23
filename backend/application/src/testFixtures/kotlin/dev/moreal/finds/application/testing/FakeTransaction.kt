@@ -6,6 +6,7 @@ import dev.moreal.finds.application.port.*
 import dev.moreal.finds.domain.career.CareerSite
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.career.SiteHost
+import dev.moreal.finds.domain.identity.User
 import java.time.Instant
 
 /**
@@ -16,14 +17,20 @@ import java.time.Instant
 class FakeTransaction(
   initialSites: List<CareerSite> = emptyList(),
   var auditFailure: (() -> Unit)? = null,
+  initialUsers: List<User> = emptyList(),
 ) : TransactionPort {
-  private var state = State(initialSites)
+  private var state = State(initialSites, FakeIdentityState(initialUsers))
   private var executing = false
   val sites: List<CareerSite> get() = synchronized(this) { state.sites.sites.toList() }
   val auditEvents: List<AuditEvent> get() = synchronized(this) { state.audit.toList() }
   val completedRequests: Map<CommandRequestKey, StoredCommandResult>
     get() = synchronized(this) { state.requests.mapNotNull { (key, row) -> row.result?.let { key to it } }.toMap() }
   val outboxMessages: List<EnqueuedMail> get() = synchronized(this) { state.outbox.toList() }
+  val users: List<User> get() = synchronized(this) { state.identity.users.values.toList() }
+  val otpStates: List<OtpAccountState> get() = synchronized(this) { state.identity.otps.values.toList() }
+  val credentials: List<PasskeyCredential> get() = synchronized(this) { state.identity.credentials.values.toList() }
+  val restrictedSessions: List<RestrictedSession> get() = synchronized(this) { state.identity.sessions.values.toList() }
+  val recoveryCodes: List<RecoveryCodeHash> get() = synchronized(this) { state.identity.recoveryCodes.values.toList() }
 
   @Synchronized
   override fun <T> execute(block: (TransactionContext) -> T): T {
@@ -42,13 +49,13 @@ class FakeTransaction(
     }
   }
 
-  private class State(initialSites: List<CareerSite>) {
+  private class State(initialSites: List<CareerSite>, val identity: FakeIdentityState) {
     val sites = FakeCareerSiteRepository(initialSites)
     val requests = linkedMapOf<CommandRequestKey, RequestRow>()
     val audit = mutableListOf<AuditEvent>()
     val outbox = mutableListOf<EnqueuedMail>()
 
-    fun snapshot() = State(sites.sites).also {
+    fun snapshot() = State(sites.sites, identity.snapshot()).also {
       it.requests.putAll(requests)
       it.audit.addAll(audit)
       it.outbox.addAll(outbox)
@@ -65,6 +72,13 @@ class FakeTransaction(
     private fun checkActive() = check(active && Thread.currentThread() === owner) { "Transaction context is inactive" }
 
     fun checkCompleted() = check(reserved.isEmpty()) { "Uncompleted command reservation" }
+
+    private val identityStores = snapshot.identity.stores(::checkActive)
+    override val users = identityStores.userRepository
+    override val otpChallenges = identityStores.otpRepository
+    override val credentials = identityStores.credentialRepository
+    override val restrictedSessions = identityStores.sessionRepository
+    override val recoveryCodes = identityStores.recoveryRepository
 
     override val careerSites = object : CareerSiteRepository {
       override fun findById(id: CareerSiteId): CareerSite? { checkActive(); return snapshot.sites.findById(id) }

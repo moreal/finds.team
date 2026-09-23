@@ -12,10 +12,18 @@ interface TransactionPort {
   fun <T> execute(block: (TransactionContext) -> T): T
 }
 
-/** Identity repositories will be added when the identity application ports exist. */
+/**
+ * Identity defaults fail closed until an adapter explicitly wires them. Existing non-identity
+ * commands continue to work; bootstrap must not expose enrollment endpoints before that wiring.
+ */
 interface TransactionContext {
   val careerSites: CareerSiteRepository
   val commandRequests: CommandRequestStore
   val auditLog: AuditLog
   val outbox: MailOutboxEnqueue
+  val users: UserRepository get() = error("Identity persistence is not configured")
+  val otpChallenges: OtpChallengeRepository get() = error("Identity persistence is not configured")
+  val credentials: PasskeyCredentialRepository get() = error("Identity persistence is not configured")
+  val restrictedSessions: RestrictedSessionRepository get() = error("Identity persistence is not configured")
+  val recoveryCodes: RecoveryCodeRepository get() = error("Identity persistence is not configured")
 }
