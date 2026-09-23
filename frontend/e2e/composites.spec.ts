@@ -57,7 +57,7 @@ test("popover returns focus on Escape and dismisses outside without trapping", a
   await expect(trigger).toBeFocused();
   await expect(page.getByRole("dialog", { name: "Filter options" })).toHaveCount(0);
   await trigger.click();
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.getByRole("button", { name: "Before controls" }).click();
   await expect(page.getByRole("dialog", { name: "Filter options" })).toHaveCount(0);
 });
 
@@ -83,4 +83,42 @@ test("tooltip supports focus and Escape while toast announcements persist until 
   await expect(page.getByRole("status").filter({ hasText: "Saved changes" })).toBeVisible();
   await page.getByRole("button", { name: "알림 닫기" }).click();
   await expect(page.getByText("Saved changes", { exact: true })).toHaveCount(0);
+});
+
+test("nested tooltip consumes Escape only while open so the next Escape dismisses its popover", async ({ page }) => {
+  const trigger = page.getByRole("button", { name: "More filters" });
+  await trigger.click();
+  const help = page.getByRole("button", { name: "Nested help" });
+  await help.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Choose a filter");
+  await help.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Filter options" })).toBeVisible();
+  await expect(help).toBeFocused();
+  await help.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Filter options" })).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+test("tooltip remains visible when the pointer leaves its focused trigger", async ({ page }) => {
+  const help = page.getByRole("button", { name: "Search help" });
+  await help.focus();
+  await help.hover();
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  await page.getByRole("button", { name: "Save changes" }).hover();
+  await expect(help).toBeFocused();
+  await expect(page.getByRole("tooltip")).toHaveText("Search by skill");
+  await page.getByRole("button", { name: "Save changes" }).focus();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("tooltip remains visible when focus leaves its hovered trigger", async ({ page }) => {
+  const help = page.getByRole("button", { name: "Search help" });
+  await help.hover();
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  await help.focus();
+  await page.getByRole("button", { name: "Save changes" }).focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Search by skill");
+  await page.getByRole("button", { name: "Save changes" }).hover();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
 });

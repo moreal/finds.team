@@ -13,7 +13,7 @@ export function CompositeControls() {
   return <section aria-label="Composite controls">
     <Combobox label="Skill search" options={[{ value: "solid", label: "Solid" }, { value: "rust", label: "Rust" }]} value={skill()} onChange={setSkill} />
     <output aria-label="Selected skill">{skill()}</output>
-    <Popover trigger="More filters" title="Filter options"><Button>Apply filter</Button></Popover>
+    <Popover trigger="More filters" title="Filter options"><Button>Apply filter</Button><Tooltip label="Nested help" content="Choose a filter" /></Popover>
     <Tabs label="Results" value={tab()} onChange={setTab} tabs={[{ value: "jobs", label: "Jobs", content: "Job results" }, { value: "companies", label: "Companies", content: "Company results" }]} />
     <Tooltip label="Search help" content="Search by skill" />
     <Button onClick={() => setMessage("Saved changes")}>Save changes</Button>
