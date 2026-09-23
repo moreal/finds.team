@@ -10,18 +10,31 @@ import kotlin.test.assertEquals
 class ArchitectureTest {
   @Test
   fun `security and transport frameworks are forbidden domain imports`() {
-    val forbiddenPrefixes = domainForbiddenImportPrefixes()
     assertEquals(
-      listOf("com.webauthn4j", "jakarta.servlet", "graphql"),
-      listOf("com.webauthn4j.data", "jakarta.servlet.http", "graphql.schema")
-        .filter { imported -> forbiddenPrefixes.any(imported::startsWith) }
-        .map { imported -> imported.substringBeforeLast('.') },
+      listOf("import com.webauthn4j.data", "import jakarta.servlet.http", "import graphql.schema"),
+      listOf("import com.webauthn4j.data", "import jakarta.servlet.http", "import graphql.schema")
+        .filter(::isForbiddenImportLine),
+    )
+  }
+
+  @Test
+  fun `JDBC datasource import is forbidden while adjacent packages remain allowed`() {
+    assertEquals(
+      listOf("import javax.sql.DataSource", "import javax.sql"),
+      listOf(
+        "import javax.sql.DataSource",
+        "import javax.sql",
+        "import javax.sqlx.DataSource",
+        "import java.sqlx.Connection",
+        "import graphqlish.Schema",
+        "import com.webauthn4jx.Parser",
+        "import jakarta.servletx.Servlet",
+      ).filter(::isForbiddenImportLine),
     )
   }
 
   @Test
   fun `domain source has no forbidden imports`() {
-    val forbiddenPrefixes = domainForbiddenImportPrefixes()
     val sourceRoot = Path.of("src/main/kotlin")
     val violations = Files.walk(sourceRoot).use { paths ->
       paths
@@ -29,11 +42,7 @@ class ArchitectureTest {
         .flatMap { path ->
           Files.readAllLines(path).mapIndexedNotNull { index, line ->
             val trimmed = line.trim()
-            val imported = trimmed.removePrefix("import ")
-            if (
-              trimmed.startsWith("import ") &&
-              forbiddenPrefixes.any(imported::startsWith)
-            ) {
+            if (isForbiddenImportLine(trimmed)) {
               "${sourceRoot.relativize(path)}:${index + 1}: $trimmed"
             } else {
               null
@@ -47,11 +56,20 @@ class ArchitectureTest {
     assertEquals(emptyList(), violations)
   }
 
+  private fun isForbiddenImportLine(line: String): Boolean {
+    if (!line.startsWith("import ")) return false
+    val imported = line.removePrefix("import ")
+    return domainForbiddenImportPrefixes().any { prefix ->
+      imported == prefix || imported.startsWith("$prefix.")
+    }
+  }
+
   private fun domainForbiddenImportPrefixes() = listOf(
     "org.springframework",
     "org.jooq",
     "io.ktor",
     "java.sql",
+    "javax.sql",
     "jakarta.persistence",
     "jakarta.servlet",
     "com.webauthn4j",

@@ -38,6 +38,15 @@ class AuditEventTest {
     assertFailsWith<IllegalArgumentException> {
       CommandMetadata.parse(requestId.toString(), correlationId.toString(), "cookie=secret")
     }
+    val secret = "otp=12345678"
+    for (field in 0..2) {
+      val values = arrayOf(requestId.toString(), correlationId.toString(), idempotencyKey.toString())
+      values[field] = secret
+      val failure = assertFailsWith<IllegalArgumentException> {
+        CommandMetadata.parse(values[0], values[1], values[2])
+      }
+      assertFalse(failure.message.orEmpty().contains(secret))
+    }
   }
 
   @Test
@@ -50,12 +59,25 @@ class AuditEventTest {
 
   @Test
   fun `audit actions expose stable wire names`() {
-    assertEquals("role.granted", AuditAction.ROLE_GRANTED.wireName)
-    assertEquals("career_site.registered", AuditAction.CAREER_SITE_REGISTERED.wireName)
-    assertEquals("crawl.manually_triggered", AuditAction.MANUAL_CRAWL_TRIGGERED.wireName)
-    assertEquals("passkey.registered", AuditAction.PASSKEY_REGISTERED.wireName)
-    assertEquals("recovery.completed", AuditAction.ACCOUNT_RECOVERY_COMPLETED.wireName)
-    assertEquals(AuditAction.ROLE_GRANTED, AuditAction.fromWireName("role.granted"))
+    val expected = listOf(
+      "role.granted",
+      "role.revoked",
+      "career_site.registered",
+      "career_site.settings_changed",
+      "crawl.manually_triggered",
+      "passkey.registered",
+      "passkey.removed",
+      "recovery_code.rotated",
+      "recovery.completed",
+      "session.revoked",
+      "admin_configuration.changed",
+    )
+    val actual = AuditAction.entries.map(AuditAction::wireName)
+    assertEquals(expected, actual)
+    assertEquals(expected.size, actual.toSet().size)
+    AuditAction.entries.forEach { action ->
+      assertEquals(action, AuditAction.fromWireName(action.wireName))
+    }
     assertFailsWith<IllegalArgumentException> { AuditAction.fromWireName("otp.secret") }
   }
 
@@ -73,9 +95,11 @@ class AuditEventTest {
 
   @Test
   fun `audit detail keys are allowlisted by action and secret shaped keys are rejected`() {
-    for (key in listOf("otp", "token", "cookie", "credential", "recoveryCode")) {
-      assertFailsWith<IllegalArgumentException> {
-        AuditDetails.from(AuditAction.ROLE_GRANTED, mapOf(key to "secret"))
+    for (action in AuditAction.entries) {
+      for (key in listOf("otp", "token", "cookie", "credential", "recoveryCode", "OTP", "access_token", "Cookie", "credential.id", "recovery_code")) {
+        assertFailsWith<IllegalArgumentException> {
+          AuditDetails.from(action, mapOf(key to "secret"))
+        }
       }
     }
     assertFailsWith<IllegalArgumentException> {
@@ -92,6 +116,17 @@ class AuditEventTest {
       mapOf("provider" to "FLEX"),
       AuditDetails.from(AuditAction.CAREER_SITE_REGISTERED, mapOf("provider" to "FLEX")).fields,
     )
+  }
+
+  @Test
+  fun `actor roles are defensively copied`() {
+    val roles = mutableSetOf(UserRole.USER)
+    val actor = Actor.User(userId, roles, now, AuthenticationStrength.PASSKEY)
+    roles.add(UserRole.ADMIN)
+    assertEquals(setOf(UserRole.USER), actor.roles)
+    assertFailsWith<UnsupportedOperationException> {
+      (actor.roles as MutableSet<UserRole>).add(UserRole.ADMIN)
+    }
   }
 
   @Test
