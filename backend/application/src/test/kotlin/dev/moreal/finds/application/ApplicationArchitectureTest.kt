@@ -9,15 +9,19 @@ import kotlin.test.assertEquals
 
 class ApplicationArchitectureTest {
   @Test
-  fun `application source has no adapter or framework imports`() {
-    val forbiddenPrefixes = listOf(
-      "org.springframework",
-      "org.jooq",
-      "io.ktor",
-      "java.sql",
-      "jakarta.persistence",
-      "org.jsoup",
+  fun `security and transport frameworks are forbidden application imports`() {
+    val forbiddenPrefixes = applicationForbiddenImportPrefixes()
+    assertEquals(
+      listOf("com.webauthn4j", "jakarta.servlet", "graphql"),
+      listOf("com.webauthn4j.data", "jakarta.servlet.http", "graphql.schema")
+        .filter { imported -> forbiddenPrefixes.any(imported::startsWith) }
+        .map { imported -> imported.substringBeforeLast('.') },
     )
+  }
+
+  @Test
+  fun `application source has no adapter or framework imports`() {
+    val forbiddenPrefixes = applicationForbiddenImportPrefixes()
     val sourceRoot = Path.of("src/main/kotlin")
     val violations = Files.walk(sourceRoot).use { paths ->
       paths
@@ -42,4 +46,16 @@ class ApplicationArchitectureTest {
 
     assertEquals(emptyList(), violations)
   }
+
+  private fun applicationForbiddenImportPrefixes() = listOf(
+    "org.springframework",
+    "org.jooq",
+    "io.ktor",
+    "java.sql",
+    "jakarta.persistence",
+    "jakarta.servlet",
+    "com.webauthn4j",
+    "graphql",
+    "org.jsoup",
+  )
 }

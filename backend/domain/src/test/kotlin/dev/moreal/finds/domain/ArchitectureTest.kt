@@ -9,16 +9,19 @@ import kotlin.test.assertEquals
 
 class ArchitectureTest {
   @Test
-  fun `domain source has no forbidden imports`() {
-    val forbiddenPrefixes = listOf(
-      "org.springframework",
-      "org.jooq",
-      "io.ktor",
-      "java.sql",
-      "jakarta.persistence",
-      "java.nio.file",
-      "kotlin.io.path",
+  fun `security and transport frameworks are forbidden domain imports`() {
+    val forbiddenPrefixes = domainForbiddenImportPrefixes()
+    assertEquals(
+      listOf("com.webauthn4j", "jakarta.servlet", "graphql"),
+      listOf("com.webauthn4j.data", "jakarta.servlet.http", "graphql.schema")
+        .filter { imported -> forbiddenPrefixes.any(imported::startsWith) }
+        .map { imported -> imported.substringBeforeLast('.') },
     )
+  }
+
+  @Test
+  fun `domain source has no forbidden imports`() {
+    val forbiddenPrefixes = domainForbiddenImportPrefixes()
     val sourceRoot = Path.of("src/main/kotlin")
     val violations = Files.walk(sourceRoot).use { paths ->
       paths
@@ -43,4 +46,17 @@ class ArchitectureTest {
 
     assertEquals(emptyList(), violations)
   }
+
+  private fun domainForbiddenImportPrefixes() = listOf(
+    "org.springframework",
+    "org.jooq",
+    "io.ktor",
+    "java.sql",
+    "jakarta.persistence",
+    "jakarta.servlet",
+    "com.webauthn4j",
+    "graphql",
+    "java.nio.file",
+    "kotlin.io.path",
+  )
 }
