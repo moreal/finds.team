@@ -20,8 +20,9 @@ import java.net.SocketTimeoutException
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.Properties
+import java.util.concurrent.Executor
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import org.eclipse.angus.mail.smtp.SMTPAddressFailedException
@@ -68,7 +69,7 @@ class SmtpMailTransport(private val settings: SmtpSettings) : MailTransport {
 
   override suspend fun send(message: MailMessage): MailDeliveryResult {
     val context = coroutineContext
-    return runInterruptible(Dispatchers.IO) {
+    return runInterruptible(socketIo) {
       context.ensureActive()
       var transport: TrackedSmtpTransport? = null
       try {
@@ -190,5 +191,14 @@ class SmtpMailTransport(private val settings: SmtpSettings) : MailTransport {
       (next as? MessagingException)?.nextException?.let(pending::add)
     }
     return seen.toList()
+  }
+
+  private companion object {
+    // Default Socket connect/read/write close on virtual-thread interruption (Java 21+).
+    // Platform-thread interruption cannot unblock these reads, so Dispatchers.IO would let a
+    // cancelled send outlive its outbox lease. runInterruptible still waits for cleanup to finish;
+    // the cancelled context is checked before classification, preserving possible acceptance.
+    // A thread-per-task Executor has no persistent pool or service requiring shutdown.
+    val socketIo = Executor { task -> Thread.ofVirtual().name("smtp-io").start(task) }.asCoroutineDispatcher()
   }
 }

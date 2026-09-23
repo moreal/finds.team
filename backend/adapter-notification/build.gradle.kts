@@ -9,6 +9,7 @@ dependencies {
   testImplementation(project(":mail-transport-testing"))
   testImplementation(project(":mail-transport-retry"))
   testImplementation(project(":mail-transport-pool"))
+  testImplementation(project(":mail-transport-smtp"))
   testImplementation(testFixtures(project(":application")))
   testImplementation(libs.kotlin.test.junit5)
   testImplementation(libs.junit.jupiter)

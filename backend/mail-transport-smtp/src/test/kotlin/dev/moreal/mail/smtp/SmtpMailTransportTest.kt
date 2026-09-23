@@ -23,6 +23,7 @@ import kotlin.test.*
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 import kotlinx.coroutines.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.MethodOrderer
@@ -271,6 +272,19 @@ class SmtpMailTransportTest {
       val sending = async { SmtpMailTransport(server.settings(readTimeout = 300.milliseconds)).send(message) }
       withContext(Dispatchers.IO) { assertTrue(server.dataStarted.await(3, TimeUnit.SECONDS)) }
       sending.cancel()
+      assertFailsWith<CancellationException> { sending.await() }
+    }
+  }
+
+  @Test
+  fun `cancellation terminates blocked socket IO promptly after complete DATA submission`() = runBlocking<Unit> {
+    LocalSmtpServer(finalResponse = null).use { server ->
+      val sending = async { SmtpMailTransport(server.settings(readTimeout = 10.seconds)).send(message) }
+      withContext(Dispatchers.IO) { server.delivery.get(3, TimeUnit.SECONDS) }
+      val cancelledAt = TimeSource.Monotonic.markNow()
+      sending.cancelAndJoin()
+      val elapsed = cancelledAt.elapsedNow()
+      assertTrue(elapsed < 1.seconds, "Cancellation waited $elapsed for an uninterruptible socket read")
       assertFailsWith<CancellationException> { sending.await() }
     }
   }
