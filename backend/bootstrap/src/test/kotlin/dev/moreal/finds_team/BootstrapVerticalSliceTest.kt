@@ -7,6 +7,10 @@ import dev.moreal.finds.application.port.SourceFetchPort
 import dev.moreal.finds.application.port.SourceFetchResult
 import dev.moreal.finds.application.port.TransactionPort
 import dev.moreal.finds.application.port.VerificationCodeNotifier
+import dev.moreal.finds.application.port.DeliveryRequestId
+import dev.moreal.finds.application.port.VerificationCode
+import dev.moreal.finds.application.port.VerificationPurpose
+import dev.moreal.finds.domain.identity.EmailAddress
 import dev.moreal.finds.notification.MailOutboxDispatcher
 import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
@@ -42,10 +46,18 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
+import kotlin.test.assertContains
+import java.util.UUID
+import kotlinx.coroutines.runBlocking
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.OutputCaptureExtension
+import org.springframework.boot.test.system.CapturedOutput
 
+@ExtendWith(OutputCaptureExtension::class)
 class BootstrapVerticalSliceTest {
   @Test
-  fun `Spring runtime starts migrates and exposes the GraphQL engine`() {
+  fun `Spring runtime starts migrates and exposes the GraphQL engine`(output: CapturedOutput) {
     val container = postgres.getOrElse { error ->
       assumeTrue(false, "Docker unavailable: ${error.message}")
       error("unreachable")
@@ -73,6 +85,23 @@ class BootstrapVerticalSliceTest {
         val data = result.data<Map<String, Any?>>()
         assertTrue(data.containsKey("jobPostings"))
         assertTrue(data.containsKey("crawlStatuses"))
+        val messageId = DeliveryRequestId(UUID.randomUUID())
+        val correlationId = UUID.randomUUID()
+        context.getBean(TransactionPort::class.java).execute {
+          context.getBean(VerificationCodeNotifier::class.java).deliver(it,
+            EmailAddress("private-runtime-recipient@example.test"), VerificationPurpose.ENROLLMENT,
+            VerificationCode("81726354"), Instant.now().plusSeconds(600), messageId, correlationId)
+        }
+        assertEquals(1, runBlocking { context.getBean(MailOutboxDispatcher::class.java).dispatch() })
+        val trace = output.out.lineSequence().single { "mail.delivery.attempt" in it }
+        assertContains(trace, "message_id=\"${messageId.value}\"")
+        assertContains(trace, "correlation_id=\"$correlationId\"")
+        assertContains(trace, "purpose=\"ENROLLMENT\"")
+        assertContains(trace, "attempt=\"1\"")
+        assertContains(trace, "provider=\"recording\"")
+        listOf("private-runtime-recipient", "81726354", "이메일 인증 코드").forEach {
+          assertFalse(output.out.contains(it), "Sensitive marker escaped to console: $it")
+        }
       }
   }
 

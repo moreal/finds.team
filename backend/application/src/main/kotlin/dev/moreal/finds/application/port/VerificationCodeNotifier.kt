@@ -23,5 +23,7 @@ interface VerificationCodeNotifier {
     code: VerificationCode,
     expiresAt: Instant,
     idempotencyKey: DeliveryRequestId,
+    /** Use command/request metadata when available; the legacy default identifies delivery, not an HTTP request. */
+    correlationId: UUID = idempotencyKey.value,
   ): DeliveryRequestId
 }

@@ -79,7 +79,8 @@ class MailOutboxDispatcher(
     if (!canSend(lease)) return
     val deadline = minOf(lease.leaseExpiresAt, lease.metadata.expiresAt, clock.now().plus(policy.sendTimeout))
     val result = try {
-      withContext(MailDeliveryContext(purpose = lease.metadata.purpose) + MailSendDeadline(deadline)) {
+      withContext(MailDeliveryContext(purpose = lease.metadata.purpose,
+        correlationId = lease.metadata.correlationId) + MailSendDeadline(deadline)) {
         withTimeoutOrNull(Duration.between(clock.now(), deadline).toKotlinDuration()) {
           transport.send(message)
         } ?: MailDeliveryResult.Indeterminate(transport.provider, MailFailure.TIMEOUT)

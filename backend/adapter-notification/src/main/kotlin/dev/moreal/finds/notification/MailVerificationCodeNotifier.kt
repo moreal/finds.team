@@ -9,14 +9,16 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 
 class MailVerificationCodeNotifier(private val clock: ClockPort) : VerificationCodeNotifier {
   override fun deliver(transaction: TransactionContext, recipient: EmailAddress, purpose: VerificationPurpose,
-    code: VerificationCode, expiresAt: Instant, idempotencyKey: DeliveryRequestId): DeliveryRequestId {
+    code: VerificationCode, expiresAt: Instant, idempotencyKey: DeliveryRequestId,
+    correlationId: UUID): DeliveryRequestId {
     Mailbox(recipient.value) // The domain's normalization policy is independent of transport validation.
     val now = clock.now()
     val metadata = MailPayloadMetadata(MailMessageId(idempotencyKey.value), purpose.name,
-      expiresAt.truncatedTo(ChronoUnit.MICROS))
+      expiresAt.truncatedTo(ChronoUnit.MICROS), correlationId)
     require(metadata.expiresAt > now) { "Verification challenge has expired" }
     val payload = VerificationMail.encode(recipient, code)
     try { transaction.outbox.enqueue(metadata, payload, now) } finally { payload.fill(0) }

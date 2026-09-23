@@ -25,6 +25,7 @@ class JooqMailOutbox(private val context: DSLContext, private val crypto: MailPa
     val encrypted = crypto.encrypt(canonical, plaintext)
     context.insertInto(MAIL_OUTBOX)
       .set(MAIL_OUTBOX.MESSAGE_ID, metadata.id.value)
+      .set(MAIL_OUTBOX.CORRELATION_ID, canonical.correlationId)
       .set(MAIL_OUTBOX.PURPOSE, canonical.purpose)
       .set(MAIL_OUTBOX.EXPIRES_AT, canonical.expiresAt.sql())
       .set(MAIL_OUTBOX.CREATED_AT, now.sql())
@@ -62,7 +63,8 @@ class JooqMailOutbox(private val context: DSLContext, private val crypto: MailPa
           .where(MAIL_OUTBOX.MESSAGE_ID.eq(row.messageId))
           .execute()
         MailOutboxLease(
-          metadata = MailPayloadMetadata(MailMessageId(row.messageId!!), row.purpose!!, row.expiresAt!!.toInstant()),
+          metadata = MailPayloadMetadata(MailMessageId(row.messageId!!), row.purpose!!,
+            row.expiresAt!!.toInstant(), row.correlationId!!),
           payload = EncryptedMailPayload(row.payloadCiphertext!!, row.payloadNonce!!, row.keyVersion!!),
           owner = owner,
           token = token,

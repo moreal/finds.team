@@ -8,7 +8,13 @@ import java.time.Instant
 import java.util.UUID
 
 /** Only non-sensitive routing metadata belongs here; recipient, code and template data are payload. */
-data class MailPayloadMetadata(val id: MailMessageId, val purpose: String, val expiresAt: Instant) {
+data class MailPayloadMetadata(
+  val id: MailMessageId,
+  val purpose: String,
+  val expiresAt: Instant,
+  /** Legacy callers correlate by delivery ID; new semantic callers supply their request correlation UUID. */
+  val correlationId: UUID = id.value,
+) {
   init {
     require(purpose.matches(Regex("[A-Z][A-Z0-9_]{0,63}"))) { "Invalid mail purpose" }
   }

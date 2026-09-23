@@ -12,9 +12,117 @@ import org.springframework.boot.test.context.TestConfiguration
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import java.time.Instant
 import kotlin.test.*
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import dev.moreal.mail.*
+import java.util.UUID
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import org.slf4j.LoggerFactory
+import dev.moreal.mail.testing.ScriptedMailTransport
 
 class MailConfigurationTest {
   private val key = Base64.getEncoder().encodeToString(ByteArray(32) { 7 })
+
+  @Test
+  fun `production retry and fallback trace every provider attempt without sensitive data`() = runBlocking {
+    val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as Logger
+    val logs = ListAppender<ILoggingEvent>().apply { start() }
+    root.addAppender(logs)
+    try {
+      val message = MailMessage(MailMessageId.new(), Mailbox("private-sender@example.test"),
+        Recipients(to = listOf(Mailbox("private-recipient@example.test"))), "private-subject",
+        MailContent(text = "private-body OTP 19384217", html = "<p>private-html</p>"))
+      val smtp = MailProvider("smtp")
+      val ses = MailProvider("ses")
+      val primary = ScriptedMailTransport(smtp, List(2) {
+        MailDeliveryResult.Rejected(smtp, MailFailure.SERVICE_UNAVAILABLE, true)
+      })
+      val secondary = ScriptedMailTransport(ses, listOf(MailDeliveryResult.Accepted(ses, "private-provider-receipt")))
+      val properties = MailProperties(retry = MailProperties.Retry(maxAttempts = 2,
+        initialDelay = Duration.ZERO, maximumDelay = Duration.ZERO))
+      val correlation = UUID.randomUUID()
+      val registry = SimpleMeterRegistry()
+      MailConfiguration().composeProviders(listOf(primary to 100, secondary to 50), properties,
+        ClockPort(Instant::now), registry).use { providers ->
+        withContext(MailDeliveryContext(purpose = "RECOVERY", correlationId = correlation)) {
+          assertIs<MailDeliveryResult.Accepted>(providers.transport.send(message))
+        }
+      }
+      val traces = logs.list.filter { it.message == "mail.delivery.attempt" }
+      assertEquals(3, traces.size)
+      val fields = traces.map { event -> event.keyValuePairs.associate { it.key to it.value } }
+      assertEquals(listOf("smtp", "smtp", "ses"), fields.map { it["provider"] })
+      assertEquals(listOf(1, 2, 1), fields.map { it["attempt"] })
+      assertEquals(listOf("RETRYABLE_REJECTED", "RETRYABLE_REJECTED", "ACCEPTED"), fields.map { it["result"] })
+      fields.forEach {
+        assertEquals(message.id.toString(), it["message_id"])
+        assertEquals(correlation.toString(), it["correlation_id"])
+        assertEquals("RECOVERY", it["purpose"])
+        assertTrue((it["latency_ns"] as Long) >= 0)
+        assertEquals(setOf("message_id", "provider", "result", "latency_ns", "attempt", "purpose", "correlation_id"), it.keys)
+      }
+      assertEquals(listOf(message.id, message.id), primary.messages().map { it.id })
+      assertEquals(listOf(message.id), secondary.messages().map { it.id })
+      assertEquals(2.0, registry.get("finds.mail.attempts").tag("provider", "smtp").counter().count())
+      val rawFailure = IllegalStateException("private-exception credentials private-password")
+      val throwing = object : MailTransport {
+        override val provider = smtp
+        override suspend fun send(message: MailMessage): MailDeliveryResult = throw rawFailure
+      }
+      MailConfiguration().composeProviders(listOf(throwing to 100), properties, ClockPort(Instant::now), registry).use {
+        assertFailsWith<IllegalStateException> { it.transport.send(message) }
+      }
+      assertEquals(3, logs.list.count { it.message == "mail.delivery.attempt" })
+      val output = logs.list.joinToString { "${it.formattedMessage} ${it.keyValuePairs} ${it.argumentArray?.toList()} ${it.throwableProxy?.message}" }
+      listOf("private-sender", "private-recipient", "private-subject", "private-body", "19384217",
+        "private-html", "private-provider-receipt", "private-exception", "private-password").forEach {
+        assertFalse(output.contains(it), "Sensitive marker escaped to production logs: $it")
+      }
+      assertTrue(traces.all { it.throwableProxy == null })
+    } finally {
+      root.detachAppender(logs)
+      logs.stop()
+    }
+  }
+
+  @Test
+  fun `production composition emits safe structured trace fields`() {
+    val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as Logger
+    val logs = ListAppender<ILoggingEvent>().apply { start() }
+    root.addAppender(logs)
+    try {
+      runner().withPropertyValues("spring.profiles.active=test", "finds.mail.recording=true").run { context ->
+        assertNull(context.startupFailure)
+        val message = MailMessage(MailMessageId.new(), Mailbox("private-sender@example.test"),
+          Recipients(to = listOf(Mailbox("private-recipient@example.test"))), "private-subject",
+          MailContent(text = "private-body OTP 19384217"))
+        val correlation = UUID.randomUUID()
+        runBlocking {
+          withContext(MailDeliveryContext(purpose = "ENROLLMENT", correlationId = correlation)) {
+            assertIs<MailDeliveryResult.Accepted>(context.getBean(MailTransport::class.java).send(message))
+          }
+        }
+        val trace = logs.list.single { it.message == "mail.delivery.attempt" }
+        val fields = trace.keyValuePairs.associate { it.key to it.value }
+        assertEquals(message.id.toString(), fields["message_id"])
+        assertEquals(correlation.toString(), fields["correlation_id"])
+        assertEquals("ENROLLMENT", fields["purpose"])
+        assertEquals(1, fields["attempt"])
+        assertEquals("recording", fields["provider"])
+        assertEquals("ACCEPTED", fields["result"])
+        assertNull(trace.throwableProxy)
+        val output = logs.list.joinToString { "${it.formattedMessage} ${it.keyValuePairs} ${it.argumentArray?.toList()}" }
+        listOf("private-sender", "private-recipient", "private-subject", "private-body", "19384217").forEach {
+          assertFalse(output.contains(it))
+        }
+      }
+    } finally {
+      root.detachAppender(logs)
+      logs.stop()
+    }
+  }
 
   @Test
   fun `startup fails closed without production transport and key`() {

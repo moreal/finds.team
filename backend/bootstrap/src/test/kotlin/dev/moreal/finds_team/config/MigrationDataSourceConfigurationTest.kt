@@ -74,7 +74,7 @@ class MigrationDataSourceConfigurationTest {
         context.getBean(Flyway::class.java).configuration.dataSource.connection.use {
           assertEquals("finds_migrator", it.metaData.userName)
         }
-        assertEquals(3, context.getBean(Flyway::class.java).info().applied().size)
+        assertEquals(4, context.getBean(Flyway::class.java).info().applied().size)
       }
     }
   }

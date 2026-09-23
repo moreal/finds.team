@@ -16,6 +16,11 @@ spring:
         size: 1
       thread-name-prefix: finds-scheduler-
 
+logging:
+  pattern:
+    # Keep safe SLF4J structured fields visible in both default console and file appenders.
+    level: "%5p %kvp"
+
 server:
   error:
     whitelabel:

@@ -20,6 +20,7 @@ import org.jooq.SQLDialect
 import org.jooq.exception.DataAccessException
 import org.jooq.impl.DSL
 import org.slf4j.LoggerFactory
+import org.flywaydb.core.Flyway
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -30,6 +31,30 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class JooqMailOutboxTest : PostgresIntegrationTest() {
+  @Test
+  fun `V4 backfills retained V3 mail without changing encrypted payload or message identity`() {
+    val source = resetPublicSchema()
+    Flyway.configure().dataSource(source).target("3").load().migrate()
+    val db = DSL.using(source, SQLDialect.POSTGRES)
+    val metadata = metadata()
+    val payload = crypto().encrypt(metadata, PAYLOAD)
+    // Insert the pre-V4 shape so this exercises an upgrade of a retained row, not a fresh schema.
+    db.execute("""INSERT INTO mail_outbox
+      (message_id, purpose, expires_at, created_at, payload_ciphertext, payload_nonce, key_version, next_attempt_at)
+      VALUES (?, ?, ?::timestamptz, ?::timestamptz, ?, ?, ?, ?::timestamptz)""", metadata.id.value, metadata.purpose,
+      metadata.expiresAt.atOffset(java.time.ZoneOffset.UTC), NOW.atOffset(java.time.ZoneOffset.UTC),
+      payload.ciphertext, payload.nonce, payload.keyVersion, NOW.atOffset(java.time.ZoneOffset.UTC))
+    Flyway.configure().dataSource(source).load().migrate()
+    assertEquals(1L, db.fetchValue("""SELECT count(*) FROM information_schema.columns
+      WHERE table_name = 'mail_outbox' AND column_name = 'correlation_id' AND is_nullable = 'NO'"""))
+    assertEquals(metadata.id.value, db.fetchValue("SELECT correlation_id FROM mail_outbox"))
+    val lease = JooqMailOutbox(db, crypto()).leaseBatch("upgrade", NOW, TTL, 1).single()
+    assertEquals(metadata.id, lease.metadata.id)
+    assertEquals(metadata.id.value, lease.metadata.correlationId)
+    assertContentEquals(payload.ciphertext, lease.payload.ciphertext)
+    assertContentEquals(PAYLOAD, crypto().decrypt(lease.metadata, lease.payload))
+  }
+
   @Test
   fun `migrations create encrypted outbox and attempt storage`() {
     val (dataSource, _) = migratedContext()

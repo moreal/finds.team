@@ -17,6 +17,7 @@ import dev.moreal.mail.retry.RetryMailTransport
 import dev.moreal.mail.pool.PriorityMailTransport
 import dev.moreal.mail.observability.*
 import io.micrometer.core.instrument.MeterRegistry
+import org.slf4j.LoggerFactory
 import java.util.concurrent.TimeUnit
 
 @Configuration(proxyBeanMethods = false)
@@ -39,13 +40,30 @@ class MailConfiguration {
     if (properties.ses.enabled) entries += SesMailTransport(SesSettings(properties.ses.region,
       properties.ses.configurationSet)) to properties.ses.priority
     if (properties.recording) entries += RecordingMailTransport(MailProvider("recording")) to 0
+    return composeProviders(entries, properties, clock, registry)
+  }
+
+  internal fun composeProviders(entries: List<Pair<MailTransport, Int>>, properties: MailProperties,
+    clock: ClockPort, registry: MeterRegistry): MailProviders {
     val sink = object : MailObservationSink {
       override fun metric(metric: MailAttemptMetric) {
         registry.counter("finds.mail.attempts", "provider", metric.provider.value, "result", metric.result.name).increment()
         registry.timer("finds.mail.attempt.latency", "provider", metric.provider.value)
           .record(metric.latencyNanos, TimeUnit.NANOSECONDS)
       }
-      override fun trace(trace: MailAttemptTrace) = Unit // No recipient, OTP, rendered body or provider exception logging.
+      override fun trace(trace: MailAttemptTrace) {
+        // Only UUIDs, numbers and closed categories cross this boundary. Never log a message,
+        // receipt, credentials, provider response or exception, including as a structured value.
+        logger.atInfo()
+          .addKeyValue("message_id", trace.messageId.toString())
+          .addKeyValue("provider", trace.provider.value.takeIf { it in setOf("smtp", "ses", "recording") } ?: "other")
+          .addKeyValue("result", trace.result.name)
+          .addKeyValue("latency_ns", trace.latencyNanos)
+          .addKeyValue("attempt", trace.attempt)
+          .addKeyValue("purpose", trace.purpose?.takeIf { it in setOf("ENROLLMENT", "RECOVERY") } ?: "UNSPECIFIED")
+          .addKeyValue("correlation_id", trace.correlationId?.toString())
+          .log("mail.delivery.attempt")
+      }
     }
     val pool = PriorityMailTransport(entries.map { (provider, priority) ->
       PriorityMailTransport.Entry(RetryMailTransport(ObservedMailTransport(
@@ -56,6 +74,10 @@ class MailConfiguration {
 
   @Bean
   fun mailTransport(providers: MailProviders): MailTransport = providers.transport
+
+  private companion object {
+    val logger = LoggerFactory.getLogger(MailConfiguration::class.java)
+  }
 }
 
 class MailProviders(val transport: MailTransport, private val providers: List<MailTransport>) : AutoCloseable {
