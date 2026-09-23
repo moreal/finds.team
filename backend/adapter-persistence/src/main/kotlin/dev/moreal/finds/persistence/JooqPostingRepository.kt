@@ -9,6 +9,7 @@ import dev.moreal.finds.domain.posting.JobPosting
 import dev.moreal.finds.domain.posting.JobPostingId
 import dev.moreal.finds.domain.posting.PostingStatus
 import dev.moreal.finds.domain.posting.PostingClassification
+import dev.moreal.finds.domain.posting.SkillMention
 import dev.moreal.finds.domain.search.Filter
 import dev.moreal.finds.domain.search.normalize
 import dev.moreal.finds.persistence.jooq.generated.tables.records.JobPostingsRecord
@@ -18,41 +19,47 @@ import java.time.ZoneOffset
 import java.util.Locale
 import org.jooq.Condition
 import org.jooq.DSLContext
+import org.jooq.Record2
 import org.jooq.impl.DSL
 
 class JooqPostingRepository(
   private val context: DSLContext,
 ) : PostingRepository {
   override fun findByCareerSite(id: CareerSiteId): List<JobPosting> {
-    val records = context.selectFrom(JOB_POSTINGS)
+    return context.select(JOB_POSTINGS, POSTING_SKILL_MENTIONS)
+      .from(JOB_POSTINGS)
       .where(JOB_POSTINGS.CAREER_SITE_ID.eq(id.value))
       .orderBy(JOB_POSTINGS.ID.asc())
       .fetch()
-    val classifications = context.loadClassifications(records)
-    return records.map { it.toDomain(classifications[it.id]) }
+      .map { it.toDomain() }
   }
 
   override fun search(filter: Filter, page: PageRequest): SearchPage {
     val condition = filter.normalize().toCondition()
-    val totalCount = context.selectCount()
-      .from(JOB_POSTINGS)
-      .where(condition)
-      .fetchOne(0, Long::class.java) ?: 0L
     val cursorCondition = page.after?.let(::afterCondition) ?: DSL.trueCondition()
-    val records = context.selectFrom(JOB_POSTINGS)
-      .where(condition.and(cursorCondition))
-      .orderBy(JOB_POSTINGS.UPDATED_AT.desc(), JOB_POSTINGS.ID.desc())
-      .limit(page.size + 1)
-      .fetch()
-    val pageRecords = records.take(page.size)
-    val classifications = context.loadClassifications(pageRecords)
-    val selected = pageRecords.map { it.toDomain(classifications[it.id]) }
+    // One outer row keeps the total available even for an empty page. Count, bounded page,
+    // and nested associations all share one statement snapshot on the caller's connection.
+    val result = context.select(
+      DSL.field(DSL.select(DSL.count().cast(Long::class.java)).from(JOB_POSTINGS).where(condition)),
+      DSL.multiset(DSL.select(JOB_POSTINGS, POSTING_SKILL_MENTIONS)
+        .from(JOB_POSTINGS)
+        .where(condition.and(cursorCondition))
+        .orderBy(JOB_POSTINGS.UPDATED_AT.desc(), JOB_POSTINGS.ID.desc())
+        .limit(page.size + 1)),
+    ).fetchSingle()
+    val records = result.value2()
+    val selected = records.take(page.size).map { it.toDomain() }
     val next = if (records.size > page.size) {
       selected.lastOrNull()?.let { SearchCursor(it.updatedAt, it.id) }
     } else {
       null
     }
-    return SearchPage(selected, next, totalCount)
+    return SearchPage(selected, next, result.value1())
+  }
+
+  private fun Record2<JobPostingsRecord, List<SkillMention>>.toDomain(): JobPosting {
+    val posting = value1()
+    return posting.toDomain(posting.toClassification(value2()))
   }
 
   private fun afterCondition(cursor: SearchCursor): Condition {

@@ -7,6 +7,7 @@ import dev.moreal.finds.persistence.jooq.generated.tables.references.POSTING_SKI
 import kotlinx.serialization.json.*
 import org.jooq.DSLContext
 import org.jooq.JSONB
+import org.jooq.impl.DSL
 
 /** Called only with the successful-crawl transaction; classification is pure domain work. */
 internal fun DSLContext.persistClassification(id: Long, raw: RawPosting) {
@@ -42,32 +43,33 @@ internal fun DSLContext.persistClassification(id: Long, raw: RawPosting) {
   if (associations.isNotEmpty()) batch(associations).execute()
 }
 
-/** One association query per returned page/site, never one query per posting. */
-internal fun DSLContext.loadClassifications(records: List<JobPostingsRecord>): Map<Long, PostingClassification> {
-  val classified = records.filter { it.taxonomyVersion != null }
-  if (classified.isEmpty()) return emptyMap()
-  val skills = selectFrom(POSTING_SKILLS)
-    .where(POSTING_SKILLS.JOB_POSTING_ID.`in`(classified.map { it.id }))
+/** Nested collection stays in the posting SELECT's MVCC snapshot, including at READ COMMITTED. */
+internal val POSTING_SKILL_MENTIONS = DSL.multiset(
+  DSL.select(POSTING_SKILLS.CANONICAL_SLUG, POSTING_SKILLS.MENTION_TEXT,
+    POSTING_SKILLS.SKILL, POSTING_SKILLS.REQUIREMENT_LEVEL)
+    .from(POSTING_SKILLS)
+    .where(POSTING_SKILLS.JOB_POSTING_ID.eq(JOB_POSTINGS.ID))
     .orderBy(POSTING_SKILLS.MENTION_ORDER, POSTING_SKILLS.SKILL)
-    .fetch()
-    .groupBy { requireNotNull(it.jobPostingId) }
-  return classified.associate { row ->
-    val id = requireNotNull(row.id)
-    val knownAndLegacy = skills[id].orEmpty().map {
-      SkillMention(it.canonicalSlug, it.mentionText ?: requireNotNull(it.skill),
-        SkillRequirementLevel.valueOf(requireNotNull(it.requirementLevel)))
-    }
-    val unknown = Json.parseToJsonElement(requireNotNull(row.unknownSkillMentions).data()).jsonArray.map {
-      val mention = it.jsonObject
-      SkillMention(null, mention.getValue("text").jsonPrimitive.content,
-        SkillRequirementLevel.valueOf(mention.getValue("level").jsonPrimitive.content))
-    }
-    id to PostingClassification(requireNotNull(row.taxonomyVersion), knownAndLegacy + unknown,
-      ClassifiedValue(RoleCategory.valueOf(requireNotNull(row.roleCategory)), row.title),
-      ClassifiedValue(EmploymentType.valueOf(requireNotNull(row.employmentType)), row.employmentHint),
-      ClassifiedValue(RemotePolicy.valueOf(requireNotNull(row.remotePolicy)), row.remoteHint),
-      row.locationDisplayName?.let { NormalizedLocation(it, requireNotNull(row.locationSearchValue)) })
+).convertFrom { records ->
+  records.map { row ->
+    SkillMention(row.value1(), row.value2() ?: requireNotNull(row.value3()),
+      SkillRequirementLevel.valueOf(requireNotNull(row.value4())))
   }
+}.`as`("skill_mentions")
+
+/** Mapping is pure: all evidence was fetched with this posting, never on a later statement. */
+internal fun JobPostingsRecord.toClassification(skills: List<SkillMention>): PostingClassification? {
+  val version = taxonomyVersion ?: return null
+  val unknown = Json.parseToJsonElement(requireNotNull(unknownSkillMentions).data()).jsonArray.map {
+    val mention = it.jsonObject
+    SkillMention(null, mention.getValue("text").jsonPrimitive.content,
+      SkillRequirementLevel.valueOf(mention.getValue("level").jsonPrimitive.content))
+  }
+  return PostingClassification(version, skills + unknown,
+    ClassifiedValue(RoleCategory.valueOf(requireNotNull(roleCategory)), title),
+    ClassifiedValue(EmploymentType.valueOf(requireNotNull(employmentType)), employmentHint),
+    ClassifiedValue(RemotePolicy.valueOf(requireNotNull(remotePolicy)), remoteHint),
+    locationDisplayName?.let { NormalizedLocation(it, requireNotNull(locationSearchValue)) })
 }
 
 internal fun JobPostingsRecord.toRawPosting(): RawPosting = RawPosting(

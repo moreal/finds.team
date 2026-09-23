@@ -2,6 +2,7 @@ package dev.moreal.finds.persistence
 
 import dev.moreal.finds.application.model.NewCareerSite
 import dev.moreal.finds.application.model.PageRequest
+import dev.moreal.finds.application.model.SearchCursor
 import dev.moreal.finds.application.port.InsertCareerSiteResult
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.career.SiteUrl
@@ -41,6 +42,11 @@ class JooqPostingRepositoryTest : PostgresIntegrationTest() {
     assertEquals(listOf("b", "a"), first.postings.map { it.raw.externalKey })
     assertEquals(listOf("c", "d"), second.postings.map { it.raw.externalKey })
     assertEquals(null, second.next)
+    val beyondLast = repository.search(Filter.And(emptyList()),
+      PageRequest(2, SearchCursor(NOW.minusSeconds(3), second.postings.last().id)))
+    assertEquals(4, beyondLast.totalCount, "An empty cursor page must retain the total before cursor filtering")
+    assertEquals(emptyList(), beyondLast.postings)
+    assertEquals(null, beyondLast.next)
     assertEquals(
       listOf("d"),
       repository.search(Filter.TextContains("%_"), PageRequest(100)).postings
