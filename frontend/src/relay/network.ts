@@ -1,4 +1,5 @@
 import { Network, type FetchFunction, type RequestParameters, type Variables } from "relay-runtime";
+import { csrfHeaders } from '../security/csrf';
 
 export class GraphQLRequestError extends Error {
   constructor(readonly status: number, readonly correlationId: string) {
@@ -50,7 +51,11 @@ export function createServerNetwork(request: Request) {
 }
 
 export function createBrowserNetwork() {
-  return Network.create((operation, variables) =>
-    fetchGraphQL("/graphql", operation, variables, graphqlHeaders(), "same-origin"),
-  );
+  return Network.create(async (operation, variables) => {
+    const headers = graphqlHeaders();
+    if (operation.operationKind === 'mutation') {
+      for (const [name, value] of Object.entries(await csrfHeaders())) headers.set(name, value);
+    }
+    return fetchGraphQL('/graphql', operation, variables, headers, 'same-origin');
+  });
 }

@@ -13,6 +13,17 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+it('refreshes CSRF for each browser mutation, including after session rotation', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(Response.json({ token: 'fresh', headerName: 'X-CSRF-TOKEN' })).mockResolvedValueOnce(Response.json({ data: {} }))
+    .mockResolvedValueOnce(Response.json({ token: 'rotated', headerName: 'X-CSRF-TOKEN' })).mockResolvedValueOnce(Response.json({ data: {} }));
+  vi.stubGlobal('fetch', fetch);
+  await createBrowserNetwork().execute({ ...query, operationKind: 'mutation' }, {}, {}).toPromise();
+  expect(fetch.mock.calls[0][0]).toBe('/auth/csrf');
+  expect(new Headers(fetch.mock.calls[1][1].headers).get('X-CSRF-TOKEN')).toBe('fresh');
+  await createBrowserNetwork().execute({ ...query, operationKind: 'mutation' }, {}, {}).toPromise();
+  expect(new Headers(fetch.mock.calls[3][1].headers).get('X-CSRF-TOKEN')).toBe('rotated');
+});
+
 it.each(["query", "mutation"] as const)("forwards only allowed headers for a server %s", async (operationKind) => {
   vi.stubEnv("FINDS_INTERNAL_GRAPHQL_URL", "http://backend.test/graphql");
   const fetch = vi.fn().mockResolvedValue(Response.json({ data: {} }));

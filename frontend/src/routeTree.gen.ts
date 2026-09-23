@@ -10,6 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as JoinRouteImport } from './routes/join'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as RecoverRouteImport } from './routes/recover'
+import { Route as AccountSecurityRouteImport } from './routes/account/security'
 import { Route as CompaniesSlugRouteImport } from './routes/companies/$slug'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as JobsIdRouteImport } from './routes/jobs/$id'
@@ -18,6 +22,26 @@ import { Route as SkillsSlugRouteImport } from './routes/skills/$slug'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JoinRoute = JoinRouteImport.update({
+  id: '/join',
+  path: '/join',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecoverRoute = RecoverRouteImport.update({
+  id: '/recover',
+  path: '/recover',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountSecurityRoute = AccountSecurityRouteImport.update({
+  id: '/account/security',
+  path: '/account/security',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CompaniesSlugRoute = CompaniesSlugRouteImport.update({
@@ -43,6 +67,10 @@ const SkillsSlugRoute = SkillsSlugRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/join': typeof JoinRoute
+  '/login': typeof LoginRoute
+  '/recover': typeof RecoverRoute
+  '/account/security': typeof AccountSecurityRoute
   '/companies/$slug': typeof CompaniesSlugRoute
   '/jobs/$id': typeof JobsIdRoute
   '/skills/$slug': typeof SkillsSlugRoute
@@ -50,6 +78,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/join': typeof JoinRoute
+  '/login': typeof LoginRoute
+  '/recover': typeof RecoverRoute
+  '/account/security': typeof AccountSecurityRoute
   '/companies/$slug': typeof CompaniesSlugRoute
   '/jobs/$id': typeof JobsIdRoute
   '/skills/$slug': typeof SkillsSlugRoute
@@ -58,6 +90,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/join': typeof JoinRoute
+  '/login': typeof LoginRoute
+  '/recover': typeof RecoverRoute
+  '/account/security': typeof AccountSecurityRoute
   '/companies/$slug': typeof CompaniesSlugRoute
   '/jobs/$id': typeof JobsIdRoute
   '/skills/$slug': typeof SkillsSlugRoute
@@ -65,12 +101,34 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/companies/$slug' | '/jobs/$id' | '/skills/$slug' | '/jobs/'
+  fullPaths:
+    | '/'
+    | '/join'
+    | '/login'
+    | '/recover'
+    | '/account/security'
+    | '/companies/$slug'
+    | '/jobs/$id'
+    | '/skills/$slug'
+    | '/jobs/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/companies/$slug' | '/jobs/$id' | '/skills/$slug' | '/jobs'
+  to:
+    | '/'
+    | '/join'
+    | '/login'
+    | '/recover'
+    | '/account/security'
+    | '/companies/$slug'
+    | '/jobs/$id'
+    | '/skills/$slug'
+    | '/jobs'
   id:
     | '__root__'
     | '/'
+    | '/join'
+    | '/login'
+    | '/recover'
+    | '/account/security'
     | '/companies/$slug'
     | '/jobs/$id'
     | '/skills/$slug'
@@ -79,6 +137,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  JoinRoute: typeof JoinRoute
+  LoginRoute: typeof LoginRoute
+  RecoverRoute: typeof RecoverRoute
+  AccountSecurityRoute: typeof AccountSecurityRoute
   CompaniesSlugRoute: typeof CompaniesSlugRoute
   JobsIdRoute: typeof JobsIdRoute
   SkillsSlugRoute: typeof SkillsSlugRoute
@@ -92,6 +154,34 @@ declare module '@tanstack/solid-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/join': {
+      id: '/join'
+      path: '/join'
+      fullPath: '/join'
+      preLoaderRoute: typeof JoinRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recover': {
+      id: '/recover'
+      path: '/recover'
+      fullPath: '/recover'
+      preLoaderRoute: typeof RecoverRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account/security': {
+      id: '/account/security'
+      path: '/account/security'
+      fullPath: '/account/security'
+      preLoaderRoute: typeof AccountSecurityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/companies/$slug': {
@@ -127,6 +217,10 @@ declare module '@tanstack/solid-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  JoinRoute: JoinRoute,
+  LoginRoute: LoginRoute,
+  RecoverRoute: RecoverRoute,
+  AccountSecurityRoute: AccountSecurityRoute,
   CompaniesSlugRoute: CompaniesSlugRoute,
   JobsIdRoute: JobsIdRoute,
   SkillsSlugRoute: SkillsSlugRoute,
