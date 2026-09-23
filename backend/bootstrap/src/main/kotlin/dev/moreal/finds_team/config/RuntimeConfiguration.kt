@@ -232,12 +232,14 @@ class RuntimeConfiguration {
 
   @Bean
   fun registerCareerSite(
-    sites: CareerSiteRepository,
+    transactions: TransactionPort,
     discovery: SourceDiscoveryPort,
+    clock: ClockPort,
     properties: FindsProperties,
   ): RegisterCareerSite = RegisterCareerSite(
-    sites,
+    transactions,
     discovery,
+    clock,
     CrawlSettings(successfulInterval = properties.crawl.successInterval),
   )
 

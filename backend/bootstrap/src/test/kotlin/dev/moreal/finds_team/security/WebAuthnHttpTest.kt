@@ -191,6 +191,53 @@ class WebAuthnHttpTest {
       .content("""{"query":"mutation { triggerCrawl(careerSiteId: \"1\") { outcome } }"}"""))
       .andExpect(status().isForbidden)
   }
+  @Test fun `registration uses live Passkey administrator identity and replays reordered GraphQL input`() {
+    discoveries.set(0)
+    val key = UUID.randomUUID().toString()
+    val host = "jobs-${UUID.randomUUID()}.example.test"
+    val mutation = "mutation Register(\$input: RegisterCareerSiteInput!) { registerCareerSite(input: \$input) { site { id } error { code } } }"
+    fun register(session: MockHttpSession? = null, name: String = "Acme", reverse: Boolean = false): JsonNode {
+      val input = if (reverse) linkedMapOf("idempotencyKey" to key, "displayName" to name, "url" to "https://$host")
+        else linkedMapOf("url" to "https://$host", "displayName" to name, "idempotencyKey" to key)
+      val builder = post("/graphql").secure(true).with(csrf()).contentType("application/json")
+        .content(json.writeValueAsString(mapOf("query" to mutation, "variables" to mapOf("input" to input))))
+      if (session != null) builder.session(session)
+      val pending = mvc.perform(builder).andExpect(request().asyncStarted()).andReturn()
+      val response = mvc.perform(asyncDispatch(pending)).andExpect(status().isOk).andReturn().response
+      return json.readTree(response.contentAsString)["data"]["registerCareerSite"]
+    }
+    assertEquals("FORBIDDEN", register()["error"]["code"].asText())
+    val account = seed()
+    val (options, session) = options()
+    login(session, account.key.assertion(options["challenge"].asText(), account.handle)).andExpect(status().isOk)
+    assertEquals("FORBIDDEN", register(session)["error"]["code"].asText())
+    assertEquals(0, discoveries.get())
+    tx.execute {
+      val live = it.users.lockByEmail(account.user.email)!!
+      it.users.save(assertIs<UserChange.Updated>(live.grantRole(UserRole.ADMIN)).user)
+    }
+    val requestBody = json.writeValueAsString(mapOf("query" to mutation, "variables" to mapOf("input" to
+      mapOf("url" to "https://$host", "displayName" to "Acme", "idempotencyKey" to key))))
+    mvc.perform(post("/graphql").session(session).secure(true).contentType("application/json").content(requestBody))
+      .andExpect(status().isForbidden)
+    mvc.perform(post("/graphql").session(session).secure(true).with(csrf().useInvalidToken())
+      .contentType("application/json").content(requestBody)).andExpect(status().isForbidden)
+    assertEquals(0, discoveries.get())
+    val first = register(session)
+    assertTrue(first["error"].isNull)
+    val siteId = first["site"]["id"].asText()
+    assertEquals(first, register(session, reverse = true))
+    assertEquals("IDEMPOTENCY_CONFLICT", register(session, "Changed")["error"]["code"].asText())
+    assertEquals(1, discoveries.get())
+    val database = context.getBean(org.jooq.DSLContext::class.java)
+    assertEquals(1, database.fetchValue("SELECT count(*)::int FROM audit_events WHERE action = 'career_site.registered' AND target_id = ?", siteId))
+    now = now.plusSeconds(301)
+    assertEquals("FORBIDDEN", register(session)["error"]["code"].asText())
+    now = now.minusSeconds(301)
+    tx.execute { it.users.lockByEmail(account.user.email); it.userSessions.revokeForUser(account.user.id, now) }
+    assertEquals("FORBIDDEN", register(session)["error"]["code"].asText())
+    assertEquals(1, discoveries.get())
+  }
   @Test fun `real server cookie is secure HttpOnly SameSite Lax and csrf bootstrap is no-store`() {
     val port = context.environment.getProperty("local.server.port")
     val response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI("http://localhost:$port/auth/csrf")).GET().build(), HttpResponse.BodyHandlers.ofString())
@@ -348,8 +395,17 @@ class WebAuthnHttpTest {
       Account(user, key, it.users.findUserHandle(user.id)!!)
     }
   }
-  @TestConfiguration(proxyBeanMethods = false) class TestClock { @Bean @Primary fun testClock() = ClockPort { now } }
-  companion object { var now: Instant = Instant.parse("2026-09-23T00:00:00Z") }
+  @TestConfiguration(proxyBeanMethods = false) class TestClock {
+    @Bean @Primary fun testClock() = ClockPort { now }
+    @Bean @Primary fun testDiscovery() = SourceDiscoveryPort {
+      discoveries.incrementAndGet()
+      ProviderDiscoveryResult.Detected(dev.moreal.finds.domain.career.SourceProvider.NINEHIRE)
+    }
+  }
+  companion object {
+    var now: Instant = Instant.parse("2026-09-23T00:00:00Z")
+    val discoveries = java.util.concurrent.atomic.AtomicInteger()
+  }
 }
 private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 private fun sha(value: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(value)

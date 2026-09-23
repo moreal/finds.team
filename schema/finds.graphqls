@@ -17,6 +17,8 @@ enum ApiErrorCode {
   BUSY
   CRAWL_FAILED
   INTERNAL
+  FORBIDDEN
+  IDEMPOTENCY_CONFLICT
 }
 
 type ApiError {
@@ -71,7 +73,7 @@ type CareerSite {
   successfulIntervalSeconds: Int!
 }
 
-input RegisterCareerSiteInput { url: String!, displayName: String! }
+input RegisterCareerSiteInput { url: String!, displayName: String!, idempotencyKey: ID! }
 type RegisterCareerSitePayload { site: CareerSite, error: ApiError }
 
 enum CrawlTriggerOutcome {

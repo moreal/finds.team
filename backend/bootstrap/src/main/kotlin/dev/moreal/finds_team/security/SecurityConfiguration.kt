@@ -43,7 +43,8 @@ class SecurityConfiguration {
   fun securityFilterChain(http: HttpSecurity, actors: ActorResolver, transactions: TransactionPort, clock: ClockPort): SecurityFilterChain {
     http.formLogin { it.disable() }.httpBasic { it.disable() }.requestCache { it.disable() }
       .securityContext { it.securityContextRepository(HttpSessionSecurityContextRepository()) }
-      // GraphQL is query-only until audited command adapters land; its controller rejects every mutation.
+      // Public POST queries need no CSRF token. GraphqlController validates the selected mutation
+      // using this filter's deferred session token before any GraphQL field executes.
       .csrf { it.csrfTokenRepository(HttpSessionCsrfTokenRepository()).ignoringRequestMatchers("/graphql") }
       .authorizeHttpRequests { rules ->
         rules.dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()

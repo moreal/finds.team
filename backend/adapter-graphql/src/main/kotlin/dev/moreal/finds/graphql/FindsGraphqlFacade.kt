@@ -3,6 +3,9 @@ package dev.moreal.finds.graphql
 import dev.moreal.finds.application.model.CrawlStatus
 import dev.moreal.finds.application.model.PageRequest
 import dev.moreal.finds.application.model.SearchPage
+import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.usecase.SessionPrincipal
+import java.util.UUID
 import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.CrawlSiteCommand
 import dev.moreal.finds.application.usecase.CrawlSiteResult
@@ -20,7 +23,7 @@ import dev.moreal.finds.domain.search.Filter
 enum class ApiErrorCode {
   INVALID_INPUT, INVALID_URL, UNSUPPORTED_PROVIDER, AMBIGUOUS_PROVIDER,
   DISCOVERY_FAILED, ALREADY_REGISTERED, NOT_FOUND, NOT_DUE, DISABLED, BUSY,
-  CRAWL_FAILED, INTERNAL,
+  CRAWL_FAILED, INTERNAL, FORBIDDEN, IDEMPOTENCY_CONFLICT,
 }
 
 data class ApiErrorDto(
@@ -39,7 +42,7 @@ data class CareerSiteDto(
   val successfulIntervalSeconds: Int,
 )
 
-data class RegisterCareerSiteInput(val url: String, val displayName: String)
+data class RegisterCareerSiteInput(val url: String, val displayName: String, val idempotencyKey: String)
 data class RegisterCareerSitePayload(val site: CareerSiteDto?, val error: ApiErrorDto?)
 
 enum class CrawlTriggerOutcome {
@@ -80,14 +83,24 @@ class FindsGraphqlFacade(
       searchHandler(PostingGraphqlMapping.filter(filter), PostingGraphqlMapping.page(first, after)),
     )
 
-  suspend fun registerCareerSite(input: RegisterCareerSiteInput): RegisterCareerSitePayload =
-    when (val result = registerHandler(RegisterCareerSiteCommand(input.url, input.displayName))) {
+  suspend fun registerCareerSite(input: RegisterCareerSiteInput, principal: SessionPrincipal? = null): RegisterCareerSitePayload {
+    if (principal == null) return errorPayload(ApiErrorCode.FORBIDDEN, "Registration forbidden")
+    val metadata = try {
+      CommandMetadata.parse(UUID.randomUUID().toString(), UUID.randomUUID().toString(), input.idempotencyKey)
+    } catch (_: IllegalArgumentException) {
+      return errorPayload(ApiErrorCode.INVALID_INPUT, "Idempotency key must be a UUID")
+    }
+    return when (val result = registerHandler(RegisterCareerSiteCommand(input.url, input.displayName,
+      principal.actor, metadata, principal.sessionId))) {
+      RegisterCareerSiteResult.Forbidden -> errorPayload(ApiErrorCode.FORBIDDEN, "Registration forbidden")
+      RegisterCareerSiteResult.IdempotencyConflict -> errorPayload(ApiErrorCode.IDEMPOTENCY_CONFLICT, "Idempotency key was used for another request")
+      RegisterCareerSiteResult.InvalidIdempotencyKey -> errorPayload(ApiErrorCode.INVALID_INPUT, "Idempotency key must be a UUID")
       is RegisterCareerSiteResult.Registered -> RegisterCareerSitePayload(result.site.toDto(), null)
       is RegisterCareerSiteResult.AlreadyRegistered -> RegisterCareerSitePayload(
         result.site.toDto(), ApiErrorDto(ApiErrorCode.ALREADY_REGISTERED, "Career site already registered"),
       )
-      is RegisterCareerSiteResult.InvalidUrl -> errorPayload(ApiErrorCode.INVALID_URL, result.reason)
-      is RegisterCareerSiteResult.InvalidDisplayName -> errorPayload(ApiErrorCode.INVALID_INPUT, result.reason)
+      is RegisterCareerSiteResult.InvalidUrl -> errorPayload(ApiErrorCode.INVALID_URL, "Invalid career-site URL")
+      is RegisterCareerSiteResult.InvalidDisplayName -> errorPayload(ApiErrorCode.INVALID_INPUT, "Invalid display name")
       RegisterCareerSiteResult.UnsupportedProvider -> errorPayload(
         ApiErrorCode.UNSUPPORTED_PROVIDER, "Unsupported career-site provider",
       )
@@ -95,8 +108,9 @@ class FindsGraphqlFacade(
         null,
         ApiErrorDto(ApiErrorCode.AMBIGUOUS_PROVIDER, "Multiple providers matched", result.providers.sortedBy { it.name }),
       )
-      is RegisterCareerSiteResult.DiscoveryFailed -> errorPayload(ApiErrorCode.DISCOVERY_FAILED, result.reason)
+      is RegisterCareerSiteResult.DiscoveryFailed -> errorPayload(ApiErrorCode.DISCOVERY_FAILED, "Career-site discovery failed")
     }
+  }
 
   suspend fun triggerCrawl(careerSiteId: String): TriggerCrawlPayload {
     val id = careerSiteId.toLongOrNull()?.takeIf { it > 0 }

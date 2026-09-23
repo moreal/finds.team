@@ -10,6 +10,14 @@ import dev.moreal.finds.application.port.VerificationCodeNotifier
 import dev.moreal.finds.application.port.DeliveryRequestId
 import dev.moreal.finds.application.port.VerificationCode
 import dev.moreal.finds.application.port.VerificationPurpose
+import dev.moreal.finds.application.port.UserSession
+import dev.moreal.finds.application.port.UserSessionId
+import dev.moreal.finds.application.usecase.SessionPrincipal
+import dev.moreal.finds.application.security.Actor
+import dev.moreal.finds.application.security.AuthenticationStrength
+import dev.moreal.finds.domain.identity.*
+import dev.moreal.finds.persistence.JooqTransactionAdapter
+import graphql.ExecutionInput
 import dev.moreal.finds.domain.identity.EmailAddress
 import dev.moreal.finds.notification.MailOutboxDispatcher
 import dev.moreal.finds.application.usecase.CrawlSite
@@ -122,9 +130,24 @@ class BootstrapVerticalSliceTest {
     val postings = JooqPostingRepository(context)
     val runs = JooqCrawlRunRepository(context)
     val clock = ClockPort { OBSERVED_AT }
+    val transactions = JooqTransactionAdapter(context) { null }
+    val administrator = User(UserId(UUID.randomUUID()), EmailAddress("slice-admin@example.test"), UserStatus.ACTIVE,
+      setOf(UserRole.USER, UserRole.ADMIN), setOf(CredentialId("slice-passkey")))
+    val sessionId = UserSessionId(UUID.randomUUID())
+    transactions.execute {
+      it.users.lockByEmail(administrator.email)
+      it.users.save(User(administrator.id, administrator.email, roles = administrator.roles))
+      it.credentials.insert(dev.moreal.finds.application.port.PasskeyCredential(administrator.id,
+        dev.moreal.finds.application.port.PasskeyCredentialMaterial(CredentialId("slice-passkey"), byteArrayOf(1), 0, emptySet(), false, false), OBSERVED_AT))
+      it.users.save(administrator)
+      it.userSessions.save(UserSession(sessionId, administrator.id, OBSERVED_AT, OBSERVED_AT.plusSeconds(3600), OBSERVED_AT))
+    }
+    val principal = SessionPrincipal(Actor.User(administrator.id.value, administrator.roles, OBSERVED_AT,
+      AuthenticationStrength.PASSKEY), sessionId)
     val registration = RegisterCareerSite(
-      sites,
+      transactions,
       SourceDiscoveryPort { ProviderDiscoveryResult.Detected(SourceProvider.NINEHIRE) },
+      clock,
     )
     val crawling = CrawlSite(
       sites,
@@ -169,7 +192,9 @@ class BootstrapVerticalSliceTest {
     ManagedCoroutineScope().use { scope ->
       val graphQL = GraphqlRuntime.create(facade, scope)
       val registered = graphQL.execute(
-        """mutation { registerCareerSite(input: {url: "https://acme.ninehire.site", displayName: "Acme"}) { site { id provider successfulIntervalSeconds } error { code } } }""",
+        ExecutionInput.newExecutionInput().query(
+          """mutation { registerCareerSite(input: {url: "https://acme.ninehire.site", displayName: "Acme", idempotencyKey: "c6c5b651-4c67-4c17-aa5c-6476f3a1c111"}) { site { id provider successfulIntervalSeconds } error { code } } }""")
+          .graphQLContext { it.put(GraphqlRuntime.SESSION_PRINCIPAL, principal) }.build(),
       ).requireSuccess()
       val registrationPayload = registered.data<Map<String, Map<String, Any?>>>()
         .getValue("registerCareerSite")
@@ -177,13 +202,10 @@ class BootstrapVerticalSliceTest {
       assertEquals("NINEHIRE", site["provider"].toString())
       val siteId = site.getValue("id").toString()
 
-      val crawled = graphQL.execute(
-        """mutation { triggerCrawl(careerSiteId: "$siteId") { outcome counts { fetched inserted } error { code } } }""",
-      ).requireSuccess()
-      val crawlPayload = crawled.data<Map<String, Map<String, Any?>>>()
-        .getValue("triggerCrawl")
-      assertEquals("SUCCEEDED", crawlPayload["outcome"].toString())
-      assertEquals(1, assertIs<Map<String, Any?>>(crawlPayload["counts"])["inserted"])
+      // Public manual-crawl mutation stays closed until its own audited command is integrated.
+      val crawled = runBlocking { facade.triggerCrawl(siteId) }
+      assertEquals(dev.moreal.finds.graphql.CrawlTriggerOutcome.SUCCEEDED, crawled.outcome)
+      assertEquals(1, crawled.counts?.inserted)
 
       val queried = graphQL.execute(
         """{ jobPostings(filter: {textContains: "Kotlin"}) { totalCount edges { node { title status canonicalUrl } } } crawlStatuses { careerSiteId outcome error { code } } }""",

@@ -1,6 +1,9 @@
 package dev.moreal.finds.graphql
 
 import graphql.GraphQL
+import graphql.GraphqlErrorBuilder
+import graphql.execution.DataFetcherExceptionHandlerResult
+import dev.moreal.finds.application.usecase.SessionPrincipal
 import graphql.Scalars
 import graphql.schema.GraphQLScalarType
 import graphql.schema.idl.RuntimeWiring
@@ -9,6 +12,7 @@ import graphql.schema.idl.SchemaParser
 import java.io.InputStreamReader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.future.future
+import java.util.concurrent.CompletableFuture
 
 object GraphqlRuntime {
   fun create(facade: FindsGraphqlFacade, scope: CoroutineScope): GraphQL {
@@ -39,18 +43,30 @@ object GraphqlRuntime {
               RegisterCareerSiteInput(
                 input.getValue("url") as String,
                 input.getValue("displayName") as String,
+                input.getValue("idempotencyKey") as String,
               ),
+              environment.graphQlContext.get<SessionPrincipal>(SESSION_PRINCIPAL),
             )
           }
-        }.dataFetcher("triggerCrawl") { environment ->
-          scope.future {
-            facade.triggerCrawl(requireNotNull(environment.getArgument<String>("careerSiteId")))
-          }
+        }.dataFetcher("triggerCrawl") {
+          // Open each mutation only when its audited application command is available.
+          throw ClosedMutation()
         }
       }
       .build()
-    return GraphQL.newGraphQL(SchemaGenerator().makeExecutableSchema(registry, wiring)).build()
+    return GraphQL.newGraphQL(SchemaGenerator().makeExecutableSchema(registry, wiring))
+      .defaultDataFetcherExceptionHandler { parameters ->
+        val forbidden = parameters.exception is ClosedMutation
+        val error = GraphqlErrorBuilder.newError(parameters.dataFetchingEnvironment)
+          .message(if (forbidden) "Mutation forbidden" else "Request failed")
+          .extensions(mapOf("code" to if (forbidden) "FORBIDDEN" else "INTERNAL"))
+          .build()
+        CompletableFuture.completedFuture(DataFetcherExceptionHandlerResult.newResult().error(error).build())
+      }.build()
   }
+
+  const val SESSION_PRINCIPAL = "sessionPrincipal"
+  private class ClosedMutation : RuntimeException()
 
   @Suppress("UNCHECKED_CAST")
   private fun Map<String, Any?>.toFilterInput(): PostingFilterInput = PostingFilterInput(
