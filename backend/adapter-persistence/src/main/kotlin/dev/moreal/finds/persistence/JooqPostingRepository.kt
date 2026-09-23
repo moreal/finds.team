@@ -31,7 +31,7 @@ class JooqPostingRepository(
       .where(JOB_POSTINGS.CAREER_SITE_ID.eq(id.value))
       .orderBy(JOB_POSTINGS.ID.asc())
       .fetch()
-      .map { it.toDomain() }
+      .map { it.toPosting() }
   }
 
   override fun search(filter: Filter, page: PageRequest): SearchPage {
@@ -48,7 +48,7 @@ class JooqPostingRepository(
         .limit(page.size + 1)),
     ).fetchSingle()
     val records = result.value2()
-    val selected = records.take(page.size).map { it.toDomain() }
+    val selected = records.take(page.size).map { it.toPosting() }
     val next = if (records.size > page.size) {
       selected.lastOrNull()?.let { SearchCursor(it.updatedAt, it.id) }
     } else {
@@ -57,33 +57,33 @@ class JooqPostingRepository(
     return SearchPage(selected, next, result.value1())
   }
 
-  private fun Record2<JobPostingsRecord, List<SkillMention>>.toDomain(): JobPosting {
-    val posting = value1()
-    return posting.toDomain(posting.toClassification(value2()))
-  }
-
   private fun afterCondition(cursor: SearchCursor): Condition {
     val updatedAt = cursor.updatedAt.atOffset(ZoneOffset.UTC)
     return JOB_POSTINGS.UPDATED_AT.lt(updatedAt).or(
       JOB_POSTINGS.UPDATED_AT.eq(updatedAt).and(JOB_POSTINGS.ID.lt(cursor.id.value)),
     )
   }
+}
 
-  private fun JobPostingsRecord.toDomain(classification: PostingClassification?): JobPosting {
-    return JobPosting(
-      id = JobPostingId(requireNotNull(id)),
-      careerSiteId = CareerSiteId(requireNotNull(careerSiteId)),
-      raw = toRawPosting(),
-      contentHash = requireNotNull(contentHash).trim(),
-      status = PostingStatus.valueOf(requireNotNull(status)),
-      consecutiveMisses = requireNotNull(consecutiveMisses),
-      firstSeenAt = requireNotNull(firstSeenAt).toInstant(),
-      lastSeenAt = requireNotNull(lastSeenAt).toInstant(),
-      updatedAt = requireNotNull(updatedAt).toInstant(),
-      closedAt = closedAt?.toInstant(),
-      classification = classification,
-    )
-  }
+internal fun Record2<JobPostingsRecord, List<SkillMention>>.toPosting(): JobPosting {
+  val posting = value1()
+  return posting.toDomain(posting.toClassification(value2()))
+}
+
+private fun JobPostingsRecord.toDomain(classification: PostingClassification?): JobPosting {
+  return JobPosting(
+    id = JobPostingId(requireNotNull(id)),
+    careerSiteId = CareerSiteId(requireNotNull(careerSiteId)),
+    raw = toRawPosting(),
+    contentHash = requireNotNull(contentHash).trim(),
+    status = PostingStatus.valueOf(requireNotNull(status)),
+    consecutiveMisses = requireNotNull(consecutiveMisses),
+    firstSeenAt = requireNotNull(firstSeenAt).toInstant(),
+    lastSeenAt = requireNotNull(lastSeenAt).toInstant(),
+    updatedAt = requireNotNull(updatedAt).toInstant(),
+    closedAt = closedAt?.toInstant(),
+    classification = classification,
+  )
 }
 
 internal fun Filter.toCondition(): Condition = when (this) {

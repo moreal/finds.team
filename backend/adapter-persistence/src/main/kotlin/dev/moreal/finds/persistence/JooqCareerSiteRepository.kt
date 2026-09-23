@@ -58,19 +58,19 @@ class JooqCareerSiteRepository(
       .orderBy(CAREER_SITES.ID.asc())
       .fetch()
       .map { it.toDomain() }
-
-  private fun CareerSitesRecord.toDomain(): CareerSite = CareerSite(
-    id = CareerSiteId(requireNotNull(id)),
-    canonicalBaseUrl = when (val parsed = SiteUrl.parse(requireNotNull(canonicalBaseUrl))) {
-      is SiteUrlResult.Valid -> parsed.url
-      is SiteUrlResult.Invalid -> error("Stored career-site URL is invalid: ${parsed.reason}")
-    },
-    provider = SourceProvider.valueOf(requireNotNull(provider)),
-    displayName = requireNotNull(displayName),
-    slug = requireNotNull(slug),
-    crawlSettings = CrawlSettings(
-      successfulInterval = Duration.ofSeconds(requireNotNull(successfulIntervalSeconds)),
-      enabled = requireNotNull(enabled),
-    ),
-  )
 }
+
+internal fun CareerSitesRecord.toDomain(): CareerSite = CareerSite(
+  id = CareerSiteId(requireNotNull(id)),
+  canonicalBaseUrl = when (val parsed = SiteUrl.parse(requireNotNull(canonicalBaseUrl))) {
+    is SiteUrlResult.Valid -> parsed.url
+    is SiteUrlResult.Invalid -> error("Stored career-site URL is invalid: ${parsed.reason}")
+  },
+  provider = SourceProvider.valueOf(requireNotNull(provider)),
+  displayName = requireNotNull(displayName),
+  slug = requireNotNull(slug),
+  crawlSettings = CrawlSettings(
+    successfulInterval = Duration.ofSeconds(requireNotNull(successfulIntervalSeconds)),
+    enabled = requireNotNull(enabled),
+  ),
+)
