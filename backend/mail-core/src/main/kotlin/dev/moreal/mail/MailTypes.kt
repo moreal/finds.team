@@ -12,8 +12,12 @@ value class MailMessageId(val value: UUID) {
     fun new(): MailMessageId = MailMessageId(UUID.randomUUID())
 
     fun parse(value: String): MailMessageId {
-      val uuid = UUID.fromString(value)
-      require(value.lowercase(Locale.ROOT) == uuid.toString()) { "Mail message id must be a canonical UUID" }
+      val uuid = try {
+        UUID.fromString(value)
+      } catch (_: IllegalArgumentException) {
+        throw IllegalArgumentException("Invalid mail message id")
+      }
+      require(value.lowercase(Locale.ROOT) == uuid.toString()) { "Invalid mail message id" }
       return MailMessageId(uuid)
     }
   }
@@ -21,7 +25,12 @@ value class MailMessageId(val value: UUID) {
 
 data class Mailbox(val address: String, val name: String? = null) {
   init {
-    require(ADDRESS.matches(address)) { "Invalid mailbox address" }
+    require(
+      address.length <= 254 && ADDRESS.matches(address) &&
+        address.substringBefore('@').length <= 64 &&
+        address.substringAfter('@').length <= 253 &&
+        address.substringAfter('@').split('.').all { it.length <= 63 }
+    ) { "Invalid mailbox address" }
     require(name == null || validHeaderValue(name)) { "Invalid mailbox display name" }
   }
 

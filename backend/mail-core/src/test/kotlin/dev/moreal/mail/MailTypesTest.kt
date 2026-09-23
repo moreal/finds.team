@@ -26,6 +26,16 @@ class MailTypesTest {
   }
 
   @Test
+  fun `message id parse errors never reveal the invalid input`() {
+    val error = assertFailsWith<IllegalArgumentException> {
+      MailMessageId.parse("private-local@example.com")
+    }
+
+    assertEquals("Invalid mail message id", error.message)
+    assertEquals(null, error.cause)
+  }
+
+  @Test
   fun `mailbox accepts UTF-8 display names and validates address syntax`() {
     val mailbox = Mailbox("sender@example.com", "보내는 사람")
 
@@ -41,6 +51,28 @@ class MailTypesTest {
     listOf("", "   ", "Alice\r\nBcc: victim@example.com", "Alice\u0000Bob").forEach {
       assertFailsWith<IllegalArgumentException>(it) { Mailbox("sender@example.com", it) }
     }
+  }
+
+  @Test
+  fun `mailbox enforces local part and DNS label octet limits`() {
+    assertEquals("a".repeat(64) + "@example.com", Mailbox("a".repeat(64) + "@example.com").address)
+    assertFailsWith<IllegalArgumentException> { Mailbox("a".repeat(65) + "@example.com") }
+
+    assertEquals("a@" + "b".repeat(63) + ".com", Mailbox("a@" + "b".repeat(63) + ".com").address)
+    assertFailsWith<IllegalArgumentException> { Mailbox("a@" + "b".repeat(64) + ".com") }
+  }
+
+  @Test
+  fun `mailbox accepts 254 octets and rejects 255 octets`() {
+    val domain189 = listOf("a".repeat(63), "b".repeat(63), "c".repeat(61)).joinToString(".")
+    val domain190 = listOf("a".repeat(63), "b".repeat(63), "c".repeat(62)).joinToString(".")
+    val accepted = "x".repeat(64) + "@" + domain189
+    val rejected = "x".repeat(64) + "@" + domain190
+
+    assertEquals(254, accepted.length)
+    assertEquals(255, rejected.length)
+    assertEquals(accepted, Mailbox(accepted).address)
+    assertFailsWith<IllegalArgumentException> { Mailbox(rejected) }
   }
 
   @Test
@@ -102,6 +134,15 @@ class MailTypesTest {
     assertFailsWith<IllegalArgumentException> {
       MailDeliveryResult.Accepted(MailProvider("smtp"), "receipt\r\nBcc: victim@example.com")
     }
+  }
+
+  @Test
+  fun `accepted delivery diagnostics redact provider receipt`() {
+    val receipt = "private-local@example.com"
+    val result = MailDeliveryResult.Accepted(MailProvider("smtp"), receipt)
+
+    assertEquals(receipt, result.providerMessageId)
+    assertFalse(result.toString().contains("private-local"))
   }
 
   @Test

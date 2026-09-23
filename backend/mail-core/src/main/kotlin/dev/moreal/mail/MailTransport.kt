@@ -13,6 +13,8 @@ sealed interface MailDeliveryResult {
     val providerMessageId: String,
   ) : MailDeliveryResult {
     init { require(validHeaderValue(providerMessageId)) { "Invalid provider message id" } }
+
+    override fun toString(): String = "Accepted(provider=$provider, providerMessageId=<redacted>)"
   }
 
   data class Rejected(
