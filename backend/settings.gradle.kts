@@ -15,6 +15,7 @@ include(
   "domain",
   "application",
   "mail-core",
+  "mail-transport-testing",
   "adapter-source",
   "adapter-persistence",
   "adapter-graphql",
