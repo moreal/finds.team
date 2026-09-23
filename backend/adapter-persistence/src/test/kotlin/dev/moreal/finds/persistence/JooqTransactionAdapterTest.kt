@@ -25,6 +25,52 @@ import org.postgresql.ds.PGSimpleDataSource
 import kotlin.test.*
 
 class JooqTransactionAdapterTest : PostgresIntegrationTest() {
+  @Test fun `cleanup between conflicting insert and locked reload safely reserves again without duplicate effects`() {
+    val (_, db) = migratedContext()
+    val original = assertIs<Created>(register(adapter(db)))
+    val conflictObserved = CountDownLatch(1)
+    val cleanupFinished = CountDownLatch(1)
+    val paused = java.util.concurrent.atomic.AtomicBoolean()
+    val observer = object : org.jooq.ExecuteListener {
+      override fun executeEnd(context: org.jooq.ExecuteContext) {
+        val sql = context.sql().orEmpty()
+        if (sql.startsWith("insert into") && sql.contains("\"command_requests\"") && context.rows() == 0 && paused.compareAndSet(false, true)) {
+          conflictObserved.countDown()
+          check(cleanupFinished.await(10, TimeUnit.SECONDS))
+        }
+      }
+    }
+    val intercepted = DSL.using(db.configuration().derive(org.jooq.impl.DefaultExecuteListenerProvider(observer)))
+    val retry = REQUEST.copy(createdAt = NOW.plusSeconds(86400))
+    Executors.newSingleThreadExecutor().use { pool ->
+      try {
+        val result = pool.submit<StoredCommandResult> {
+          adapter(intercepted).execute { transaction ->
+            when (val reservation = transaction.commandRequests.reserve(retry)) {
+              is CommandReservation.Replay -> reservation.result
+              CommandReservation.Conflict -> error("unchanged request must not conflict")
+              CommandReservation.Reserved -> {
+                val site = assertIs<InsertCareerSiteResult.Duplicate>(transaction.careerSites.insert(site())).existing
+                stored(site.id.value, "ALREADY_REGISTERED").also { transaction.commandRequests.complete(retry.key, it) }
+              }
+            }
+          }
+        }
+        assertTrue(conflictObserved.await(10, TimeUnit.SECONDS), "must pause after ON CONFLICT DO NOTHING")
+        // This independent connection deletes only the completed expired ordinary reservation.
+        assertEquals(1, JooqCommandMaintenance(db).purgeExpired(retry.createdAt, 1))
+        cleanupFinished.countDown()
+        val completed = result.get(10, TimeUnit.SECONDS)
+        assertEquals("ALREADY_REGISTERED", completed.outcome)
+        assertEquals(mapOf("career_site" to CommandResourceId.Number(original.id)), completed.resourceIds)
+        val replay = adapter(db).execute { assertIs<CommandReservation.Replay>(it.commandRequests.reserve(retry)).result }
+        assertEquals(completed.outcome, replay.outcome)
+        assertEquals(completed.resourceIds, replay.resourceIds)
+        assertCounts(db, 1)
+      } finally { cleanupFinished.countDown(); pool.shutdownNow() }
+    }
+  }
+
   @Test fun `crawl trigger stores and replays only a stable run identifier`() {
     val (_, db) = migratedContext()
     val tx = adapter(db)

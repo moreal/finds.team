@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.setup.StandaloneMockMvcBuilder
 class GraphqlHttpTest {
   private lateinit var scope: ManagedCoroutineScope
   private lateinit var mvc: MockMvc
+  private val securityEvents = mutableListOf<dev.moreal.finds.application.port.SecurityEvent>()
 
   @BeforeEach
   fun setUp() {
@@ -35,7 +36,10 @@ class GraphqlHttpTest {
       statusHandler = { emptyList() },
       securityEvents = dev.moreal.finds.application.port.SecurityEventPort {},
     )
-    val controller = GraphqlController(GraphqlRuntime.create(facade, scope))
+    securityEvents.clear()
+    val events = dev.moreal.finds_team.security.HttpSecurityEvents({ securityEvents += it },
+      dev.moreal.finds.application.port.ClockPort { java.time.Instant.EPOCH }, io.micrometer.core.instrument.simple.SimpleMeterRegistry())
+    val controller = GraphqlController(GraphqlRuntime.create(facade, scope), events)
     val properties = FindsProperties(graphql = FindsProperties.Graphql(maximumRequestBytes = 1_024))
     mvc = MockMvcBuilders.standaloneSetup(controller)
       .addFilters<StandaloneMockMvcBuilder>(GraphqlRequestLimitFilter(properties))
@@ -72,6 +76,14 @@ class GraphqlHttpTest {
     )
       .andExpect(status().`is`(413))
       .andExpect(jsonPath("$.errors[0].message").value("GraphQL request body is too large"))
+  }
+
+  @Test fun `missing deferred CSRF token records exactly one authorization denial`() {
+    mvc.perform(post("/graphql").contentType(MediaType.APPLICATION_JSON).content(
+      """{"query":"mutation { triggerCrawl(careerSiteId: \"1\", idempotencyKey: \"00000000-0000-0000-0000-000000000001\") { outcome } }"}"""))
+      .andExpect(status().isForbidden)
+    kotlin.test.assertEquals(1, securityEvents.size)
+    kotlin.test.assertEquals(dev.moreal.finds.application.port.SecurityEventAction.AUTHORIZATION_DENIED, securityEvents.single().action)
   }
 
   private fun graphql(content: String): ResultActions {

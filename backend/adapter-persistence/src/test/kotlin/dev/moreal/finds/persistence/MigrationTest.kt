@@ -6,12 +6,27 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class MigrationTest : PostgresIntegrationTest() {
+  @Test fun `unfinished crawl maintenance has a partial ordered index`() {
+    val source = resetPublicSchema()
+    Flyway.configure().dataSource(source).load().migrate()
+    source.connection.use { connection ->
+      connection.prepareStatement("SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'ix_crawl_runs_pending_started'").use { statement ->
+        statement.executeQuery().use { rows ->
+          assertTrue(rows.next(), "maintenance index must exist")
+          val definition = rows.getString(1)
+          assertTrue(definition.contains("(started_at, id)"))
+          assertTrue(definition.contains("WHERE (finished_at IS NULL)"))
+        }
+      }
+    }
+  }
+
   @Test
   fun `migration creates constrained schema and is idempotent`() {
     val dataSource = resetPublicSchema()
     val flyway = Flyway.configure().dataSource(dataSource).load()
 
-    assertEquals(6, flyway.migrate().migrationsExecuted)
+    assertEquals(7, flyway.migrate().migrationsExecuted)
     assertTrue(flyway.validateWithResult().validationSuccessful)
     assertEquals(0, flyway.migrate().migrationsExecuted)
 

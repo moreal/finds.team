@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import java.util.concurrent.CompletableFuture
 import dev.moreal.finds_team.security.ActorResolver
+import dev.moreal.finds_team.security.HttpSecurityEvents
+import dev.moreal.finds.application.port.SecurityEventAction
 import dev.moreal.finds.graphql.GraphqlRuntime
 import org.springframework.security.core.Authentication
 import jakarta.servlet.http.HttpServletRequest
@@ -29,6 +31,7 @@ data class GraphqlRequest(
 @RequestMapping("/graphql")
 class GraphqlController(
   private val graphQL: GraphQL,
+  private val securityEvents: HttpSecurityEvents,
   private val actors: ActorResolver? = null,
 ) {
   @PostMapping(
@@ -48,10 +51,10 @@ class GraphqlController(
       else operations.singleOrNull { it.name == request.operationName }
     if (operation != null && operation.operation != graphql.language.OperationDefinition.Operation.QUERY) {
       val expected = (servletRequest.getAttribute(DeferredCsrfToken::class.java.name) as? DeferredCsrfToken)?.get()
-        ?: throw ResponseStatusException(HttpStatus.FORBIDDEN)
+        ?: csrfDenied(servletRequest)
       val supplied = XorCsrfTokenRequestAttributeHandler().resolveCsrfTokenValue(servletRequest, expected)
       if (supplied == null || !MessageDigest.isEqual(expected.token.toByteArray(Charsets.UTF_8), supplied.toByteArray(Charsets.UTF_8)))
-        throw ResponseStatusException(HttpStatus.FORBIDDEN)
+        csrfDenied(servletRequest)
     }
     val input = ExecutionInput.newExecutionInput()
       .query(request.query)
@@ -60,5 +63,10 @@ class GraphqlController(
       .also { builder -> request.operationName?.let(builder::operationName) }
       .build()
     return graphQL.executeAsync(input).thenApply(ExecutionResult::toSpecification)
+  }
+
+  private fun csrfDenied(request: HttpServletRequest): Nothing {
+    securityEvents.denied(request, SecurityEventAction.AUTHORIZATION_DENIED)
+    throw ResponseStatusException(HttpStatus.FORBIDDEN)
   }
 }

@@ -292,6 +292,42 @@ class WebAuthnHttpTest {
     assertEquals(before, counts(), "Rejected operation names cannot create a site, audit event or command result")
   }
 
+  @Test fun `selected administrator mutation CSRF denial records one event and remains forbidden when event storage fails`(output: CapturedOutput) {
+    val session = recentAdministratorSession()
+    discoveries.set(0)
+    val database = context.getBean(org.jooq.DSLContext::class.java)
+    val metrics = context.getBean(io.micrometer.core.instrument.MeterRegistry::class.java)
+    val counter = metrics.counter("finds.security.events", "outcome", "write_failed", "action", "identity.authorization_denied")
+    val initialFailures = counter.count()
+    val tables = listOf("career_sites", "crawl_runs", "audit_events", "command_requests")
+    val counts = tables.associateWith { database.fetchValue("SELECT count(*)::int FROM $it") }
+    val query = """mutation Private { ...Register } fragment Register on Mutation { aliased: registerCareerSite(input: {url: "https://csrf-private.example.test", displayName: "Private", idempotencyKey: "${UUID.randomUUID()}"}) { error { code } } } query Public { __typename }"""
+    val body = json.writeValueAsString(mapOf("query" to query, "operationName" to "Private"))
+    for (unavailable in listOf(false, true)) {
+      if (unavailable) database.execute("ALTER TABLE security_events ADD CONSTRAINT reject_graphql_csrf CHECK (false) NOT VALID")
+      try {
+        for (invalid in listOf(false, true)) {
+          val requestId = UUID.randomUUID()
+          val request = post("/graphql").session(session).secure(true).header("X-Request-ID", requestId)
+            .contentType("application/json").content(body)
+          if (invalid) request.with(csrf().useInvalidToken())
+          mvc.perform(request).andExpect(status().isForbidden)
+          val rows = database.fetch("SELECT action, details::text FROM security_events WHERE request_id = ?", requestId)
+          assertEquals(if (unavailable) 0 else 1, rows.size)
+          if (!unavailable) {
+            assertEquals("identity.authorization_denied", rows.single().get(0))
+            assertEquals("{\"reason\": \"FORBIDDEN\"}", rows.single().get(1))
+          }
+          assertEquals(counts, tables.associateWith { database.fetchValue("SELECT count(*)::int FROM $it") })
+          assertEquals(0, discoveries.get())
+        }
+      } finally { if (unavailable) database.execute("ALTER TABLE security_events DROP CONSTRAINT reject_graphql_csrf") }
+    }
+    assertEquals(initialFailures + 2, counter.count())
+    assertFalse(output.all.contains("reject_graphql_csrf"))
+    assertFalse(output.all.contains("csrf-private.example.test"))
+  }
+
   @Test fun `manual crawl binds live admin and key enforces CSRF and records denials separately`() {
     val site = tx.execute { assertIs<InsertCareerSiteResult.Inserted>(it.careerSites.insert(
       dev.moreal.finds.application.model.NewCareerSite(
