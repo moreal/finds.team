@@ -39,6 +39,27 @@ for (const action of ['rotate', 'revoke', 'begin'] as const) for (const retry of
     expect(writes).toBe(retry ? 1 : 0);
   });
 }
+
+test('credential-stage retry does not borrow another account registration options', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  let changed = false;
+  let optionsRequests = 0;
+  await page.route('**/graphql', route => route.fulfill({ json: accountResponse }));
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/auth/session', route => route.fulfill({ json: { authenticated: true, userGlobalId: changed ? 'user-2' : 'user-1' } }));
+  await page.route('**/webauthn/register/begin', route => route.fulfill({ json: { ready: true } }));
+  await page.route('**/webauthn/register/options', route => { optionsRequests++; return route.abort('failed'); });
+  await page.goto('/account/security');
+  await page.getByLabel('새 Passkey 이름').fill('Spare');
+  await page.getByRole('button', { name: 'Passkey 추가', exact: true }).click();
+  await expect(page.getByRole('button', { name: '같은 등록 다시 시도' })).toBeEnabled();
+  expect(optionsRequests).toBe(1);
+  changed = true;
+  await page.getByRole('button', { name: '같은 등록 다시 시도' }).click();
+  await expect(page.getByRole('alert')).toContainText('계정이 변경');
+  expect(optionsRequests).toBe(1);
+  await expect(page.getByLabel('Laptop 이름')).toHaveCount(0);
+});
 async function authFixture(page: Page, fault?: 'begin' | 'complete' | 'recent' | 'cancel' | 'rejected' | 'begin-expired' | 'viewer-null' | 'viewer-401' | 'viewer-403' | 'viewer-503' | 'missing-record' | 'different-account' | 'paginated-record') {
   let registered: string | undefined;
   const passkeys: { id: string; label: string }[] = [];
@@ -109,11 +130,14 @@ async function authFixture(page: Page, fault?: 'begin' | 'complete' | 'recent' |
     expect(route.request().headers()['x-csrf-token']).toBe(`csrf-${csrfEpoch}`);
     const path = new URL(route.request().url()).pathname;
     if (path === '/webauthn/register/begin' || path === '/webauthn/register/cancel') return additionalRoute(route);
-    if (path === '/webauthn/register/options') return route.fulfill({ json: {
+    if (path === '/webauthn/register/options') {
+      if (scope) expect(route.request().postDataJSON()).toEqual({ expectedUserId: 'account-1', beginKey: scope });
+      return route.fulfill({ json: {
       challenge: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8', rp: { id: 'localhost', name: 'finds.team' },
       user: { id: 'AQIDBA', name: 'person@example.com', displayName: 'Account' },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }], authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
-    } });
+      } });
+    }
     if (path === '/webauthn/authenticate/options') return route.fulfill({ json: { challenge: 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA', rpId: 'localhost', userVerification: 'required', allowCredentials: [] } });
     const body = route.request().postDataJSON();
     if (path === '/webauthn/register') {

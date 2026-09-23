@@ -20,6 +20,20 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 class AdditionalPasskeyHttpTest : OtpHttpSupport() {
   private val sql get() = context.getBean(DSLContext::class.java)
 
+  @Test fun `registration options reject a different account or superseded begin key before issuing a challenge`() {
+    val (original, _) = enroll()
+    val (current, session) = enroll()
+    val beginKey = UUID.randomUUID()
+    begin(session, beginKey).andExpect(status().isOk)
+    fun options(user: UserId, key: UUID) = postJson("/webauthn/register/options",
+      json.writeValueAsString(mapOf("expectedUserId" to dev.moreal.finds.graphql.GlobalIdCodec.encode(
+        dev.moreal.finds.graphql.NodeType.User, user.value), "beginKey" to key.toString())), session)
+    options(original, UUID.randomUUID()).andExpect(status().isUnauthorized)
+    options(current, UUID.randomUUID()).andExpect(status().isUnauthorized)
+    assertNull(session.getAttribute("finds.webauthn.registration"))
+    options(current, beginKey).andExpect(status().isOk)
+  }
+
   @Test fun `superseded and completed begin retries cannot replace a later ceremony`() {
     for (completeFirst in listOf(false, true)) {
       val (user, session) = enroll()
@@ -563,7 +577,12 @@ class AdditionalPasskeyHttpTest : OtpHttpSupport() {
   private fun authentication(session: MockHttpSession) = (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContext).authentication
   private fun principal(session: MockHttpSession) = context.getBean(ActorResolver::class.java).sessionPrincipal(authentication(session))!!
   private fun registration(session: MockHttpSession, fixture: Fixture): String {
-    val options = json.readTree(postJson("/webauthn/register/options", "{}", session).andExpect(status().isOk).andReturn().response.contentAsString)
+    val begin = session.getAttribute(AdditionalPasskeyController.BEGIN) as? AdditionalPasskeyController.Begin
+    val body = begin?.let {
+      json.writeValueAsString(mapOf("expectedUserId" to dev.moreal.finds.graphql.GlobalIdCodec.encode(
+        dev.moreal.finds.graphql.NodeType.User, principal(session).actor.userId), "beginKey" to it.key.toString()))
+    } ?: "{}"
+    val options = json.readTree(postJson("/webauthn/register/options", body, session).andExpect(status().isOk).andReturn().response.contentAsString)
     return json.writeValueAsString(fixture.registration(options["challenge"].asText()))
   }
   private fun enroll(fixture: Fixture = Fixture()): Pair<UserId, MockHttpSession> {

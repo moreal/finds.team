@@ -143,7 +143,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     ownedRegistration = command; busy = true;
     setRegistration(command); setPending(true); setError(''); setMessage('');
     try {
-      if (!cancel && command.stage === 'begin') {
+      if (!cancel) {
         const response = await fetch('/auth/session', { credentials: 'same-origin', cache: 'no-store' });
         if (response.status === 401 || response.status === 403) {
           clearProtectedState();

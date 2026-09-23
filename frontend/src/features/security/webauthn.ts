@@ -74,7 +74,8 @@ export async function beginAdditionalPasskey(command: AdditionalPasskeyCommand):
     command.stage = 'credential';
   }
   if (command.stage === 'credential') {
-    const options = await securityPost<Creation>('/webauthn/register/options');
+    const options = await securityPost<Creation>('/webauthn/register/options',
+      { expectedUserId: command.accountId, beginKey: command.beginKey });
     try {
       const credential = await navigator.credentials.create({ publicKey: creationOptions(options) }) as PublicKeyCredential | null;
       if (!credential) throw new DOMException('Cancelled', 'NotAllowedError');

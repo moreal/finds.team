@@ -16,6 +16,8 @@ import dev.moreal.finds.application.command.CommandMetadata
 import dev.moreal.finds.application.command.CanonicalCommandEncoder
 import dev.moreal.finds.application.usecase.*
 import dev.moreal.finds.domain.identity.*
+import dev.moreal.finds.graphql.GlobalIdCodec
+import dev.moreal.finds.graphql.NodeType
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.Authentication
@@ -98,10 +100,15 @@ class WebAuthnCeremonies(
   }
 
   fun registrationOptions(request: HttpServletRequest,
-    authentication: Authentication?): PublicKeyCredentialCreationOptions = synchronized(WebUtils.getSessionMutex(request.session)) {
+    authentication: Authentication?, expectedUserId: String?, beginKey: String?): PublicKeyCredentialCreationOptions = synchronized(WebUtils.getSessionMutex(request.session)) {
     val scope = restricted(request)
-    if (scope.scope == RestrictedSessionScope.ADDITIONAL_PASSKEY && actors.resolve(authentication)?.hasRecentPasskeyAuthentication(clock.now()) != true)
-      throw CeremonyRejected()
+    if (scope.scope == RestrictedSessionScope.ADDITIONAL_PASSKEY) {
+      val principal = actors.sessionPrincipal(authentication) ?: throw CeremonyRejected()
+      val begin = request.session.getAttribute(AdditionalPasskeyController.BEGIN) as? AdditionalPasskeyController.Begin
+      if (!principal.actor.hasRecentPasskeyAuthentication(clock.now()) || principal.actor.userId != scope.userId.value ||
+        expectedUserId != GlobalIdCodec.encode(NodeType.User, scope.userId.value) || begin == null ||
+        beginKey != begin.key.toString() || begin.scopeId != scope.id) throw CeremonyRejected()
+    }
     val adapters = snapshot(scope.userId)
     val operations = Webauthn4JRelyingPartyOperations(adapters.users, adapters.credentials, rp, settings.allowedOrigins)
     operations.setCustomizeCreationOptions { it.authenticatorSelection(AuthenticatorSelectionCriteria.builder()

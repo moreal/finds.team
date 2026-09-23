@@ -204,8 +204,10 @@ Passkey session, `GET /auth/session` returns the raw user ID, opaque
 problem-details 401. Account-security GraphQL mutations require
 `expectedUserId` (the viewer's opaque User ID), and
 `POST /webauthn/register/begin` requires the same field in its JSON body.
-The adapters reject a changed account before any security command or new
-registration scope is created.
+Additional-Passkey `/webauthn/register/options` requires both that ID and the
+original `beginKey`; enrollment/recovery options remain unchanged. The adapters
+reject a changed account or superseded begin before a security command, new
+registration scope, or additional-registration challenge is created.
 
 V6 stores shared fixed-window abuse counters keyed by purpose-separated HMACs;
 raw email/IP/device values never enter the counter table. Enrollment and recovery

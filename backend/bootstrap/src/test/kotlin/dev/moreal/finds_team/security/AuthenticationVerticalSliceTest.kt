@@ -27,9 +27,7 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
     val before = principal(session)
     val authentication = (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContext).authentication
     val sessionId = session.id
-    val scope = assertIs<AdditionalPasskeySessionResult.Ready>(BeginAdditionalPasskeyRegistration(tx,
-      context.getBean(ClockPort::class.java), context.getBean(SecureRandomPort::class.java)).execute(before)).session
-    session.setAttribute(WebAuthnCeremonies.RESTRICTED_SESSION, scope.id)
+    val scopeId = beginAdditional(session)
     val second = Fixture()
     val body = registration(session, second)
     val csrf = json.readTree(mvc.perform(get("/auth/csrf").secure(true).session(session))
@@ -39,7 +37,7 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
       .header("X-CSRF-TOKEN", csrf).header("Idempotency-Key", key).contentType("application/json").content(encoded))
     // A cryptographically invalid ceremony cannot consume the scope or add a credential.
     submit(json.writeValueAsString(second.registration("wrong-challenge"))).andExpect(status().isUnauthorized)
-    assertEquals(scope.id, session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    assertEquals(scopeId, session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
     assertEquals(1, tx.execute { it.credentials.findByUserId(userId).size })
     assertEquals(before.sessionId, principal(session).sessionId)
     assertSame(authentication, (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContext).authentication)
@@ -91,11 +89,7 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
     val oldSession = login(first, handle, restricted, count = 1)
     val otherSession = login(first, handle, count = 2)
     // A second real registration makes revocation plural, not just a one-credential happy path.
-    val principal = principal(oldSession)
-    val scope = BeginAdditionalPasskeyRegistration(tx, context.getBean(ClockPort::class.java), context.getBean(SecureRandomPort::class.java))
-      .execute(principal)
-    assertIs<AdditionalPasskeySessionResult.Ready>(scope)
-    oldSession.setAttribute(WebAuthnCeremonies.RESTRICTED_SESSION, scope.session.id)
+    beginAdditional(oldSession)
     val second = Fixture()
     postJson("/webauthn/register", json.writeValueAsString(registration(oldSession, second)), oldSession)
       .andExpect(status().isOk).andExpect(jsonPath("$.recoveryCode").doesNotExist())
@@ -245,8 +239,18 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
       .content("""{"query":"{ jobPostings { totalCount } }"}""")).andExpect(status().isForbidden)
   }
   private fun registration(session: MockHttpSession, key: Fixture): Map<String, Any> {
-    val options = json.readTree(postJson("/webauthn/register/options", "{}", session).andExpect(status().isOk).andReturn().response.contentAsString)
+    val begin = session.getAttribute(AdditionalPasskeyController.BEGIN) as? AdditionalPasskeyController.Begin
+    val body = begin?.let { json.writeValueAsString(mapOf("expectedUserId" to
+      dev.moreal.finds.graphql.GlobalIdCodec.encode(dev.moreal.finds.graphql.NodeType.User, principal(session).actor.userId),
+      "beginKey" to it.key.toString())) } ?: "{}"
+    val options = json.readTree(postJson("/webauthn/register/options", body, session).andExpect(status().isOk).andReturn().response.contentAsString)
     return key.registration(options["challenge"].asText())
+  }
+  private fun beginAdditional(session: MockHttpSession): RestrictedSessionId {
+    val userId = dev.moreal.finds.graphql.GlobalIdCodec.encode(dev.moreal.finds.graphql.NodeType.User, principal(session).actor.userId)
+    postJson("/webauthn/register/begin", json.writeValueAsString(mapOf("expectedUserId" to userId)), session, UUID.randomUUID())
+      .andExpect(status().isOk)
+    return session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) as RestrictedSessionId
   }
   private fun complete(session: MockHttpSession, body: Map<String, Any>): String {
     val command = UUID.randomUUID(); val encoded = json.writeValueAsString(body)

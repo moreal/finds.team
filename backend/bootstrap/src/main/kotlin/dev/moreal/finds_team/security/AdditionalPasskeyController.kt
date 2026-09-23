@@ -119,15 +119,15 @@ class AdditionalPasskeyController(
       .body(ProblemDetail.forStatusAndDetail(status, "Passkey registration rejected"))
   }
 
-  private class Begin(val key: UUID, val scopeId: RestrictedSessionId)
+  internal data class Begin(val key: UUID, val scopeId: RestrictedSessionId)
   data class BeginRequest(val expectedUserId: String?)
   private class CanceledHistory(val commands: Map<UUID, UserSessionId>)
   private class AcceptedHistory(val keys: Set<UUID>)
-  private companion object {
-    const val BEGIN = "finds.webauthn.additional-begin"
-    const val CANCELED = "finds.webauthn.additional-canceled"
-    const val ACCEPTED = "finds.webauthn.additional-accepted"
-    const val MAX_ACCEPTED_COMMANDS = 64
-    val UUID_PATTERN = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+  companion object {
+    internal const val BEGIN = "finds.webauthn.additional-begin"
+    private const val CANCELED = "finds.webauthn.additional-canceled"
+    private const val ACCEPTED = "finds.webauthn.additional-accepted"
+    private const val MAX_ACCEPTED_COMMANDS = 64
+    private val UUID_PATTERN = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
   }
 }

@@ -49,8 +49,11 @@ class WebAuthnController(private val ceremonies: WebAuthnCeremonies, private val
     return json(mapOf("authenticated" to true))
   }
   @PostMapping("/webauthn/register/options", produces = ["application/json"])
-  fun registrationOptions(request: HttpServletRequest, authentication: Authentication?): ResponseEntity<SecurityJson> =
-    json(ceremonies.registrationOptions(request, authentication))
+  fun registrationOptions(request: HttpServletRequest, authentication: Authentication?,
+    @RequestBody(required = false) body: RegistrationOptionsRequest?): ResponseEntity<SecurityJson> =
+    json(ceremonies.registrationOptions(request, authentication, body?.expectedUserId, body?.beginKey))
+
+  data class RegistrationOptionsRequest(val expectedUserId: String? = null, val beginKey: String? = null)
 
   @PostMapping("/webauthn/register", consumes = ["application/json"], produces = ["application/json"])
   fun register(request: HttpServletRequest, authentication: Authentication?): ResponseEntity<SecurityJson> {
