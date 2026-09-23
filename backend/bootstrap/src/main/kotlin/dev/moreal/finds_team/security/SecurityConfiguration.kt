@@ -47,14 +47,18 @@ class SecurityConfiguration {
       .csrf { it.csrfTokenRepository(HttpSessionCsrfTokenRepository()).ignoringRequestMatchers("/graphql") }
       .authorizeHttpRequests { rules ->
         rules.dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
-          .requestMatchers(HttpMethod.GET, "/auth/csrf", "/actuator/health", "/actuator/health/**").permitAll()
-          .requestMatchers(HttpMethod.POST, "/graphql", "/webauthn/authenticate/options", "/login/webauthn",
-            "/webauthn/register/options", "/webauthn/register").permitAll()
-          .requestMatchers("/auth/session").access { auth, _ -> AuthorizationDecision(actors.resolve(auth.get()) != null) }
+          .requestMatchers(HttpMethod.GET, "/auth/csrf", "/auth/session", "/actuator/health", "/actuator/health/**").permitAll()
+          .requestMatchers(HttpMethod.POST, "/graphql").access { _, context ->
+            AuthorizationDecision(context.request.getSession(false)?.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) == null)
+          }
+          .requestMatchers(HttpMethod.POST, "/webauthn/authenticate/options", "/login/webauthn",
+            "/webauthn/register/options", "/webauthn/register", "/auth/enrollment/otp/request", "/auth/enrollment/otp/verify",
+            "/auth/recovery/otp/request", "/auth/recovery/otp/verify").permitAll()
           .anyRequest().denyAll()
       }
       .exceptionHandling { errors ->
-        errors.authenticationEntryPoint { _, response, _ -> securityProblem(response, 401) }
+        errors.authenticationEntryPoint { request, response, _ -> securityProblem(response,
+          if (request.requestURI == request.contextPath + "/graphql" && request.getSession(false)?.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) != null) 403 else 401) }
         errors.accessDeniedHandler { _, response, _ -> securityProblem(response, 403) }
       }
       .logout { logout ->

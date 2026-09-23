@@ -22,6 +22,8 @@ logging:
     level: "%5p %kvp"
 
 server:
+  # Preserve the socket peer; only OtpHttpBoundary's explicit proxy allowlist trusts forwarding.
+  forward-headers-strategy: none
   servlet:
     session:
       timeout: 12h
@@ -53,6 +55,8 @@ finds:
     active-hash-version: ${FINDS_IDENTITY_HASH_VERSION:1}
     # Supply finds.security.hash-keys.<version> (base64, >=32 bytes) in production.
     cleanup-interval: 1m
+    rate-cleanup-interval: 10s
+    trusted-proxy-cidrs: ${FINDS_TRUSTED_PROXY_CIDRS:}
   mail:
     sender: ${FINDS_MAIL_SENDER:verify@finds.team}
     sender-name: ${FINDS_MAIL_SENDER_NAME:finds.team}

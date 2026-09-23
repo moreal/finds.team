@@ -84,6 +84,10 @@ class WebAuthnHttpTest {
     val oldId = session.id
     val assertion = account.key.assertion(options["challenge"].asText(), account.handle, count = 8)
     login(session, assertion).andExpect(status().isOk).andExpect(jsonPath("$.authenticated").value(true))
+    mvc.perform(get("/auth/session").session(session).secure(true)).andExpect(status().isOk)
+      .andExpect(jsonPath("$.userId").value(account.user.id.value.toString()))
+      .andExpect(jsonPath("$.roles[0]").value("USER"))
+      .andExpect(header().string("Cache-Control", "no-store"))
     assertNotEquals(oldId, session.id)
     tx.execute {
       assertEquals(8, it.credentials.findById(account.key.id)!!.material.signatureCount)
@@ -227,6 +231,12 @@ class WebAuthnHttpTest {
     mvc.perform(post("/login/webauthn").secure(true).with(csrf()).contentType("application/json").content("{}"))
       .andExpect(status().isBadRequest)
   }
+  @Test fun `JSON null credentials are malformed problem details rather than server errors`() {
+    listOf("/login/webauthn" to "null", "/webauthn/register" to "null", "/webauthn/register" to """{"publicKey":null}""").forEach { (path, body) ->
+      mvc.perform(post(path).secure(true).with(csrf()).contentType("application/json").content(body))
+        .andExpect(status().isBadRequest).andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+    }
+  }
   @Test fun `recovery plaintext never enters Spring response diagnostics`(output: CapturedOutput) {
     val account = seed(pending = true)
     val session = restricted(account.user)
@@ -258,6 +268,7 @@ class WebAuthnHttpTest {
     assertNotNull(actors.resolve(authentication))
     tx.execute { it.users.lockByEmail(account.user.email); it.userSessions.revokeForUser(account.user.id, now) }
     assertNull(actors.resolve(authentication))
+    mvc.perform(get("/auth/session").session(session).secure(true)).andExpect(status().isUnauthorized)
     val (newOptions, newSession) = options()
     login(newSession, account.key.assertion(newOptions["challenge"].asText(), account.handle, count = 9)).andExpect(status().isOk)
     val newAuthentication = (newSession.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContext).authentication
@@ -343,7 +354,7 @@ class WebAuthnHttpTest {
 private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)
 private fun sha(value: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(value)
 /** Signs authenticatorData || SHA-256(clientDataJSON) independently with a fresh P-256 key. */
-private class Fixture {
+internal class Fixture {
   private val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
   private val rawId = UUID.randomUUID().toString().toByteArray()
   val id = CredentialId(b64(rawId))

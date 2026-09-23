@@ -12,14 +12,24 @@ import dev.moreal.finds.application.port.TransactionPort
 import dev.moreal.finds.application.port.MailPayloadCrypto
 import dev.moreal.finds.application.port.MailOutbox
 import dev.moreal.finds.application.port.VerificationCodeNotifier
+import dev.moreal.finds.application.port.AuthRateLimitPort
+import dev.moreal.finds.application.port.KeyedIdentityHashPort
+import dev.moreal.finds.application.port.SecureRandomPort
+import dev.moreal.finds.application.usecase.RequestEnrollmentOtp
+import dev.moreal.finds.application.usecase.VerifyEnrollmentOtp
+import dev.moreal.finds.application.usecase.RequestRecoveryOtp
+import dev.moreal.finds.application.usecase.VerifyRecoveryProofs
 import dev.moreal.finds.notification.MailVerificationCodeNotifier
 import dev.moreal.finds.notification.MailOutboxDispatcher
 import dev.moreal.finds.notification.MailDispatchMetrics
 import dev.moreal.finds.notification.DispatchOutcome
 import dev.moreal.finds.persistence.JooqMailOutbox
+import dev.moreal.finds.persistence.JooqAuthRateLimit
 import dev.moreal.mail.MailTransport
 import dev.moreal.mail.Mailbox
 import dev.moreal.finds_team.mail.ScheduledMailDispatcher
+import dev.moreal.finds_team.security.OtpHttpBoundary
+import dev.moreal.finds_team.security.SecurityProperties
 import dev.moreal.finds.application.usecase.CrawlAllDue
 import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
@@ -66,6 +76,19 @@ import javax.sql.DataSource
 
 @Configuration(proxyBeanMethods = false)
 class RuntimeConfiguration {
+  @Bean fun authRateLimits(context: DSLContext): AuthRateLimitPort = JooqAuthRateLimit(context)
+  @Bean fun otpHttpBoundary(rates: AuthRateLimitPort, hashes: KeyedIdentityHashPort, random: SecureRandomPort,
+    clock: ClockPort, properties: SecurityProperties) = OtpHttpBoundary(rates, hashes, random, clock, properties)
+  @Bean fun requestEnrollmentOtp(transactions: TransactionPort, clock: ClockPort,
+    random: SecureRandomPort, hashes: KeyedIdentityHashPort,
+    notifier: VerificationCodeNotifier) = RequestEnrollmentOtp(transactions, clock, random, hashes, notifier)
+  @Bean fun verifyEnrollmentOtp(transactions: TransactionPort, clock: ClockPort,
+    random: SecureRandomPort, hashes: KeyedIdentityHashPort) = VerifyEnrollmentOtp(transactions, clock, random, hashes)
+  @Bean fun requestRecoveryOtp(transactions: TransactionPort, clock: ClockPort,
+    random: SecureRandomPort, hashes: KeyedIdentityHashPort,
+    notifier: VerificationCodeNotifier) = RequestRecoveryOtp(transactions, clock, random, hashes, notifier)
+  @Bean fun verifyRecoveryProofs(transactions: TransactionPort, clock: ClockPort,
+    random: SecureRandomPort, hashes: KeyedIdentityHashPort) = VerifyRecoveryProofs(transactions, clock, random, hashes)
   @Bean
   @DependsOn("flyway")
   fun dslContext(dataSource: DataSource): DSLContext = DSL.using(dataSource, SQLDialect.POSTGRES)

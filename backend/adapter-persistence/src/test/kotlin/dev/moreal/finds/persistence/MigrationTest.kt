@@ -11,7 +11,7 @@ class MigrationTest : PostgresIntegrationTest() {
     val dataSource = resetPublicSchema()
     val flyway = Flyway.configure().dataSource(dataSource).load()
 
-    assertEquals(5, flyway.migrate().migrationsExecuted)
+    assertEquals(6, flyway.migrate().migrationsExecuted)
     assertTrue(flyway.validateWithResult().validationSuccessful)
     assertEquals(0, flyway.migrate().migrationsExecuted)
 

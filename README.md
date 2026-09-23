@@ -158,7 +158,35 @@ Registration completion uses `Idempotency-Key` (UUID), with optional UUID
 `X-Request-ID` and `X-Correlation-ID`. Only a server-bound restricted enrollment,
 recovery or additional-Passkey session can register. Completion returns the
 recovery code once; same-command retries return success without the secret.
-OTP/recovery initiation and security-management HTTP routes are added separately.
+`POST /auth/enrollment/otp/request` and `/auth/recovery/otp/request` accept
+`{"email":"person@example.com"}` and the same idempotency/correlation headers.
+Both return `202 {"accepted":true}` regardless of account existence, with the
+same 200–220ms minimum response timing class. Database slowness may exceed that
+floor. `/auth/enrollment/otp/verify` accepts `email` and `otp`; recovery verification
+also requires `recoveryCode`. Proof verification replaces the browser session and
+CSRF token; fetch `/auth/csrf` again before registering a Passkey. Neither proof
+flow logs in. Restricted sessions cannot access `/auth/session` or GraphQL.
+`GET /auth/session` returns current user ID, roles and authentication time only
+for a live Passkey session; expired/revoked sessions return problem-details 401.
+
+V6 stores shared fixed-window abuse counters keyed by purpose-separated HMACs;
+raw email/IP/device values never enter the counter table. Enrollment and recovery
+share request budgets of 3/email, 30/IP and 10/device per 60 seconds. Verification
+has separate budgets of 10/email, 60/IP and 20/device. Idempotent retries count
+toward these budgets. Throttling returns generic problem-details 429 and
+`Retry-After` between 1 and 60 seconds. Account lockout remains 15 minutes after
+five failed proofs, and reissue never resets failures. Recovery reissue requires
+60 seconds. Cleanup deletes at most 1,000 expired buckets every 10 seconds.
+
+The `__Host-finds-device` cookie is server-issued, MAC-authenticated, Secure,
+HttpOnly, SameSite=Lax and valid for 30 days. It survives session rotation and
+is an abuse signal, never an authentication credential. Client IP defaults to the
+socket peer. Set `FINDS_TRUSTED_PROXY_CIDRS` to the actual ingress proxy addresses
+or narrowly scoped networks to enable right-to-left `X-Forwarded-For` parsing.
+Leave framework forwarded-header rewriting disabled. Without an allowlist,
+proxied clients share the proxy's IP budget; arbitrary forwarding headers are
+ignored. Production replicas must share stable identity HMAC keys and PostgreSQL.
+Security-management HTTP routes are added separately.
 
 Defaults live in `backend/bootstrap/src/main/resources/application.yml`. The
 most commonly deployed overrides are:

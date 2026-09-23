@@ -38,7 +38,7 @@ class WebAuthnController(private val ceremonies: WebAuthnCeremonies) {
   @PostMapping("/login/webauthn", consumes = ["application/json"], produces = ["application/json"])
   fun authenticate(request: HttpServletRequest, response: HttpServletResponse): ResponseEntity<SecurityJson> {
     val body = readBody(request)
-    val credential = parse { mapper.readValue(body, object : TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>() {}) }
+    val credential = parse { requireNotNull(mapper.readValue(body, object : TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>() {})) }
     val authentication = ceremonies.authenticate(request, credential)
     ChangeSessionIdAuthenticationStrategy().onAuthentication(authentication, request, response)
     CsrfAuthenticationStrategy(HttpSessionCsrfTokenRepository()).onAuthentication(authentication, request, response)
@@ -54,7 +54,7 @@ class WebAuthnController(private val ceremonies: WebAuthnCeremonies) {
   @PostMapping("/webauthn/register", consumes = ["application/json"], produces = ["application/json"])
   fun register(request: HttpServletRequest, authentication: Authentication?): ResponseEntity<SecurityJson> {
     val body = readBody(request)
-    val key = parse { mapper.treeToValue(mapper.readTree(body).required("publicKey"), RelyingPartyPublicKey::class.java) }
+    val key = parse { requireNotNull(mapper.treeToValue(mapper.readTree(body).required("publicKey"), RelyingPartyPublicKey::class.java)) }
     val metadata = parse { CommandMetadata.parse(request.getHeader("X-Request-ID") ?: UUID.randomUUID().toString(),
       request.getHeader("X-Correlation-ID") ?: UUID.randomUUID().toString(), requireNotNull(request.getHeader("Idempotency-Key"))) }
     return json(ceremonies.register(request, authentication, key, metadata))

@@ -135,7 +135,13 @@ class WebAuthnCeremonies(
         val user = tx.users.findById(scope.userId) ?: throw CeremonyRejected()
         tx.users.lockByEmail(user.email) ?: throw CeremonyRejected()
         if (!tx.webauthnChallenges.consume(ceremony.challenge, clock.now())) throw CeremonyRejected()
-        block(tx)
+        block(tx).also { result ->
+          // A semantic conflict must also roll back challenge consumption, so the original
+          // verified ceremony can be submitted with a fresh command key after a 409.
+          if (result == CompletePasskeyEnrollmentResult.IdempotencyConflict ||
+            result == CompletePasskeyRecoveryResult.IdempotencyConflict || result == SecurityChangeResult.IdempotencyConflict)
+            throw CeremonyConflict()
+        }
       }
     }
     val result = complete(completionTransactions, scope, proof, metadata, publicKey.label, authentication)
@@ -150,12 +156,14 @@ class WebAuthnCeremonies(
       .execute(CompletePasskeyEnrollmentCommand(scope.id, proof, metadata))) {
       is CompletePasskeyEnrollmentResult.Completed -> mapOf("success" to true, "recoveryCode" to result.recoveryCode.format())
       is CompletePasskeyEnrollmentResult.AlreadyCompleted -> mapOf("success" to true)
+      CompletePasskeyEnrollmentResult.IdempotencyConflict -> throw CeremonyConflict()
       else -> throw CeremonyRejected()
     }
     RestrictedSessionScope.RECOVERY -> when (val result = CompletePasskeyRecovery(tx, clock, random, hashes)
       .execute(CompletePasskeyRecoveryCommand(scope.id, proof, metadata))) {
       is CompletePasskeyRecoveryResult.Completed -> mapOf("success" to true, "recoveryCode" to result.recoveryCode.format())
       is CompletePasskeyRecoveryResult.AlreadyCompleted -> mapOf("success" to true)
+      CompletePasskeyRecoveryResult.IdempotencyConflict -> throw CeremonyConflict()
       else -> throw CeremonyRejected()
     }
     RestrictedSessionScope.ADDITIONAL_PASSKEY -> {

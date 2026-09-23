@@ -12,6 +12,7 @@ class SecurityProperties(
   val activeHashVersion: Int = 1,
   val commandScopeHashVersion: Int = 1,
   val hashKeys: Map<Int, String> = emptyMap(),
+  val trustedProxyCidrs: Set<String> = emptySet(),
 ) {
   fun validated(profiles: Set<String>): RelyingPartySettings {
     val local = profiles.isNotEmpty() && profiles.all { it in setOf("dev", "test") }
