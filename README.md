@@ -84,8 +84,15 @@ sends every other path to the Start production server. The browser therefore
 uses relative `/graphql` requests without CORS, while Start SSR alone receives
 `FINDS_INTERNAL_GRAPHQL_URL=http://backend:8080/graphql`. The backend and
 frontend have no host ports; set `FINDS_APP_PORT` to change the proxy's
-localhost-only host port. The existing PostgreSQL development binding and named
-volume are unchanged.
+localhost-only host port. Set `FINDS_PUBLIC_ORIGIN` to the matching origin when
+running the routing test on a custom port, for example:
+
+```sh
+FINDS_APP_PORT=8081 docker compose --profile app up -d --build
+FINDS_PUBLIC_ORIGIN=http://127.0.0.1:8081 pnpm --dir frontend exec playwright test e2e/same-origin-routing.spec.ts
+```
+
+The existing PostgreSQL development binding and named volume are unchanged.
 
 Inspect health and stop the application without deleting database data:
 
@@ -106,6 +113,7 @@ most commonly deployed overrides are:
 | `FINDS_DB_USER` | PostgreSQL user | `finds` |
 | `FINDS_DB_PASSWORD` | PostgreSQL password | `finds` |
 | `FINDS_APP_PORT` | Same-origin proxy host port | `8080` |
+| `FINDS_PUBLIC_ORIGIN` | Routing Playwright test origin; set to match `FINDS_APP_PORT` | `http://127.0.0.1:8080` |
 | `FINDS_USER_AGENT_PRODUCT` | HTTP User-Agent product | `finds.team` |
 | `FINDS_ROBOTS_PRODUCT_TOKEN` | robots.txt product token | `findsteam` |
 | `FINDS_CONTACT_URL` | HTTPS operator contact in User-Agent | `https://finds.team/contact` |

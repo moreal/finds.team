@@ -1,6 +1,6 @@
 FROM eclipse-temurin:25.0.4_7-jdk-alpine-3.24 AS jdk
 
-FROM postgres:17-alpine AS build
+FROM postgres:17.10-alpine3.24 AS build
 
 COPY --from=jdk /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk
