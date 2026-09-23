@@ -11,6 +11,7 @@ repository root, enter the Java 25 LTS shell, and run Spring Boot:
 
 ```sh
 docker compose up -d postgres
+docker compose run --rm postgres-roles
 nix develop
 cd backend
 ./gradlew :bootstrap:bootRun
@@ -93,6 +94,12 @@ FINDS_PUBLIC_ORIGIN=http://127.0.0.1:8081 pnpm --dir frontend exec playwright te
 ```
 
 The existing PostgreSQL development binding and named volume are unchanged.
+The `postgres-roles` service runs before the backend, including on an existing
+volume. It creates the limited `finds_app` and schema-owning `finds_migrator`
+roles and transfers existing public schema objects to the migrator without
+changing rows or Flyway history. The backend then applies pending migrations
+through Flyway. Repeating the bootstrap is safe and does not broaden audit
+permissions. No `down -v` or volume reset is needed.
 
 Inspect health and stop the application without deleting database data:
 
@@ -110,8 +117,11 @@ most commonly deployed overrides are:
 |---|---|---|
 | `FINDS_DB_URL` | PostgreSQL JDBC URL | `jdbc:postgresql://localhost:55432/finds_team` |
 | `FINDS_DB_PORT` | Compose host port | `55432` |
-| `FINDS_DB_USER` | PostgreSQL user | `finds` |
-| `FINDS_DB_PASSWORD` | PostgreSQL password | `finds` |
+| `FINDS_DB_USER` | Runtime PostgreSQL user | `finds_app` |
+| `FINDS_DB_PASSWORD` | Runtime PostgreSQL password | `finds` (development only) |
+| `FINDS_MIGRATION_DB_URL` | Flyway JDBC URL | Runtime JDBC URL |
+| `FINDS_MIGRATION_DB_USER` | Flyway schema owner | `finds_migrator` |
+| `FINDS_MIGRATION_DB_PASSWORD` | Flyway password | `finds` (development only) |
 | `FINDS_APP_PORT` | Same-origin proxy host port | `8080` |
 | `FINDS_PUBLIC_ORIGIN` | Routing Playwright test origin; set to match `FINDS_APP_PORT` | `http://127.0.0.1:8080` |
 | `FINDS_USER_AGENT_PRODUCT` | HTTP User-Agent product | `finds.team` |
@@ -122,6 +132,46 @@ most commonly deployed overrides are:
 Durations, concurrency, retry backoff, close grace, sitemap bounds, response
 limits, and the GraphQL body limit are normal Spring configuration properties
 under `finds.source`, `finds.crawl`, and `finds.graphql`.
+
+### Database roles and existing volumes
+
+The checked-in Compose credentials are only for local development. For an
+external deployment, inject distinct role passwords through the deployment's
+secret environment; never paste passwords into commands, documentation, or
+version control. The bootstrap reads `FINDS_MIGRATION_DB_PASSWORD` and
+`FINDS_DB_PASSWORD` directly from its environment. It requires an administrator
+connection (`POSTGRES_USER`, `POSTGRES_DB`, and the usual libpq `PGHOST` /
+`PGPASSWORD` settings). Run `deploy/postgres/00-create-runtime-role.sh` once
+before deploying the backend, including for databases already at V1 or V2.
+The Docker init directory only runs for new volumes; for local existing
+volumes use the explicit `docker compose run --rm postgres-roles` command above.
+The app profile automates this step.
+
+The script is scoped to a dedicated finds.team database whose `public` schema
+belongs to this service. It transfers table, sequence, and non-extension
+function ownership in that schema; it refuses roles with inherited memberships.
+Take the normal database backup before an operational ownership change. No
+application data is deleted and no migrations are marked as applied. Custom
+deployments using different login names must provision equivalent ownership
+and grants themselves; the bundled SQL provisions `finds_migrator` and
+`finds_app`. Future migrations must explicitly grant their runtime privileges.
+
+Set `SPRING_PROFILES_ACTIVE=production` (or `prod`) in deployed environments;
+startup rejects equal runtime and migrator usernames. The app Compose profile
+sets this automatically. The runtime login has read/insert permission only on
+the audit and security ledgers, no ownership or role membership, and no schema
+CREATE permission. It cannot change Flyway history, disable triggers, or
+truncate the audit ledger. The migrator remains a privileged operational
+credential and must not be used for application queries.
+
+Ordinary command request rows expire after 24 hours; `AUDIT` retention has no
+ordinary expiration. Audit retention/legal deletion is an explicit operator
+procedure using a separately controlled administrative connection and backup:
+stop writers, begin a transaction, disable `audit_events_immutable`, perform
+only the approved scoped deletion, enable the trigger with `ENABLE ALWAYS`,
+and commit. Record the authorization and affected event IDs externally. Roll
+back on error. Never grant this capability to `finds_app`; automated audit
+deletion is not part of application startup or ordinary command cleanup.
 
 The scheduler scans every 15 minutes, but the domain policy—not the provider
 adapter—decides whether each site is due. Database leases prevent cross-instance

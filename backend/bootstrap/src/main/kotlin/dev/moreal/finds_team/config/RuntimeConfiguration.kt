@@ -41,7 +41,6 @@ import dev.moreal.finds.source.sitemap.SitemapCrawler
 import dev.moreal.finds_team.crawl.ScheduledCrawlDispatcher
 import dev.moreal.finds_team.runtime.ManagedCoroutineScope
 import io.micrometer.core.instrument.MeterRegistry
-import org.flywaydb.core.Flyway
 import org.jooq.DSLContext
 import org.jooq.SQLDialect
 import org.jooq.impl.DSL
@@ -53,12 +52,6 @@ import javax.sql.DataSource
 
 @Configuration(proxyBeanMethods = false)
 class RuntimeConfiguration {
-  @Bean(initMethod = "migrate")
-  fun flyway(dataSource: DataSource): Flyway = Flyway.configure()
-    .dataSource(dataSource)
-    .locations("classpath:db/migration")
-    .load()
-
   @Bean
   @DependsOn("flyway")
   fun dslContext(dataSource: DataSource): DSLContext = DSL.using(dataSource, SQLDialect.POSTGRES)

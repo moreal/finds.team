@@ -5,6 +5,8 @@ services:
       POSTGRES_DB: finds_team
       POSTGRES_USER: finds
       POSTGRES_PASSWORD: finds
+      FINDS_MIGRATION_DB_PASSWORD: ${FINDS_MIGRATION_DB_PASSWORD:-finds}
+      FINDS_DB_PASSWORD: ${FINDS_DB_PASSWORD:-finds}
     ports:
       - "${FINDS_DB_PORT:-55432}:5432"
     healthcheck:
@@ -14,6 +16,24 @@ services:
       retries: 15
     volumes:
       - finds-postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres/00-create-runtime-role.sh:/docker-entrypoint-initdb.d/00-create-runtime-role.sh:ro
+
+  postgres-roles:
+    profiles: [app, tools]
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      POSTGRES_DB: finds_team
+      POSTGRES_USER: finds
+      PGPASSWORD: finds
+      FINDS_MIGRATION_DB_PASSWORD: ${FINDS_MIGRATION_DB_PASSWORD:-finds}
+      FINDS_DB_PASSWORD: ${FINDS_DB_PASSWORD:-finds}
+    volumes:
+      - ./deploy/postgres/00-create-runtime-role.sh:/bootstrap-roles.sh:ro
+    entrypoint: [sh, /bootstrap-roles.sh]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   backend:
     profiles: [app]
@@ -22,11 +42,16 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       FINDS_DB_URL: jdbc:postgresql://postgres:5432/finds_team
-      FINDS_DB_USER: finds
-      FINDS_DB_PASSWORD: finds
+      FINDS_DB_USER: finds_app
+      FINDS_DB_PASSWORD: ${FINDS_DB_PASSWORD:-finds}
+      FINDS_MIGRATION_DB_USER: finds_migrator
+      FINDS_MIGRATION_DB_PASSWORD: ${FINDS_MIGRATION_DB_PASSWORD:-finds}
+      SPRING_PROFILES_ACTIVE: production
     depends_on:
       postgres:
         condition: service_healthy
+      postgres-roles:
+        condition: service_completed_successfully
     healthcheck:
       test: [CMD-SHELL, "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 3s

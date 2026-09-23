@@ -53,6 +53,8 @@ class BootstrapVerticalSliceTest {
         "--spring.datasource.url=${container.jdbcUrl}",
         "--spring.datasource.username=${container.username}",
         "--spring.datasource.password=${container.password}",
+        "--spring.flyway.user=${container.username}",
+        "--spring.flyway.password=${container.password}",
         "--finds.crawl.scan-interval=1h",
       )
       .use { context ->

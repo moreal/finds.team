@@ -3,9 +3,12 @@ spring:
     name: finds.team
   datasource:
     url: ${FINDS_DB_URL:jdbc:postgresql://localhost:55432/finds_team}
-    username: ${FINDS_DB_USER:finds}
+    username: ${FINDS_DB_USER:finds_app}
     password: ${FINDS_DB_PASSWORD:finds}
   flyway:
+    url: ${FINDS_MIGRATION_DB_URL:${spring.datasource.url}}
+    user: ${FINDS_MIGRATION_DB_USER:finds_migrator}
+    password: ${FINDS_MIGRATION_DB_PASSWORD:finds}
     locations: classpath:db/migration
   task:
     scheduling:
