@@ -8,6 +8,24 @@ import org.junit.jupiter.api.function.Executable
 
 class ClassificationTest {
   @Test
+  fun `positive copular skill requirements remain technical while ordinary verbs do not`() {
+    val required = SkillRequirementLevel.REQUIRED
+    val preferred = SkillRequirementLevel.PREFERRED
+    assertClassificationFixtures(listOf(
+      "Requirements:\nGo is required" to mapOf("go" to required),
+      "Requirements:\nReact is required" to mapOf("react" to required),
+      "Preferred:\nReact is preferred" to mapOf("react" to preferred),
+      "React required" to mapOf("react" to required),
+      "자격요건\nGo는 필수입니다" to mapOf("go" to required),
+      "우대사항\nReact는 우대합니다" to mapOf("react" to preferred),
+      "Requirements:\nYou go above and beyond" to emptyMap(),
+      "Requirements:\nReact to incidents quickly" to emptyMap(),
+      "Preferred:\nReact to incidents quickly" to emptyMap(),
+      "Requirements:\nGo is not required" to mapOf("go" to SkillRequirementLevel.MENTIONED),
+    ))
+  }
+
+  @Test
   fun `shared list suffixes apply to every member while independent qualifiers retain scope`() {
     val required = SkillRequirementLevel.REQUIRED
     val preferred = SkillRequirementLevel.PREFERRED

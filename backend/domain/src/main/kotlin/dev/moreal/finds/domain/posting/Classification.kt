@@ -186,5 +186,5 @@ private val TECHNICAL_BEFORE = Regex(
   """(?i)\b(?:with|using|in|of|required|preferred)\s+$""",
 )
 private val TECHNICAL_AFTER = Regex(
-  """(?i)^(?:과|와|을|를|은|는|이|가|로|으로)?\s+(?:(?:developer|engineer|programming|language|framework|experience|knowledge|required|preferred|optional)\b|(?:is\s+)?not\s+required\b|개발|경험|사용|필수|우대)""",
+  """(?i)^(?:과|와|을|를|은|는|이|가|로|으로)?\s+(?:(?:developer|engineer|programming|language|framework|experience|knowledge)\b|(?:is\s+)?(?:required|preferred|optional|not\s+required)\b|개발|경험|사용|필수|우대)""",
 )
