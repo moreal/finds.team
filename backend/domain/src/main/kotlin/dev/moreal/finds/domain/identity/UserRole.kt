@@ -1,6 +1,6 @@
 package dev.moreal.finds.domain.identity
 
-/** Shared account roles; the identity aggregate adds policy around this type. */
+/** USER is required on every account; ADMIN adds authorization without changing authentication. */
 enum class UserRole {
   USER,
   ADMIN,
