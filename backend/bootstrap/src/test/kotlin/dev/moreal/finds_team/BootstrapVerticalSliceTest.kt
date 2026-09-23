@@ -17,6 +17,7 @@ import dev.moreal.finds.application.security.Actor
 import dev.moreal.finds.application.security.AuthenticationStrength
 import dev.moreal.finds.domain.identity.*
 import dev.moreal.finds.persistence.JooqTransactionAdapter
+import dev.moreal.finds.persistence.JooqSecurityEventLog
 import graphql.ExecutionInput
 import dev.moreal.finds.domain.identity.EmailAddress
 import dev.moreal.finds.notification.MailOutboxDispatcher
@@ -33,7 +34,6 @@ import dev.moreal.finds.domain.posting.PostingUrlResult
 import dev.moreal.finds.domain.posting.RawPosting
 import dev.moreal.finds.graphql.FindsGraphqlFacade
 import dev.moreal.finds.graphql.GraphqlRuntime
-import dev.moreal.finds.persistence.JooqCareerSiteRepository
 import dev.moreal.finds.persistence.JooqCrawlLeasePort
 import dev.moreal.finds.persistence.JooqCrawlRunRepository
 import dev.moreal.finds.persistence.JooqPostingRepository
@@ -126,7 +126,6 @@ class BootstrapVerticalSliceTest {
     }
     Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate()
     val context = DSL.using(dataSource, SQLDialect.POSTGRES)
-    val sites = JooqCareerSiteRepository(context)
     val postings = JooqPostingRepository(context)
     val runs = JooqCrawlRunRepository(context)
     val clock = ClockPort { OBSERVED_AT }
@@ -148,9 +147,9 @@ class BootstrapVerticalSliceTest {
       transactions,
       SourceDiscoveryPort { ProviderDiscoveryResult.Detected(SourceProvider.NINEHIRE) },
       clock,
+      securityEvents = JooqSecurityEventLog(context),
     )
     val crawling = CrawlSite(
-      sites,
       postings,
       runs,
       SourceFetchPort { site ->
@@ -181,12 +180,15 @@ class BootstrapVerticalSliceTest {
       ClosePolicy(2),
       "vertical-slice-test",
       Duration.ofMinutes(10),
+      transactions,
+      JooqSecurityEventLog(context),
     )
     val facade = FindsGraphqlFacade(
       SearchPostings(postings),
       registration,
       crawling,
       GetCrawlStatus(runs),
+      JooqSecurityEventLog(context),
     )
 
     ManagedCoroutineScope().use { scope ->
@@ -202,10 +204,8 @@ class BootstrapVerticalSliceTest {
       assertEquals("NINEHIRE", site["provider"].toString())
       val siteId = site.getValue("id").toString()
 
-      // Public manual-crawl mutation stays closed until its own audited command is integrated.
-      val crawled = runBlocking { facade.triggerCrawl(siteId) }
-      assertEquals(dev.moreal.finds.graphql.CrawlTriggerOutcome.SUCCEEDED, crawled.outcome)
-      assertEquals(1, crawled.counts?.inserted)
+      val crawled = runBlocking { facade.triggerCrawl(siteId, UUID.randomUUID().toString(), principal) }
+      assertEquals(dev.moreal.finds.graphql.CrawlTriggerOutcome.TRIGGERED, crawled.outcome)
 
       val queried = graphQL.execute(
         """{ jobPostings(filter: {textContains: "Kotlin"}) { totalCount edges { node { title status canonicalUrl } } } crawlStatuses { careerSiteId outcome error { code } } }""",

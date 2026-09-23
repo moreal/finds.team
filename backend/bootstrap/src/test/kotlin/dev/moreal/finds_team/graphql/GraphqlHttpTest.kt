@@ -33,6 +33,7 @@ class GraphqlHttpTest {
       registerHandler = { RegisterCareerSiteResult.UnsupportedProvider },
       crawlHandler = { CrawlSiteResult.NotFound },
       statusHandler = { emptyList() },
+      securityEvents = dev.moreal.finds.application.port.SecurityEventPort {},
     )
     val controller = GraphqlController(GraphqlRuntime.create(facade, scope))
     val properties = FindsProperties(graphql = FindsProperties.Graphql(maximumRequestBytes = 1_024))

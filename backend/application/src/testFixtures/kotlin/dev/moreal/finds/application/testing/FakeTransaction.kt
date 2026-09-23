@@ -21,6 +21,8 @@ class FakeTransaction(
 ) : TransactionPort {
   private var state = State(initialSites, FakeIdentityState(initialUsers))
   private var executing = false
+  val crawlRuns: FakeCrawlRunRepository get() = synchronized(this) { state.runs }
+  val crawlLeases: FakeCrawlLeasePort get() = synchronized(this) { state.leases }
   val sites: List<CareerSite> get() = synchronized(this) { state.sites.sites.toList() }
   val auditEvents: List<AuditEvent> get() = synchronized(this) { state.audit.toList() }
   val completedRequests: Map<CommandRequestKey, StoredCommandResult>
@@ -52,6 +54,8 @@ class FakeTransaction(
 
   private class State(initialSites: List<CareerSite>, val identity: FakeIdentityState) {
     val sites = FakeCareerSiteRepository(initialSites)
+    var runs = FakeCrawlRunRepository()
+    var leases = FakeCrawlLeasePort()
     val requests = linkedMapOf<CommandRequestKey, RequestRow>()
     val audit = mutableListOf<AuditEvent>()
     val outbox = mutableListOf<EnqueuedMail>()
@@ -60,6 +64,8 @@ class FakeTransaction(
       it.requests.putAll(requests)
       it.audit.addAll(audit)
       it.outbox.addAll(outbox)
+      it.runs = runs.snapshot()
+      it.leases = leases.snapshot()
     }
   }
 
@@ -82,6 +88,26 @@ class FakeTransaction(
     override val recoveryCodes = identityStores.recoveryRepository
     override val userSessions = identityStores.userSessionRepository
     override val webauthnChallenges = identityStores.challengeRepository
+    override val crawlRuns = object : CrawlRunRepository {
+      override fun latestHistory(siteId: CareerSiteId): dev.moreal.finds.domain.crawl.CrawlHistory? {
+        checkActive(); return snapshot.runs.latestHistory(siteId)
+      }
+      override fun start(siteId: CareerSiteId, startedAt: Instant): dev.moreal.finds.application.model.CrawlRunId {
+        checkActive(); return snapshot.runs.start(siteId, startedAt)
+      }
+      override fun fail(runId: dev.moreal.finds.application.model.CrawlRunId, failure: dev.moreal.finds.application.model.CrawlFailure, finishedAt: Instant) {
+        checkActive(); snapshot.runs.fail(runId, failure, finishedAt)
+      }
+      override fun latestStatuses(): List<dev.moreal.finds.application.model.CrawlStatus> {
+        checkActive(); return snapshot.runs.latestStatuses()
+      }
+    }
+    override val crawlLeases = object : CrawlLeasePort {
+      override fun tryAcquire(siteId: CareerSiteId, owner: String, now: Instant, ttl: java.time.Duration): Boolean {
+        checkActive(); return snapshot.leases.tryAcquire(siteId, owner, now, ttl)
+      }
+      override fun release(siteId: CareerSiteId, owner: String) { checkActive(); snapshot.leases.release(siteId, owner) }
+    }
 
     override val careerSites = object : CareerSiteRepository {
       override fun findById(id: CareerSiteId): CareerSite? { checkActive(); return snapshot.sites.findById(id) }

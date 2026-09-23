@@ -26,6 +26,21 @@ class ScheduledCrawlDispatcherTest {
   private val scope = ManagedCoroutineScope()
   private val registry = SimpleMeterRegistry()
 
+  @Test fun `same scheduler window retries one key and next window creates a new key`() = runBlocking {
+    var now = Instant.parse("2026-09-23T00:00:01Z")
+    val commands = mutableListOf<CrawlSiteCommand>()
+    val dispatcher = ScheduledCrawlDispatcher({ listOf(CareerSiteId(1)) },
+      { commands += it; success(it.siteId) }, ClockPort { now }, scope, 10, 1, registry)
+    assertNotNull(dispatcher.dispatch()).join()
+    now = now.plusSeconds(30)
+    assertNotNull(dispatcher.dispatch()).join()
+    now = now.plusSeconds(900)
+    assertNotNull(dispatcher.dispatch()).join()
+    assertEquals(commands[0].metadata.idempotencyKey, commands[1].metadata.idempotencyKey)
+    kotlin.test.assertNotEquals(commands[1].metadata.idempotencyKey, commands[2].metadata.idempotencyKey)
+    assertTrue(commands.all { it.actor == dev.moreal.finds.application.security.Actor.System })
+  }
+
   @AfterEach
   fun tearDown() {
     scope.close()

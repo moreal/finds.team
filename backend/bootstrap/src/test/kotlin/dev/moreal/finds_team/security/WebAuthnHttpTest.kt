@@ -242,14 +242,16 @@ class WebAuthnHttpTest {
     val session = recentAdministratorSession()
     discoveries.set(0)
     val database = context.getBean(org.jooq.DSLContext::class.java)
-    fun counts() = listOf("career_sites", "audit_events", "command_requests").map {
+    fun counts() = listOf("career_sites", "crawl_runs", "audit_events", "command_requests").map {
       database.fetchValue("SELECT count(*)::int FROM $it")
     }
     val before = counts()
     val statuses = mutableListOf<Int>()
-    for (multiple in listOf(false, true)) for (invalidCsrf in listOf(false, true)) {
+    for (crawl in listOf(false, true)) for (multiple in listOf(false, true)) for (invalidCsrf in listOf(false, true)) {
       val input = """{url: "https://jobs-${UUID.randomUUID()}.example.test", displayName: "Acme", idempotencyKey: "${UUID.randomUUID()}"}"""
-      val query = if (multiple)
+      val query = if (crawl)
+        "mutation Private { ...Crawl } ${if (multiple) "query Public { __typename }" else ""} fragment Crawl on Mutation { aliased: triggerCrawl(careerSiteId: \"1\", idempotencyKey: \"${UUID.randomUUID()}\") { runId } }"
+        else if (multiple)
         "mutation Private { ...Registration } query Public { __typename } fragment Registration on Mutation { aliased: registerCareerSite(input: $input) { site { id } } }"
         else "mutation { registerCareerSite(input: $input) { site { id } } }"
       val builder = post("/graphql").session(session).secure(true).contentType("application/json")
@@ -259,9 +261,58 @@ class WebAuthnHttpTest {
       val response = if (pending.request.isAsyncStarted) mvc.perform(asyncDispatch(pending)).andReturn().response else pending.response
       statuses += response.status
     }
-    assertEquals(listOf(400, 400, 400, 400), statuses)
+    assertEquals(List(8) { 400 }, statuses)
     assertEquals(0, discoveries.get())
     assertEquals(before, counts(), "Rejected operation names cannot create a site, audit event or command result")
+  }
+
+  @Test fun `manual crawl binds live admin and key enforces CSRF and records denials separately`() {
+    val site = tx.execute { assertIs<InsertCareerSiteResult.Inserted>(it.careerSites.insert(
+      dev.moreal.finds.application.model.NewCareerSite(
+        assertIs<dev.moreal.finds.domain.career.SiteUrlResult.Valid>(dev.moreal.finds.domain.career.SiteUrl.parse(
+          "https://crawl-${UUID.randomUUID()}.example.test")).url,
+        dev.moreal.finds.domain.career.SourceProvider.FLEX, "Crawl"))).site }
+    val database = context.getBean(org.jooq.DSLContext::class.java)
+    val key = UUID.randomUUID()
+    val query = """mutation Crawl { ...Trigger } fragment Trigger on Mutation { aliased: triggerCrawl(careerSiteId: "${site.id.value}", idempotencyKey: "$key") { runId outcome error { code } } }"""
+    val body = json.writeValueAsString(mapOf("query" to query))
+    val beforeEvents = database.fetchValue("SELECT count(*)::int FROM security_events") as Int
+    fun trigger(session: MockHttpSession?): JsonNode {
+      val builder = post("/graphql").secure(true).with(csrf()).contentType("application/json").content(body)
+      if (session != null) builder.session(session)
+      val pending = mvc.perform(builder).andExpect(request().asyncStarted()).andReturn()
+      return json.readTree(mvc.perform(asyncDispatch(pending)).andExpect(status().isOk).andReturn().response.contentAsString)["data"]["aliased"]
+    }
+    fetches.set(0)
+    assertEquals("FORBIDDEN", trigger(null)["outcome"].asText())
+    val account = seed()
+    val (options, session) = options()
+    login(session, account.key.assertion(options["challenge"].asText(), account.handle)).andExpect(status().isOk)
+    assertEquals("FORBIDDEN", trigger(session)["outcome"].asText())
+    tx.execute {
+      val live = it.users.lockByEmail(account.user.email)!!
+      it.users.save(assertIs<UserChange.Updated>(live.grantRole(UserRole.ADMIN)).user)
+    }
+    mvc.perform(post("/graphql").session(session).secure(true).contentType("application/json").content(body))
+      .andExpect(status().isForbidden)
+    mvc.perform(post("/graphql").session(session).secure(true).with(csrf().useInvalidToken()).contentType("application/json").content(body))
+      .andExpect(status().isForbidden)
+    assertEquals(0, fetches.get())
+    val first = trigger(session)
+    assertEquals("TRIGGERED", first["outcome"].asText())
+    assertEquals(first, trigger(session))
+    assertEquals(1, fetches.get())
+    val runId = first["runId"].asText().toLong()
+    assertEquals("SUCCESS", database.fetchValue("SELECT outcome FROM crawl_runs WHERE id = ?", runId))
+    assertEquals(1, database.fetchValue("SELECT count(*)::int FROM audit_events WHERE action = 'crawl.manually_triggered' AND target_id = ?", runId.toString()))
+    now = now.plusSeconds(301)
+    assertEquals("FORBIDDEN", trigger(session)["outcome"].asText())
+    now = now.minusSeconds(301)
+    tx.execute { it.users.lockByEmail(account.user.email); it.userSessions.revokeForUser(account.user.id, now) }
+    assertEquals("FORBIDDEN", trigger(session)["outcome"].asText())
+    assertEquals(1, fetches.get())
+    assertEquals(beforeEvents + 4, database.fetchValue("SELECT count(*)::int FROM security_events"))
+    assertEquals(1, database.fetchValue("SELECT count(*)::int FROM crawl_runs WHERE career_site_id = ?", site.id.value))
   }
 
   @Test fun `null omitted and selected GraphQL operation names preserve CSRF and public queries`() {
@@ -465,10 +516,17 @@ class WebAuthnHttpTest {
       discoveries.incrementAndGet()
       ProviderDiscoveryResult.Detected(dev.moreal.finds.domain.career.SourceProvider.NINEHIRE)
     }
+    @Bean @Primary fun testFetch(transactions: TransactionPort) = SourceFetchPort { site ->
+      // The source boundary must be able to start an independent transaction: nested use fails.
+      check(transactions.execute { it.careerSites.findById(site.id) } != null)
+      fetches.incrementAndGet()
+      SourceFetchResult.Success(dev.moreal.finds.domain.crawl.Snapshot(site.id, site.canonicalBaseUrl.host, now, emptyList()))
+    }
   }
   companion object {
     var now: Instant = Instant.parse("2026-09-23T00:00:00Z")
     val discoveries = java.util.concurrent.atomic.AtomicInteger()
+    val fetches = java.util.concurrent.atomic.AtomicInteger()
   }
 }
 private fun b64(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(value)

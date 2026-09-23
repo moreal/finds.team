@@ -12,6 +12,7 @@ import dev.moreal.finds.application.usecase.SessionPrincipal
 import dev.moreal.finds.application.security.Actor
 import dev.moreal.finds.application.security.AuthenticationStrength
 import dev.moreal.finds.application.port.UserSessionId
+import dev.moreal.finds.application.port.SecurityEventPort
 import dev.moreal.finds.domain.identity.UserRole
 import java.time.Instant
 import java.util.UUID
@@ -31,6 +32,34 @@ class FindsGraphqlFacadeTest {
   private val principal = SessionPrincipal(Actor.User(UUID.randomUUID(), setOf(UserRole.USER, UserRole.ADMIN),
     Instant.now(), AuthenticationStrength.PASSKEY), UserSessionId(UUID.randomUUID()))
 
+  @Test fun `anonymous denials emit only categorical security events without invoking handlers`() = runTest {
+    val events = mutableListOf<dev.moreal.finds.application.port.SecurityEvent>()
+    val facade = FindsGraphqlFacade({ _, _ -> SearchPage(emptyList(), null, 0) },
+      { error("unauthenticated registration invoked") }, { error("unauthenticated crawl invoked") }, { emptyList() },
+      SecurityEventPort { events += it })
+    assertEquals(ApiErrorCode.FORBIDDEN, facade.registerCareerSite(input()).error?.code)
+    assertEquals(ApiErrorCode.FORBIDDEN, facade.triggerCrawl("email@example.test", "secret").error?.code)
+    assertEquals(listOf("career_site.registration_denied", "crawl.trigger_denied"), events.map { it.action.wireName })
+    assertTrue(events.all { it.actorUserId == null && it.careerSiteId == null })
+    assertTrue(events.none { "secret" in it.toString() || "@" in it.toString() })
+  }
+
+  @Test fun `manual crawl validates UUID and passes trusted actor session and metadata`() = runTest {
+    var command: dev.moreal.finds.application.usecase.CrawlSiteCommand? = null
+    val facade = FindsGraphqlFacade({ _, _ -> SearchPage(emptyList(), null, 0) },
+      { RegisterCareerSiteResult.UnsupportedProvider }, { command = it; CrawlSiteResult.Triggered(CrawlRunId(7)) },
+      { emptyList() }, SecurityEventPort {})
+    for (key in listOf("", "1-1-1-1-1", "secret"))
+      assertEquals(ApiErrorCode.INVALID_INPUT, facade.triggerCrawl("1", key, principal).error?.code)
+    kotlin.test.assertNull(command)
+    val result = facade.triggerCrawl("1", input().idempotencyKey, principal)
+    assertEquals(CrawlTriggerOutcome.TRIGGERED, result.outcome)
+    assertEquals("7", result.runId)
+    assertSame(principal.actor, command?.actor)
+    assertEquals(principal.sessionId, command?.sessionId)
+    assertEquals(UUID.fromString(input().idempotencyKey), command?.metadata?.idempotencyKey)
+  }
+
   @Test fun `registration requires a trusted principal and strict UUID before handler`() = runTest {
     var calls = 0
     val facade = facade(register = { calls++; RegisterCareerSiteResult.UnsupportedProvider })
@@ -44,7 +73,7 @@ class FindsGraphqlFacadeTest {
   @Test fun `registration passes trusted actor session and parsed metadata`() = runTest {
     var command: RegisterCareerSiteCommand? = null
     val facade = FindsGraphqlFacade({ _, _ -> SearchPage(emptyList(), null, 0) },
-      { command = it; RegisterCareerSiteResult.UnsupportedProvider }, { CrawlSiteResult.NotFound }, { emptyList() })
+      { command = it; RegisterCareerSiteResult.UnsupportedProvider }, { CrawlSiteResult.NotFound }, { emptyList() }, SecurityEventPort {})
     facade.registerCareerSite(input(), principal)
     assertSame(principal.actor, command?.actor)
     assertEquals(principal.sessionId, command?.sessionId)
@@ -78,16 +107,16 @@ class FindsGraphqlFacadeTest {
       CrawlRunId(2), CrawlChangeCounts(1, 1, 0, 0, 0, 0, 0),
     )
     val facade = facade(crawl = { result })
-    assertEquals(CrawlTriggerOutcome.SUCCEEDED, facade.triggerCrawl("1").outcome)
+    assertEquals(CrawlTriggerOutcome.SUCCEEDED, facade.triggerCrawl("1", input().idempotencyKey, principal).outcome)
 
     result = CrawlSiteResult.Failed(
       CrawlRunId(3), CrawlFailure(CrawlFailureCode.ROBOTS_DENIED, "denied"),
     )
-    val failed = facade.triggerCrawl("1")
+    val failed = facade.triggerCrawl("1", input().idempotencyKey, principal)
     assertEquals(ApiErrorCode.CRAWL_FAILED, failed.error?.code)
-    assertEquals("denied", failed.error?.message)
+    assertEquals("Crawl failed", failed.error?.message)
 
-    assertEquals(ApiErrorCode.INVALID_INPUT, facade.triggerCrawl("bad").error?.code)
+    assertEquals(ApiErrorCode.INVALID_INPUT, facade.triggerCrawl("bad", input().idempotencyKey, principal).error?.code)
   }
 
   private fun facade(
@@ -98,6 +127,7 @@ class FindsGraphqlFacadeTest {
     registerHandler = { register() },
     crawlHandler = { crawl() },
     statusHandler = { emptyList() },
+    securityEvents = SecurityEventPort {},
   )
 
   private fun input() = RegisterCareerSiteInput("https://jobs.example", "Acme", "c6c5b651-4c67-4c17-aa5c-6476f3a1c111")

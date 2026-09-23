@@ -138,6 +138,10 @@ data class FailedRun(
 )
 
 class FakeCrawlRunRepository : CrawlRunRepository {
+  fun snapshot() = FakeCrawlRunRepository().also {
+    it.histories.putAll(histories); it.startedSites.addAll(startedSites); it.failedRuns.addAll(failedRuns)
+    it.statuses = statuses.toList(); it.startThrowable = startThrowable; it.failThrowable = failThrowable; it.nextId = nextId
+  }
   val histories = mutableMapOf<CareerSiteId, CrawlHistory?>()
   val startedSites = mutableListOf<Pair<CareerSiteId, Instant>>()
   val failedRuns = mutableListOf<FailedRun>()
@@ -170,6 +174,9 @@ data class LeaseAttempt(
 )
 
 class FakeCrawlLeasePort : CrawlLeasePort {
+  fun snapshot() = FakeCrawlLeasePort().also {
+    it.attempts.addAll(attempts); it.releases.addAll(releases); it.acquireResult = acquireResult
+  }
   val attempts = mutableListOf<LeaseAttempt>()
   val releases = mutableListOf<Pair<CareerSiteId, String>>()
   var acquireResult = true

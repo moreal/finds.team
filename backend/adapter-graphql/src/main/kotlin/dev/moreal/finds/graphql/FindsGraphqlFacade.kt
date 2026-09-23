@@ -4,6 +4,8 @@ import dev.moreal.finds.application.model.CrawlStatus
 import dev.moreal.finds.application.model.PageRequest
 import dev.moreal.finds.application.model.SearchPage
 import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.port.*
+import java.time.Instant
 import dev.moreal.finds.application.usecase.SessionPrincipal
 import java.util.UUID
 import dev.moreal.finds.application.usecase.CrawlSite
@@ -46,6 +48,7 @@ data class RegisterCareerSiteInput(val url: String, val displayName: String, val
 data class RegisterCareerSitePayload(val site: CareerSiteDto?, val error: ApiErrorDto?)
 
 enum class CrawlTriggerOutcome {
+  TRIGGERED, FORBIDDEN, INVALID_INPUT, IDEMPOTENCY_CONFLICT,
   SUCCEEDED, FAILED, NOT_FOUND, NOT_DUE, DISABLED, BUSY, INFRASTRUCTURE_FAILURE,
 }
 
@@ -70,13 +73,17 @@ class FindsGraphqlFacade(
   private val registerHandler: suspend (RegisterCareerSiteCommand) -> RegisterCareerSiteResult,
   private val crawlHandler: suspend (CrawlSiteCommand) -> CrawlSiteResult,
   private val statusHandler: () -> List<CrawlStatus>,
+  private val securityEvents: SecurityEventPort,
+  private val clock: ClockPort = ClockPort(Instant::now),
 ) {
   constructor(
     search: SearchPostings,
     register: RegisterCareerSite,
     crawl: CrawlSite,
     statuses: GetCrawlStatus,
-  ) : this(search::execute, register::execute, crawl::execute, statuses::execute)
+    securityEvents: SecurityEventPort,
+    clock: ClockPort = ClockPort(Instant::now),
+  ) : this(search::execute, register::execute, crawl::execute, statuses::execute, securityEvents, clock)
 
   fun jobPostings(filter: PostingFilterInput?, first: Int?, after: String?): JobPostingConnectionDto =
     PostingGraphqlMapping.connection(
@@ -84,7 +91,10 @@ class FindsGraphqlFacade(
     )
 
   suspend fun registerCareerSite(input: RegisterCareerSiteInput, principal: SessionPrincipal? = null): RegisterCareerSitePayload {
-    if (principal == null) return errorPayload(ApiErrorCode.FORBIDDEN, "Registration forbidden")
+    if (principal == null) {
+      securityEvents.denied(SecurityEventAction.REGISTRATION_DENIED, clock.now(), anonymousMetadata())
+      return errorPayload(ApiErrorCode.FORBIDDEN, "Registration forbidden")
+    }
     val metadata = try {
       CommandMetadata.parse(UUID.randomUUID().toString(), UUID.randomUUID().toString(), input.idempotencyKey)
     } catch (_: IllegalArgumentException) {
@@ -112,19 +122,33 @@ class FindsGraphqlFacade(
     }
   }
 
-  suspend fun triggerCrawl(careerSiteId: String): TriggerCrawlPayload {
+  suspend fun triggerCrawl(careerSiteId: String, idempotencyKey: String, principal: SessionPrincipal? = null): TriggerCrawlPayload {
+    if (principal == null) {
+      securityEvents.denied(SecurityEventAction.CRAWL_DENIED, clock.now(), anonymousMetadata())
+      return simpleCrawlError(CrawlTriggerOutcome.FORBIDDEN, ApiErrorCode.FORBIDDEN)
+    }
+    val metadata = try {
+      CommandMetadata.parse(UUID.randomUUID().toString(), UUID.randomUUID().toString(), idempotencyKey)
+    } catch (_: IllegalArgumentException) {
+      return simpleCrawlError(CrawlTriggerOutcome.INVALID_INPUT, ApiErrorCode.INVALID_INPUT)
+    }
     val id = careerSiteId.toLongOrNull()?.takeIf { it > 0 }
       ?: return TriggerCrawlPayload(
-        CrawlTriggerOutcome.NOT_FOUND,
+        CrawlTriggerOutcome.INVALID_INPUT,
         error = ApiErrorDto(ApiErrorCode.INVALID_INPUT, "ID must be a positive integer"),
       )
-    return when (val result = crawlHandler(CrawlSiteCommand(CareerSiteId(id), CrawlTrigger.MANUAL))) {
+    return when (val result = crawlHandler(CrawlSiteCommand(CareerSiteId(id), CrawlTrigger.MANUAL,
+      principal.actor, metadata, principal.sessionId))) {
+      is CrawlSiteResult.Triggered -> TriggerCrawlPayload(CrawlTriggerOutcome.TRIGGERED, result.runId.value.toString())
+      CrawlSiteResult.Forbidden -> simpleCrawlError(CrawlTriggerOutcome.FORBIDDEN, ApiErrorCode.FORBIDDEN)
+      CrawlSiteResult.InvalidIdempotencyKey -> simpleCrawlError(CrawlTriggerOutcome.INVALID_INPUT, ApiErrorCode.INVALID_INPUT)
+      CrawlSiteResult.IdempotencyConflict -> simpleCrawlError(CrawlTriggerOutcome.IDEMPOTENCY_CONFLICT, ApiErrorCode.IDEMPOTENCY_CONFLICT)
       is CrawlSiteResult.Succeeded -> TriggerCrawlPayload(
         CrawlTriggerOutcome.SUCCEEDED, result.runId.value.toString(), result.counts,
       )
       is CrawlSiteResult.Failed -> TriggerCrawlPayload(
         CrawlTriggerOutcome.FAILED, result.runId.value.toString(),
-        error = ApiErrorDto(ApiErrorCode.CRAWL_FAILED, result.failure.message),
+        error = ApiErrorDto(ApiErrorCode.CRAWL_FAILED, "Crawl failed"),
       )
       CrawlSiteResult.NotFound -> simpleCrawlError(CrawlTriggerOutcome.NOT_FOUND, ApiErrorCode.NOT_FOUND)
       is CrawlSiteResult.NotDue -> TriggerCrawlPayload(
@@ -135,7 +159,7 @@ class FindsGraphqlFacade(
       CrawlSiteResult.Busy -> simpleCrawlError(CrawlTriggerOutcome.BUSY, ApiErrorCode.BUSY)
       is CrawlSiteResult.InfrastructureFailure -> TriggerCrawlPayload(
         CrawlTriggerOutcome.INFRASTRUCTURE_FAILURE,
-        error = ApiErrorDto(ApiErrorCode.INTERNAL, result.message),
+        error = ApiErrorDto(ApiErrorCode.INTERNAL, "Crawl request failed"),
       )
     }
   }
@@ -144,10 +168,12 @@ class FindsGraphqlFacade(
     CrawlStatusDto(
       status.careerSiteId.value.toString(), status.runId?.value?.toString(), status.outcome,
       status.finishedAt?.toString(), status.failure?.let {
-        ApiErrorDto(ApiErrorCode.CRAWL_FAILED, it.message)
+        ApiErrorDto(ApiErrorCode.CRAWL_FAILED, "Crawl failed")
       },
     )
   }
+
+  private fun anonymousMetadata() = CommandMetadata(UUID.randomUUID(), UUID.randomUUID())
 
   private fun CareerSite.toDto() = CareerSiteDto(
     id.value.toString(), canonicalBaseUrl.value.toString(), canonicalBaseUrl.host.value,

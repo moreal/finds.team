@@ -21,6 +21,8 @@ interface TransactionContext {
   val commandRequests: CommandRequestStore
   val auditLog: AuditLog
   val outbox: MailOutboxEnqueue
+  val crawlRuns: CrawlRunRepository get() = error("Crawl persistence is not configured")
+  val crawlLeases: CrawlLeasePort get() = error("Crawl persistence is not configured")
   val users: UserRepository get() = error("Identity persistence is not configured")
   val otpChallenges: OtpChallengeRepository get() = error("Identity persistence is not configured")
   val credentials: PasskeyCredentialRepository get() = error("Identity persistence is not configured")

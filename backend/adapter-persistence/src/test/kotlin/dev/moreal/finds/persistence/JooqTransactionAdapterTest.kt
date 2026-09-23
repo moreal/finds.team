@@ -25,6 +25,20 @@ import org.postgresql.ds.PGSimpleDataSource
 import kotlin.test.*
 
 class JooqTransactionAdapterTest : PostgresIntegrationTest() {
+  @Test fun `crawl trigger stores and replays only a stable run identifier`() {
+    val (_, db) = migratedContext()
+    val tx = adapter(db)
+    val request = REQUEST.copy(key = REQUEST.key.copy(operation = "crawl.trigger"))
+    tx.execute {
+      it.commandRequests.reserve(request)
+      it.commandRequests.complete(request.key, StoredCommandResult(1, "crawl.trigger", "TRIGGERED",
+        mapOf("crawl_run" to CommandResourceId.Number(12))))
+    }
+    val stored = tx.execute { assertIs<CommandReservation.Replay>(it.commandRequests.reserve(request)).result }
+    assertEquals("TRIGGERED", stored.outcome)
+    assertEquals(mapOf("crawl_run" to CommandResourceId.Number(12)), stored.resourceIds)
+  }
+
   @Test
   fun `same key replays original semantic result and changed hash conflicts without writes`() {
     val (_, db) = migratedContext()

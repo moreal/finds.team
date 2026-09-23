@@ -59,6 +59,8 @@ internal object CommandResultCodec {
   private fun validate(operation: String, result: StoredCommandResult) {
     result.requireSupported(operation, 1)
     val supported = when (operation) {
+      "crawl.trigger" -> result.outcome == "TRIGGERED" && result.resourceIds.keys == setOf("crawl_run") &&
+        result.resourceIds["crawl_run"] is CommandResourceId.Number
       "career_site.register" -> result.outcome in setOf("CREATED", "ALREADY_REGISTERED") &&
         result.resourceIds.keys == setOf("career_site") && result.resourceIds["career_site"] is CommandResourceId.Number
       "enrollment.complete" -> when (result.outcome) {

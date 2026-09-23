@@ -6,6 +6,12 @@ import dev.moreal.finds.application.port.CareerSiteRepository
 import dev.moreal.finds.application.model.NewCareerSite
 import dev.moreal.finds.application.port.TransactionContext
 import dev.moreal.finds.application.port.TransactionPort
+import dev.moreal.finds.application.port.CrawlRunRepository
+import dev.moreal.finds.application.port.CrawlLeasePort
+import dev.moreal.finds.application.model.CrawlRunId
+import dev.moreal.finds.application.model.CrawlFailure
+import java.time.Instant
+import java.time.Duration
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.career.SiteHost
 import org.jooq.DSLContext
@@ -52,6 +58,18 @@ class JooqTransactionAdapter(
     override val userSessions = JooqSessionRepository(db, identityAccess)
     override val webauthnChallenges = JooqWebAuthnChallengeStore(db, identityAccess)
     private val sites = JooqCareerSiteRepository(db)
+    private val runs = JooqCrawlRunRepository(db)
+    private val leases = JooqCrawlLeasePort(db)
+    override val crawlRuns = object : CrawlRunRepository {
+      override fun latestHistory(siteId: CareerSiteId) = scope.access { runs.latestHistory(siteId) }
+      override fun start(siteId: CareerSiteId, startedAt: Instant) = scope.access { runs.start(siteId, startedAt) }
+      override fun fail(runId: CrawlRunId, failure: CrawlFailure, finishedAt: Instant) = scope.access { runs.fail(runId, failure, finishedAt) }
+      override fun latestStatuses() = scope.access { runs.latestStatuses() }
+    }
+    override val crawlLeases = object : CrawlLeasePort {
+      override fun tryAcquire(siteId: CareerSiteId, owner: String, now: Instant, ttl: Duration) = scope.access { leases.tryAcquire(siteId, owner, now, ttl) }
+      override fun release(siteId: CareerSiteId, owner: String) = scope.access { leases.release(siteId, owner) }
+    }
     override val careerSites = object : CareerSiteRepository {
       override fun findById(id: CareerSiteId) = scope.access { sites.findById(id) }
       override fun findByHost(host: SiteHost) = scope.access { sites.findByHost(host) }
@@ -68,8 +86,9 @@ class JooqTransactionAdapter(
     }
   }
 
-  private companion object {
-    val executing = ThreadLocal<Boolean>()
+  internal companion object {
+    private val executing = ThreadLocal<Boolean>()
+    fun requireOutsideTransaction() = check(executing.get() != true) { "Security events require a separate transaction" }
   }
 }
 

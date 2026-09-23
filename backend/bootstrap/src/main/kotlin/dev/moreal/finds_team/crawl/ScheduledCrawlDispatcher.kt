@@ -23,6 +23,10 @@ import org.springframework.boot.health.contributor.Health
 import org.springframework.boot.health.contributor.HealthIndicator
 import org.springframework.scheduling.annotation.Scheduled
 import java.time.Instant
+import java.time.Duration
+import java.util.UUID
+import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.security.Actor
 import java.util.concurrent.atomic.AtomicBoolean
 
 class ScheduledCrawlDispatcher internal constructor(
@@ -33,6 +37,7 @@ class ScheduledCrawlDispatcher internal constructor(
   private val dispatchLimit: Int,
   globalConcurrency: Int,
   private val registry: MeterRegistry,
+  private val scanInterval: Duration = Duration.ofMinutes(15),
 ) : HealthIndicator {
   constructor(
     selectDue: CrawlAllDue,
@@ -49,6 +54,7 @@ class ScheduledCrawlDispatcher internal constructor(
     properties.crawl.dispatchLimit,
     properties.crawl.globalConcurrency,
     registry,
+    properties.crawl.scanInterval,
   )
 
   private val scanning = AtomicBoolean(false)
@@ -61,6 +67,7 @@ class ScheduledCrawlDispatcher internal constructor(
   init {
     require(dispatchLimit in 1..1_000) { "Dispatch limit must be between 1 and 1000" }
     require(globalConcurrency >= 1) { "Global concurrency must be positive" }
+    require(scanInterval.toMillis() > 0) { "Scan interval must be at least one millisecond" }
   }
 
   @Scheduled(
@@ -77,6 +84,7 @@ class ScheduledCrawlDispatcher internal constructor(
       return null
     }
     lastStartedAt = clock.now()
+    val window = Math.floorDiv(checkNotNull(lastStartedAt).toEpochMilli(), scanInterval.toMillis())
     return scope.launch(CoroutineName("scheduled-crawl-scan")) {
       try {
         val due = selectDue(dispatchLimit)
@@ -86,7 +94,7 @@ class ScheduledCrawlDispatcher internal constructor(
         supervisorScope {
           due.map { siteId ->
             launch(CoroutineName("crawl-${siteId.value}")) {
-              permits.withPermit { runSite(siteId) }
+              permits.withPermit { runSite(siteId, window) }
             }
           }.joinAll()
         }
@@ -106,9 +114,11 @@ class ScheduledCrawlDispatcher internal constructor(
     }
   }
 
-  private suspend fun runSite(siteId: CareerSiteId) {
+  private suspend fun runSite(siteId: CareerSiteId, window: Long) {
     val result = try {
-      crawl(CrawlSiteCommand(siteId, CrawlTrigger.SCHEDULED))
+      val key = UUID.nameUUIDFromBytes("crawl_scheduler:${siteId.value}:${scanInterval.toMillis()}:$window".toByteArray(Charsets.UTF_8))
+      crawl(CrawlSiteCommand(siteId, CrawlTrigger.SCHEDULED, Actor.System,
+        CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), key)))
     } catch (cancelled: CancellationException) {
       registry.counter(METRIC_RUNS, "outcome", "cancelled").increment()
       throw cancelled
@@ -146,6 +156,10 @@ class ScheduledCrawlDispatcher internal constructor(
     CrawlSiteResult.Disabled -> "disabled"
     CrawlSiteResult.Busy -> "busy"
     is CrawlSiteResult.InfrastructureFailure -> "infrastructure_failure"
+    is CrawlSiteResult.Triggered -> "replayed"
+    CrawlSiteResult.Forbidden -> "forbidden"
+    CrawlSiteResult.InvalidIdempotencyKey -> "invalid_key"
+    CrawlSiteResult.IdempotencyConflict -> "idempotency_conflict"
   }
 
   private fun Throwable.safeMessage(): String =

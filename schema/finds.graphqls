@@ -77,6 +77,7 @@ input RegisterCareerSiteInput { url: String!, displayName: String!, idempotencyK
 type RegisterCareerSitePayload { site: CareerSite, error: ApiError }
 
 enum CrawlTriggerOutcome {
+  TRIGGERED FORBIDDEN INVALID_INPUT IDEMPOTENCY_CONFLICT
   SUCCEEDED FAILED NOT_FOUND NOT_DUE DISABLED BUSY INFRASTRUCTURE_FAILURE
 }
 
@@ -113,5 +114,5 @@ type Query {
 
 type Mutation {
   registerCareerSite(input: RegisterCareerSiteInput!): RegisterCareerSitePayload!
-  triggerCrawl(careerSiteId: ID!): TriggerCrawlPayload!
+  triggerCrawl(careerSiteId: ID!, idempotencyKey: ID!): TriggerCrawlPayload!
 }

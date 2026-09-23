@@ -4,14 +4,14 @@ import dev.moreal.finds.application.model.CrawlChangeCounts
 import dev.moreal.finds.application.model.CrawlFailure
 import dev.moreal.finds.application.model.CrawlFailureCode
 import dev.moreal.finds.application.model.CrawlRunId
-import dev.moreal.finds.application.port.CareerSiteRepository
-import dev.moreal.finds.application.port.ClockPort
-import dev.moreal.finds.application.port.CrawlLeasePort
-import dev.moreal.finds.application.port.CrawlRunRepository
-import dev.moreal.finds.application.port.PostingRepository
-import dev.moreal.finds.application.port.SourceFetchPort
-import dev.moreal.finds.application.port.SourceFetchResult
-import dev.moreal.finds.application.port.SuccessfulCrawlPort
+import dev.moreal.finds.application.audit.*
+import dev.moreal.finds.application.command.CanonicalCommandEncoder
+import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.port.*
+import dev.moreal.finds.application.security.Actor
+import dev.moreal.finds.domain.identity.UserId
+import dev.moreal.finds.domain.identity.UserRole
+import java.util.UUID
 import dev.moreal.finds.domain.career.CareerSite
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.crawl.ClosePolicy
@@ -33,9 +33,16 @@ enum class CrawlTrigger {
 data class CrawlSiteCommand(
   val siteId: CareerSiteId,
   val trigger: CrawlTrigger,
+  val actor: Actor,
+  val metadata: CommandMetadata,
+  val sessionId: UserSessionId? = null,
 )
 
 sealed interface CrawlSiteResult {
+  data class Triggered(val runId: CrawlRunId) : CrawlSiteResult
+  data object Forbidden : CrawlSiteResult
+  data object InvalidIdempotencyKey : CrawlSiteResult
+  data object IdempotencyConflict : CrawlSiteResult
   data object NotFound : CrawlSiteResult
 
   data class NotDue(val nextEligibleAt: Instant) : CrawlSiteResult
@@ -58,7 +65,6 @@ sealed interface CrawlSiteResult {
 }
 
 class CrawlSite(
-  private val sites: CareerSiteRepository,
   private val postings: PostingRepository,
   private val runs: CrawlRunRepository,
   private val source: SourceFetchPort,
@@ -69,6 +75,8 @@ class CrawlSite(
   private val closePolicy: ClosePolicy,
   private val leaseOwner: String,
   private val leaseTtl: Duration,
+  private val transactions: TransactionPort,
+  private val securityEvents: SecurityEventPort,
 ) {
   init {
     require(leaseOwner.isNotBlank()) { "Lease owner must not be blank" }
@@ -76,49 +84,77 @@ class CrawlSite(
   }
 
   suspend fun execute(command: CrawlSiteCommand): CrawlSiteResult {
-    val site = try {
-      sites.findById(command.siteId)
+    val reservation = try {
+      transactions.execute { tx -> reserve(tx, command) }
+    } catch (rejected: TriggerRejected) {
+      Reservation(rejected.result)
     } catch (error: Exception) {
       return error.asInfrastructureFailure()
-    } ?: return CrawlSiteResult.NotFound
-
-    if (!site.crawlSettings.enabled) {
-      return CrawlSiteResult.Disabled
     }
+    if (reservation.result == CrawlSiteResult.Forbidden) {
+      securityEvents.denied(SecurityEventAction.CRAWL_DENIED, clock.now(), command.metadata,
+        (command.actor as? Actor.User)?.userId, command.siteId.value)
+    }
+    val site = reservation.site ?: return reservation.result
+    val runId = (reservation.result as CrawlSiteResult.Triggered).runId
+    // The transaction has committed the run, lease, audit and semantic result. Neither source I/O
+    // nor reconciliation can retain its connection. A replay returns above without fetching.
+    val completed = crawl(site, runId)
+    return if (command.trigger == CrawlTrigger.MANUAL) reservation.result else completed
+  }
+
+  private fun reserve(tx: TransactionContext, command: CrawlSiteCommand): Reservation {
+    val actor = command.actor
+    val scope = if (command.trigger == CrawlTrigger.SCHEDULED) {
+      if (actor != Actor.System) return Reservation(CrawlSiteResult.Forbidden)
+      "SYSTEM:crawl_scheduler"
+    } else {
+      if (actor !is Actor.User || UserRole.ADMIN !in actor.roles || !actor.hasRecentPasskeyAuthentication(clock.now()))
+        return Reservation(CrawlSiteResult.Forbidden)
+      val session = command.sessionId ?: return Reservation(CrawlSiteResult.Forbidden)
+      val user = tx.lockUsers(setOf(UserId(actor.userId)))[UserId(actor.userId)]
+      if (!tx.authorize(SessionPrincipal(actor, session), user, clock.now(), recent = true) || UserRole.ADMIN !in checkNotNull(user).roles)
+        return Reservation(CrawlSiteResult.Forbidden)
+      actor.userId.toString()
+    }
+    val key = CommandRequestKey(scope, OPERATION, command.metadata.idempotencyKey
+      ?: return Reservation(CrawlSiteResult.InvalidIdempotencyKey))
+    val now = clock.now()
+    val hash = CanonicalCommandEncoder.hash(mapOf("siteId" to command.siteId.value, "trigger" to command.trigger.name))
+    val retention = if (command.trigger == CrawlTrigger.MANUAL) CommandRetention.AUDIT else CommandRetention.ORDINARY
+    when (val reserved = tx.commandRequests.reserve(CommandRequest(key, hash, now, retention))) {
+      CommandReservation.Conflict -> return Reservation(CrawlSiteResult.IdempotencyConflict)
+      is CommandReservation.Replay -> {
+        reserved.result.requireSupported(OPERATION, 1)
+        if (reserved.result.outcome != "TRIGGERED" || reserved.result.resourceIds.keys != setOf("crawl_run"))
+          throw UnsupportedCommandResultException()
+        val id = reserved.result.resourceIds["crawl_run"] as? CommandResourceId.Number ?: throw UnsupportedCommandResultException()
+        return Reservation(CrawlSiteResult.Triggered(CrawlRunId(id.value)))
+      }
+      CommandReservation.Reserved -> Unit
+    }
+    val site = tx.careerSites.findById(command.siteId) ?: throw TriggerRejected(CrawlSiteResult.NotFound)
+    if (!site.crawlSettings.enabled) throw TriggerRejected(CrawlSiteResult.Disabled)
     if (command.trigger == CrawlTrigger.SCHEDULED) {
-      val eligibility = try {
-        decideCrawlEligibility(
-          site.crawlSettings,
-          runs.latestHistory(site.id),
-          retryPolicy,
-          clock.now(),
-        )
-      } catch (error: Exception) {
-        return error.asInfrastructureFailure()
-      }
-      when (eligibility) {
+      when (val eligibility = decideCrawlEligibility(site.crawlSettings, tx.crawlRuns.latestHistory(site.id), retryPolicy, now)) {
         is CrawlEligibility.Due -> Unit
-        is CrawlEligibility.NotDue -> return CrawlSiteResult.NotDue(eligibility.nextEligibleAt)
-        is CrawlEligibility.Disabled -> return CrawlSiteResult.Disabled
+        is CrawlEligibility.NotDue -> throw TriggerRejected(CrawlSiteResult.NotDue(eligibility.nextEligibleAt))
+        is CrawlEligibility.Disabled -> throw TriggerRejected(CrawlSiteResult.Disabled)
       }
     }
+    if (!tx.crawlLeases.tryAcquire(site.id, leaseOwner, now, leaseTtl)) throw TriggerRejected(CrawlSiteResult.Busy)
+    val runId = tx.crawlRuns.start(site.id, now)
+    if (command.trigger == CrawlTrigger.MANUAL) tx.auditLog.append(AuditEvent(UUID.randomUUID(), 1, now, actor,
+      AuditAction.MANUAL_CRAWL_TRIGGERED, "crawl_run", runId.value.toString(), command.metadata.requestId,
+      command.metadata.correlationId, AuditOutcome.SUCCEEDED))
+    tx.commandRequests.complete(key, StoredCommandResult(1, OPERATION, "TRIGGERED",
+      mapOf("crawl_run" to CommandResourceId.Number(runId.value))))
+    return Reservation(CrawlSiteResult.Triggered(runId), site)
+  }
 
-    val acquiredAt = clock.now()
-    val acquired = try {
-      leases.tryAcquire(site.id, leaseOwner, acquiredAt, leaseTtl)
-    } catch (error: Exception) {
-      return error.asInfrastructureFailure()
-    }
-    if (!acquired) {
-      return CrawlSiteResult.Busy
-    }
-
-    var runId: CrawlRunId? = null
-    var infrastructureFailureCode = CrawlFailureCode.PERSISTENCE_FAILED
+  private suspend fun crawl(site: CareerSite, startedRunId: CrawlRunId): CrawlSiteResult {
+    var infrastructureFailureCode = CrawlFailureCode.SOURCE_FETCH_FAILED
     try {
-      val startedRunId = runs.start(site.id, acquiredAt)
-      runId = startedRunId
-      infrastructureFailureCode = CrawlFailureCode.SOURCE_FETCH_FAILED
       val fetchResult = source.fetch(site)
       if (fetchResult is SourceFetchResult.Failure) {
         val finishedAt = clock.now()
@@ -150,24 +186,21 @@ class CrawlSite(
       return CrawlSiteResult.Succeeded(startedRunId, counts)
     } catch (error: Exception) {
       if (error is CancellationException) {
-        runId?.let { started ->
-          val failure = CrawlFailure(
-            CrawlFailureCode.CANCELLED,
-            error.safeMessage(),
-          )
-          runCatching { runs.fail(started, failure, clock.now()) }
-        }
+        val failure = CrawlFailure(CrawlFailureCode.CANCELLED, error.safeMessage())
+        runCatching { runs.fail(startedRunId, failure, clock.now()) }
         throw error
       }
       val failure = CrawlFailure(infrastructureFailureCode, error.safeMessage())
-      runId?.let { started ->
-        runCatching { runs.fail(started, failure, clock.now()) }
-      }
+      runCatching { runs.fail(startedRunId, failure, clock.now()) }
       return CrawlSiteResult.InfrastructureFailure(failure.message)
     } finally {
       runCatching { leases.release(site.id, leaseOwner) }
     }
   }
+
+  private data class Reservation(val result: CrawlSiteResult, val site: CareerSite? = null)
+  private class TriggerRejected(val result: CrawlSiteResult) : RuntimeException(null, null, false, false)
+  private companion object { const val OPERATION = "crawl.trigger" }
 
   private fun Snapshot.identityFailure(site: CareerSite): CrawlFailure? = when {
     careerSiteId != site.id -> CrawlFailure(

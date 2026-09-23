@@ -9,6 +9,8 @@ import dev.moreal.finds.application.port.SourceDiscoveryPort
 import dev.moreal.finds.application.port.SourceFetchPort
 import dev.moreal.finds.application.port.SuccessfulCrawlPort
 import dev.moreal.finds.application.port.TransactionPort
+import dev.moreal.finds.application.port.SecurityEventPort
+import dev.moreal.finds.persistence.JooqSecurityEventLog
 import dev.moreal.finds.application.port.MailPayloadCrypto
 import dev.moreal.finds.application.port.MailOutbox
 import dev.moreal.finds.application.port.VerificationCodeNotifier
@@ -95,6 +97,9 @@ class RuntimeConfiguration {
 
   @Bean
   fun careerSites(context: DSLContext): CareerSiteRepository = JooqCareerSiteRepository(context)
+
+  @Bean
+  fun securityEvents(context: DSLContext): SecurityEventPort = JooqSecurityEventLog(context)
 
   @Bean
   fun transactions(context: DSLContext, crypto: MailPayloadCrypto): TransactionPort =
@@ -236,11 +241,13 @@ class RuntimeConfiguration {
     discovery: SourceDiscoveryPort,
     clock: ClockPort,
     properties: FindsProperties,
+    securityEvents: SecurityEventPort,
   ): RegisterCareerSite = RegisterCareerSite(
     transactions,
     discovery,
     clock,
     CrawlSettings(successfulInterval = properties.crawl.successInterval),
+    securityEvents,
   )
 
   @Bean
@@ -248,7 +255,6 @@ class RuntimeConfiguration {
 
   @Bean
   fun crawlSite(
-    sites: CareerSiteRepository,
     postings: PostingRepository,
     runs: CrawlRunRepository,
     source: SourceFetchPort,
@@ -258,8 +264,9 @@ class RuntimeConfiguration {
     retryPolicy: RetryPolicy,
     closePolicy: ClosePolicy,
     properties: FindsProperties,
+    transactions: TransactionPort,
+    securityEvents: SecurityEventPort,
   ): CrawlSite = CrawlSite(
-    sites,
     postings,
     runs,
     source,
@@ -270,6 +277,8 @@ class RuntimeConfiguration {
     closePolicy,
     properties.crawl.leaseOwner,
     properties.crawl.leaseDuration,
+    transactions,
+    securityEvents,
   )
 
   @Bean

@@ -48,8 +48,16 @@ class RegisterCareerSite(
   private val discovery: SourceDiscoveryPort,
   private val clock: ClockPort,
   private val defaultCrawlSettings: CrawlSettings = CrawlSettings(),
+  private val securityEvents: SecurityEventPort,
 ) {
   suspend fun execute(command: RegisterCareerSiteCommand): RegisterCareerSiteResult {
+    val result = executeCommand(command)
+    if (result == RegisterCareerSiteResult.Forbidden) securityEvents.denied(SecurityEventAction.REGISTRATION_DENIED,
+      clock.now(), command.metadata, (command.actor as? Actor.User)?.userId)
+    return result
+  }
+
+  private suspend fun executeCommand(command: RegisterCareerSiteCommand): RegisterCareerSiteResult {
     val actor = command.actor as? Actor.User ?: return RegisterCareerSiteResult.Forbidden
     if (UserRole.ADMIN !in actor.roles || !actor.hasRecentPasskeyAuthentication(clock.now()))
       return RegisterCareerSiteResult.Forbidden

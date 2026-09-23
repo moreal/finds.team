@@ -4,10 +4,13 @@ import dev.moreal.finds.application.model.CrawlChangeCounts
 import dev.moreal.finds.application.model.CrawlFailure
 import dev.moreal.finds.application.model.CrawlFailureCode
 import dev.moreal.finds.application.port.SourceFetchResult
-import dev.moreal.finds.application.testing.FakeCareerSiteRepository
+import dev.moreal.finds.application.port.*
+import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.security.*
+import dev.moreal.finds.application.testing.FakeTransaction
+import dev.moreal.finds.domain.identity.*
+import java.util.UUID
 import dev.moreal.finds.application.testing.FakeClock
-import dev.moreal.finds.application.testing.FakeCrawlLeasePort
-import dev.moreal.finds.application.testing.FakeCrawlRunRepository
 import dev.moreal.finds.application.testing.FakePostingRepository
 import dev.moreal.finds.application.testing.FakeSourceFetchPort
 import dev.moreal.finds.application.testing.FakeSuccessfulCrawlPort
@@ -38,8 +41,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class CrawlSiteTest {
+  @Test
+  fun `manual trigger without trusted authentication cannot fetch or create a run`() = runTest {
+    val fixture = fixture()
+    fixture.useCase.execute(command(CrawlTrigger.MANUAL).copy(actor = Actor.System, sessionId = null))
+    assertTrue(fixture.runs.startedSites.isEmpty(), "Untrusted manual trigger created a run")
+    assertTrue(fixture.source.fetchedSites.isEmpty())
+  }
+
   @Test
   fun `missing site stops before lease run and fetch`() = runTest {
     val fixture = fixture(includeSite = false)
@@ -70,10 +82,92 @@ class CrawlSiteTest {
 
     val manual = fixture()
     manual.runs.histories[SITE_ID] = scheduled.runs.histories[SITE_ID]
-    assertIs<CrawlSiteResult.Succeeded>(
+    assertIs<CrawlSiteResult.Triggered>(
       manual.useCase.execute(command(CrawlTrigger.MANUAL)),
     )
     assertEquals(1, manual.source.fetchedSites.size)
+  }
+
+  @Test fun `manual replay returns original run without fetching and changed site conflicts`() = runTest {
+    val f = fixture()
+    val command = command(CrawlTrigger.MANUAL)
+    val first = assertIs<CrawlSiteResult.Triggered>(f.useCase.execute(command))
+    assertEquals(first, f.useCase.execute(command.copy(metadata = command.metadata.copy(requestId = UUID.randomUUID()))))
+    assertEquals(CrawlSiteResult.IdempotencyConflict, f.useCase.execute(command.copy(siteId = CareerSiteId(2))))
+    assertEquals(1, f.runs.startedSites.size)
+    assertEquals(1, f.source.fetchedSites.size)
+    assertEquals(1, f.tx.auditEvents.size)
+    assertEquals("crawl.manually_triggered", f.tx.auditEvents.single().action.wireName)
+    assertEquals(first.runId.value.toString(), f.tx.auditEvents.single().targetId)
+    assertEquals("crawl_run", f.tx.auditEvents.single().targetType)
+    assertEquals(mapOf("crawl_run" to CommandResourceId.Number(first.runId.value)), f.tx.completedRequests.values.single().resourceIds)
+  }
+
+  @Test fun `manual authorization rechecks current role session and freshness before replay`() = runTest {
+    for (mode in listOf("role", "revoked", "expired", "missing", "stale", "future", "weak", "other", "suspended")) {
+      val f = fixture()
+      val command = command(CrawlTrigger.MANUAL)
+      f.useCase.execute(command)
+      var denied = command
+      f.tx.execute {
+        it.users.lockByEmail(user().email)
+        when (mode) {
+          "role" -> it.users.save(User(USER, user().email, UserStatus.ACTIVE, setOf(UserRole.USER), user().credentials))
+          "suspended" -> it.users.save(User(USER, user().email, UserStatus.SUSPENDED, user().roles, user().credentials))
+          "revoked" -> it.userSessions.revoke(SESSION, NOW)
+          "expired" -> it.userSessions.save(session().copy(createdAt = NOW.minusSeconds(10), expiresAt = NOW))
+          "missing" -> denied = command.copy(sessionId = null)
+          "other" -> denied = command.copy(sessionId = UserSessionId(UUID.randomUUID()))
+          "stale" -> denied = command.copy(actor = actor(at = NOW.minusSeconds(301)))
+          "future" -> denied = command.copy(actor = actor(at = NOW.plusSeconds(1)))
+          "weak" -> denied = command.copy(actor = actor(strength = AuthenticationStrength.EMAIL_OTP))
+        }
+      }
+      assertEquals(CrawlSiteResult.Forbidden, f.useCase.execute(denied), mode)
+      assertEquals(1, f.events.size, mode)
+      assertEquals(SecurityEventAction.CRAWL_DENIED, f.events.single().action)
+      assertEquals(1, f.tx.auditEvents.size)
+      assertEquals(1, f.source.fetchedSites.size)
+    }
+  }
+
+  @Test fun `audit failure rolls back reservation run and lease before source and remains retryable`() = runTest {
+    val f = fixture()
+    val command = command(CrawlTrigger.MANUAL)
+    f.tx.auditFailure = { error("audit unavailable") }
+    assertIs<CrawlSiteResult.InfrastructureFailure>(f.useCase.execute(command))
+    assertTrue(f.runs.startedSites.isEmpty())
+    assertTrue(f.tx.completedRequests.isEmpty())
+    assertTrue(f.source.fetchedSites.isEmpty())
+    assertTrue(f.leases.attempts.isEmpty())
+    f.tx.auditFailure = null
+    assertIs<CrawlSiteResult.Triggered>(f.useCase.execute(command))
+  }
+
+  @Test fun `security event failure fails closed and no successful audit is emitted`() = runTest {
+    val f = fixture()
+    f.securityFailure = true
+    assertFailsWith<IllegalStateException> {
+      f.useCase.execute(command(CrawlTrigger.MANUAL).copy(actor = Actor.System))
+    }
+    assertTrue(f.runs.startedSites.isEmpty())
+    assertTrue(f.tx.completedRequests.isEmpty())
+    assertTrue(f.tx.auditEvents.isEmpty())
+  }
+
+  @Test fun `failed or cancelled manual crawl remains replayable without another fetch`() = runTest {
+    for (cancel in listOf(false, true)) {
+      val f = fixture()
+      val command = command(CrawlTrigger.MANUAL)
+      f.source.throwable = if (cancel) CancellationException("shutdown") else IllegalStateException("transport secret")
+      if (cancel) assertFailsWith<CancellationException> { f.useCase.execute(command) }
+      else assertIs<CrawlSiteResult.Triggered>(f.useCase.execute(command))
+      assertIs<CrawlSiteResult.Triggered>(f.useCase.execute(command))
+      assertEquals(1, f.runs.startedSites.size)
+      assertEquals(1, f.runs.failedRuns.size)
+      assertEquals(1, f.tx.auditEvents.size)
+      assertEquals(1, f.leases.releases.size)
+    }
   }
 
   @Test
@@ -205,17 +299,30 @@ class CrawlSiteTest {
     includeSite: Boolean = true,
     site: CareerSite = site(),
   ): Fixture {
-    val sites = FakeCareerSiteRepository(if (includeSite) listOf(site) else emptyList())
-    val runs = FakeCrawlRunRepository()
+    val tx = FakeTransaction(if (includeSite) listOf(site) else emptyList(), initialUsers = listOf(user()))
+    tx.execute { it.users.lockByEmail(user().email); it.userSessions.save(session()) }
     val postings = FakePostingRepository()
     val source = FakeSourceFetchPort(SourceFetchResult.Success(snapshot()))
-    val leases = FakeCrawlLeasePort()
     val completion = FakeSuccessfulCrawlPort()
+    val f = Fixture(tx, postings, source, completion)
+    val runs = object : CrawlRunRepository {
+      override fun latestHistory(siteId: CareerSiteId) = tx.crawlRuns.latestHistory(siteId)
+      override fun start(siteId: CareerSiteId, startedAt: Instant) = tx.crawlRuns.start(siteId, startedAt)
+      override fun fail(runId: dev.moreal.finds.application.model.CrawlRunId, failure: CrawlFailure, finishedAt: Instant) = tx.crawlRuns.fail(runId, failure, finishedAt)
+      override fun latestStatuses() = tx.crawlRuns.latestStatuses()
+    }
+    val leases = object : CrawlLeasePort {
+      override fun tryAcquire(siteId: CareerSiteId, owner: String, now: Instant, ttl: Duration) = tx.crawlLeases.tryAcquire(siteId, owner, now, ttl)
+      override fun release(siteId: CareerSiteId, owner: String) = tx.crawlLeases.release(siteId, owner)
+    }
     val useCase = CrawlSite(
-      sites = sites,
       postings = postings,
       runs = runs,
-      source = source,
+      source = SourceFetchPort { fetched ->
+        assertFalse(f.inside, "Source transport ran inside transaction")
+        assertEquals(tx.crawlRuns.startedSites.size, tx.completedRequests.size, "Trigger must commit before transport")
+        source.fetch(fetched)
+      },
       leases = leases,
       completion = completion,
       clock = FakeClock(NOW),
@@ -223,12 +330,38 @@ class CrawlSiteTest {
       closePolicy = ClosePolicy(2),
       leaseOwner = OWNER,
       leaseTtl = Duration.ofMinutes(2),
+      transactions = object : TransactionPort {
+        override fun <T> execute(block: (TransactionContext) -> T): T {
+          f.inside = true
+          return try { tx.execute(block) } finally { f.inside = false }
+        }
+      },
+      securityEvents = SecurityEventPort {
+        assertFalse(f.inside, "Security event must be recorded after the transaction")
+        if (f.securityFailure) error("Security event storage unavailable")
+        f.events += it
+      },
     )
-    return Fixture(runs, postings, source, leases, completion, useCase)
+    f.useCase = useCase
+    return f
   }
 
   private fun command(trigger: CrawlTrigger = CrawlTrigger.SCHEDULED) =
-    CrawlSiteCommand(SITE_ID, trigger)
+    CrawlSiteCommand(SITE_ID, trigger, if (trigger == CrawlTrigger.MANUAL) actor() else Actor.System,
+      CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()),
+      if (trigger == CrawlTrigger.MANUAL) SESSION else null)
+
+  @Test fun `scheduled requests use stable system scope replay once and later key can crawl`() = runTest {
+    val f = fixture()
+    val first = command()
+    val completed = assertIs<CrawlSiteResult.Succeeded>(f.useCase.execute(first))
+    assertEquals(CrawlSiteResult.Triggered(completed.runId), f.useCase.execute(first))
+    assertIs<CrawlSiteResult.Succeeded>(f.useCase.execute(command()))
+    assertEquals(2, f.source.fetchedSites.size)
+    assertEquals(2, f.tx.completedRequests.size)
+    assertTrue(f.tx.completedRequests.keys.all { it.scope == "SYSTEM:crawl_scheduler" })
+    assertTrue(f.tx.auditEvents.isEmpty())
+  }
 
   private fun site(enabled: Boolean = true): CareerSite = CareerSite(
     id = SITE_ID,
@@ -276,14 +409,19 @@ class CrawlSiteTest {
   private fun validPostingUrl(value: String): PostingUrl =
     assertIs<PostingUrlResult.Valid>(PostingUrl.parse(value)).url
 
-  private data class Fixture(
-    val runs: FakeCrawlRunRepository,
+  private class Fixture(
+    val tx: FakeTransaction,
     val postings: FakePostingRepository,
     val source: FakeSourceFetchPort,
-    val leases: FakeCrawlLeasePort,
     val completion: FakeSuccessfulCrawlPort,
-    val useCase: CrawlSite,
-  )
+  ) {
+    val runs get() = tx.crawlRuns
+    val leases get() = tx.crawlLeases
+    val events = mutableListOf<SecurityEvent>()
+    var inside = false
+    var securityFailure = false
+    lateinit var useCase: CrawlSite
+  }
 
   private companion object {
     val SITE_ID = CareerSiteId(1)
@@ -293,5 +431,12 @@ class CrawlSiteTest {
       listOf(Duration.ofMinutes(5), Duration.ofMinutes(30), Duration.ofHours(2)),
     )
     const val OWNER = "worker-1"
+    val USER = UserId(UUID.randomUUID())
+    val SESSION = UserSessionId(UUID.randomUUID())
+    fun user() = User(USER, EmailAddress("admin@example.test"), UserStatus.ACTIVE,
+      setOf(UserRole.USER, UserRole.ADMIN), setOf(CredentialId("passkey")))
+    fun actor(at: Instant = NOW, strength: AuthenticationStrength = AuthenticationStrength.PASSKEY) =
+      Actor.User(USER.value, user().roles, at, strength)
+    fun session() = UserSession(SESSION, USER, NOW, NOW.plusSeconds(3600), NOW)
   }
 }

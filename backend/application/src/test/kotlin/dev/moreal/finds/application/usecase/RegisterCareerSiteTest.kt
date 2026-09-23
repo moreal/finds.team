@@ -28,7 +28,18 @@ class RegisterCareerSiteTest {
       assertTrue(f.tx.sites.isEmpty())
       assertTrue(f.tx.auditEvents.isEmpty())
       assertTrue(f.tx.completedRequests.isEmpty())
+      assertEquals(1, f.events.size)
+      assertEquals(SecurityEventAction.REGISTRATION_DENIED, f.events.single().action)
     }
+  }
+
+  @Test fun `denial event failure propagates without claiming success or creating business rows`() = runTest {
+    val f = Fixture()
+    f.securityFailure = true
+    assertFailsWith<IllegalStateException> { f.useCase.execute(command().copy(actor = Actor.System)) }
+    assertTrue(f.tx.auditEvents.isEmpty())
+    assertTrue(f.tx.completedRequests.isEmpty())
+    assertTrue(f.tx.sites.isEmpty())
   }
 
   @Test fun `revoked missing expired and non owned sessions stop before discovery`() = runTest {
@@ -188,6 +199,8 @@ class RegisterCareerSiteTest {
     var discoveries = 0
     var detected: ProviderDiscoveryResult = ProviderDiscoveryResult.Detected(SourceProvider.NINEHIRE)
     var onDiscovery: () -> Unit = {}
+    val events = mutableListOf<SecurityEvent>()
+    var securityFailure = false
     init { tx.execute { it.users.lockByEmail(user().email); it.userSessions.save(session()) } }
     val transactions = object : TransactionPort {
       override fun <T> execute(block: (TransactionContext) -> T): T {
@@ -203,7 +216,11 @@ class RegisterCareerSiteTest {
         return detected
       }
     }
-    val useCase = RegisterCareerSite(transactions, discovery, FakeClock(NOW), policy)
+    val useCase = RegisterCareerSite(transactions, discovery, FakeClock(NOW), policy, SecurityEventPort {
+      assertFalse(inside.get(), "Security event must be independent of business transaction")
+      if (securityFailure) error("Security event unavailable")
+      events += it
+    })
   }
 
   companion object {

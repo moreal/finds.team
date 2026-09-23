@@ -4,6 +4,8 @@ import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
 import dev.moreal.finds.application.usecase.RegisterCareerSite
 import dev.moreal.finds.application.usecase.SearchPostings
+import dev.moreal.finds.application.port.SecurityEventPort
+import dev.moreal.finds.application.port.ClockPort
 import dev.moreal.finds.graphql.FindsGraphqlFacade
 import dev.moreal.finds.graphql.GraphqlRuntime
 import dev.moreal.finds_team.runtime.ManagedCoroutineScope
@@ -22,7 +24,9 @@ class GraphqlConfiguration {
     register: RegisterCareerSite,
     crawl: CrawlSite,
     statuses: GetCrawlStatus,
-  ): FindsGraphqlFacade = FindsGraphqlFacade(search, register, crawl, statuses)
+    securityEvents: SecurityEventPort,
+    clock: ClockPort,
+  ): FindsGraphqlFacade = FindsGraphqlFacade(search, register, crawl, statuses, securityEvents, clock)
 
   @Bean
   fun graphQL(facade: FindsGraphqlFacade, scope: ManagedCoroutineScope): GraphQL =

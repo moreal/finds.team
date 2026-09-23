@@ -48,25 +48,26 @@ object GraphqlRuntime {
               environment.graphQlContext.get<SessionPrincipal>(SESSION_PRINCIPAL),
             )
           }
-        }.dataFetcher("triggerCrawl") {
-          // Open each mutation only when its audited application command is available.
-          throw ClosedMutation()
+        }.dataFetcher("triggerCrawl") { environment ->
+          scope.future {
+            facade.triggerCrawl(requireNotNull(environment.getArgument("careerSiteId")),
+              requireNotNull(environment.getArgument("idempotencyKey")),
+              environment.graphQlContext.get<SessionPrincipal>(SESSION_PRINCIPAL))
+          }
         }
       }
       .build()
     return GraphQL.newGraphQL(SchemaGenerator().makeExecutableSchema(registry, wiring))
       .defaultDataFetcherExceptionHandler { parameters ->
-        val forbidden = parameters.exception is ClosedMutation
         val error = GraphqlErrorBuilder.newError(parameters.dataFetchingEnvironment)
-          .message(if (forbidden) "Mutation forbidden" else "Request failed")
-          .extensions(mapOf("code" to if (forbidden) "FORBIDDEN" else "INTERNAL"))
+          .message("Request failed")
+          .extensions(mapOf("code" to "INTERNAL"))
           .build()
         CompletableFuture.completedFuture(DataFetcherExceptionHandlerResult.newResult().error(error).build())
       }.build()
   }
 
   const val SESSION_PRINCIPAL = "sessionPrincipal"
-  private class ClosedMutation : RuntimeException()
 
   @Suppress("UNCHECKED_CAST")
   private fun Map<String, Any?>.toFilterInput(): PostingFilterInput = PostingFilterInput(
