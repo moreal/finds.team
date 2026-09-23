@@ -10,7 +10,8 @@ export function SiteDetail(props: { site: NonNullable<AdminOperationsHistoryQuer
   return <>
     <section><h2>{props.site.displayName}</h2><p>{props.site.crawlSummary?.outcome === 'FAILED' ? '최근 수집 실패' : props.site.crawlSummary?.outcome === 'SUCCESS' ? '최근 수집 성공' : '완료된 수집 없음'}</p>
       <dl><dt>공급자</dt><dd>{props.site.provider}</dd><dt>채용 페이지</dt><dd>{props.site.canonicalBaseUrl}</dd><dt>최근 완료</dt><dd>{props.site.crawlSummary?.finishedAt ?? '기록 없음'}</dd></dl>
-      <Link href="/admin/audit?targetType=career_site">전체 사이트 변경 감사 기록</Link>
+      <dl><dt>수집 활성화</dt><dd>{props.site.enabled ? '활성' : '비활성'}</dd><dt>성공 후 수집 간격</dt><dd>{props.site.successfulIntervalSeconds}초</dd></dl>
+      <Link href={`/admin/audit?atCareerSite=${encodeURIComponent(props.site.id)}`}>이 사이트 변경 감사 기록</Link>
     </section>
     <section><h2>수집 기록</h2>{!props.site.crawlHistory.edges.length && <p>수집 기록이 없어요.</p>}
       <ol class="admin-records"><For each={props.site.crawlHistory.edges}>{edge => {

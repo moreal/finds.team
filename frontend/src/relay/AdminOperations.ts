@@ -41,7 +41,7 @@ export const auditPage = graphql`
 export const history = graphql`
   query AdminOperationsHistoryQuery($slug: String!, $first: Int = 20, $after: String) {
     careerSite(slug: $slug) {
-      id slug displayName canonicalBaseUrl provider
+      id slug displayName canonicalBaseUrl provider enabled successfulIntervalSeconds
       crawlSummary { outcome finishedAt }
       crawlHistory(first: $first, after: $after)
       @connection(key: "AdminOperations_crawlHistory") {

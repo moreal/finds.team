@@ -101,9 +101,13 @@ private fun DataFetchingEnvironment.auditFilter(): AuditSearch {
   val f = getArgument<Map<String, String?>>("filter").orEmpty()
   try {
     fun timestamp(name: String) = f[name]?.let { Instant.parse(it).also { value -> require(DiscoveryTimestamp.supports(value)) } }
+    val site = f["atCareerSite"]?.let {
+      require(f["targetType"] == null && f["targetId"] == null)
+      GlobalIdCodec.decode(NodeType.CareerSite, it)
+    }
     return AuditSearch(actorUserId = f["actorUserId"]?.let { UUID.fromString(GlobalIdCodec.decode(NodeType.User, it)) },
       actorKind = f["actorKind"]?.let(AuditActorKind::valueOf), action = f["action"]?.let(AuditAction::valueOf),
-      targetType = f["targetType"], targetId = f["targetId"], from = timestamp("from"), until = timestamp("until"))
+      targetType = if (site != null) "career_site" else f["targetType"], targetId = site ?: f["targetId"], from = timestamp("from"), until = timestamp("until"))
   } catch (_: IllegalArgumentException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid audit filter") }
     catch (_: java.time.DateTimeException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid audit filter") }
 }

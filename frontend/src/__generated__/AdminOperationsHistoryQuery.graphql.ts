@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<506b67c817e84d31ccf615af64d40a99>>
+ * @generated SignedSource<<4d54e8eebe2ee8413e6d89a4fc5c7154>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -46,9 +46,11 @@ export type AdminOperationsHistoryQuery$data = {
       readonly outcome: CrawlOutcome | null | undefined;
     } | null | undefined;
     readonly displayName: string;
+    readonly enabled: boolean;
     readonly id: string;
     readonly provider: SourceProvider;
     readonly slug: string;
+    readonly successfulIntervalSeconds: number;
   } | null | undefined;
 };
 export type AdminOperationsHistoryQuery = {
@@ -118,17 +120,31 @@ v9 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
-  "name": "outcome",
+  "name": "enabled",
   "storageKey": null
 },
 v10 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
-  "name": "finishedAt",
+  "name": "successfulIntervalSeconds",
   "storageKey": null
 },
 v11 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "outcome",
+  "storageKey": null
+},
+v12 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "finishedAt",
+  "storageKey": null
+},
+v13 = {
   "alias": null,
   "args": null,
   "concreteType": "CrawlSummary",
@@ -136,26 +152,26 @@ v11 = {
   "name": "crawlSummary",
   "plural": false,
   "selections": [
-    (v9/*: any*/),
-    (v10/*: any*/)
+    (v11/*: any*/),
+    (v12/*: any*/)
   ],
   "storageKey": null
 },
-v12 = {
+v14 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "cursor",
   "storageKey": null
 },
-v13 = {
+v15 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "__typename",
   "storageKey": null
 },
-v14 = {
+v16 = {
   "alias": null,
   "args": null,
   "concreteType": "PageInfo",
@@ -194,14 +210,14 @@ v14 = {
   ],
   "storageKey": null
 },
-v15 = {
+v17 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "totalCount",
   "storageKey": null
 },
-v16 = [
+v18 = [
   {
     "alias": null,
     "args": null,
@@ -217,17 +233,17 @@ v16 = [
     "storageKey": null
   }
 ],
-v17 = {
+v19 = {
   "alias": null,
   "args": null,
   "concreteType": "DiscoveryError",
   "kind": "LinkedField",
   "name": "error",
   "plural": false,
-  "selections": (v16/*: any*/),
+  "selections": (v18/*: any*/),
   "storageKey": null
 },
-v18 = [
+v20 = [
   {
     "kind": "Variable",
     "name": "after",
@@ -263,7 +279,9 @@ return {
           (v6/*: any*/),
           (v7/*: any*/),
           (v8/*: any*/),
-          (v11/*: any*/),
+          (v9/*: any*/),
+          (v10/*: any*/),
+          (v13/*: any*/),
           {
             "alias": "crawlHistory",
             "args": null,
@@ -280,7 +298,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v12/*: any*/),
+                  (v14/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -294,16 +312,16 @@ return {
                         "kind": "FragmentSpread",
                         "name": "AdminOperations_crawl"
                       },
-                      (v13/*: any*/)
+                      (v15/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v14/*: any*/),
-              (v15/*: any*/),
-              (v17/*: any*/)
+              (v16/*: any*/),
+              (v17/*: any*/),
+              (v19/*: any*/)
             ],
             "storageKey": null
           }
@@ -337,10 +355,12 @@ return {
           (v6/*: any*/),
           (v7/*: any*/),
           (v8/*: any*/),
-          (v11/*: any*/),
+          (v9/*: any*/),
+          (v10/*: any*/),
+          (v13/*: any*/),
           {
             "alias": null,
-            "args": (v18/*: any*/),
+            "args": (v20/*: any*/),
             "concreteType": "CrawlRunConnection",
             "kind": "LinkedField",
             "name": "crawlHistory",
@@ -354,7 +374,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v12/*: any*/),
+                  (v14/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -378,8 +398,8 @@ return {
                         "name": "startedAt",
                         "storageKey": null
                       },
-                      (v10/*: any*/),
-                      (v9/*: any*/),
+                      (v12/*: any*/),
+                      (v11/*: any*/),
                       {
                         "alias": null,
                         "args": null,
@@ -447,25 +467,25 @@ return {
                         "kind": "LinkedField",
                         "name": "error",
                         "plural": false,
-                        "selections": (v16/*: any*/),
+                        "selections": (v18/*: any*/),
                         "storageKey": null
                       },
-                      (v13/*: any*/)
+                      (v15/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v14/*: any*/),
-              (v15/*: any*/),
-              (v17/*: any*/)
+              (v16/*: any*/),
+              (v17/*: any*/),
+              (v19/*: any*/)
             ],
             "storageKey": null
           },
           {
             "alias": null,
-            "args": (v18/*: any*/),
+            "args": (v20/*: any*/),
             "filters": null,
             "handle": "connection",
             "key": "AdminOperations_crawlHistory",
@@ -478,7 +498,7 @@ return {
     ]
   },
   "params": {
-    "cacheID": "842805b5981ed643d94373f105b25dfa",
+    "cacheID": "2e88722c912d79f3e63559d3adcbff9c",
     "id": null,
     "metadata": {
       "connection": [
@@ -495,11 +515,11 @@ return {
     },
     "name": "AdminOperationsHistoryQuery",
     "operationKind": "query",
-    "text": "query AdminOperationsHistoryQuery(\n  $slug: String!\n  $first: Int = 20\n  $after: String\n) {\n  careerSite(slug: $slug) {\n    id\n    slug\n    displayName\n    canonicalBaseUrl\n    provider\n    crawlSummary {\n      outcome\n      finishedAt\n    }\n    crawlHistory(first: $first, after: $after) {\n      edges {\n        cursor\n        node {\n          ...AdminOperations_crawl\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment AdminOperations_crawl on CrawlRun {\n  id\n  careerSiteId\n  startedAt\n  finishedAt\n  outcome\n  counts {\n    fetched\n    inserted\n    updated\n    touched\n    missing\n    closed\n    reopened\n  }\n  error {\n    code\n    message\n  }\n}\n"
+    "text": "query AdminOperationsHistoryQuery(\n  $slug: String!\n  $first: Int = 20\n  $after: String\n) {\n  careerSite(slug: $slug) {\n    id\n    slug\n    displayName\n    canonicalBaseUrl\n    provider\n    enabled\n    successfulIntervalSeconds\n    crawlSummary {\n      outcome\n      finishedAt\n    }\n    crawlHistory(first: $first, after: $after) {\n      edges {\n        cursor\n        node {\n          ...AdminOperations_crawl\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment AdminOperations_crawl on CrawlRun {\n  id\n  careerSiteId\n  startedAt\n  finishedAt\n  outcome\n  counts {\n    fetched\n    inserted\n    updated\n    touched\n    missing\n    closed\n    reopened\n  }\n  error {\n    code\n    message\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "1cc70fc6ac3f0dbf17dc322173a58886";
+(node as any).hash = "f06e19f790ee3e4ad54d4b11f130a734";
 
 export default node;

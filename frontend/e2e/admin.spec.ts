@@ -3,6 +3,40 @@ import AxeBuilder from '@axe-core/playwright';
 
 test.use({ baseURL: 'http://127.0.0.1:4176' });
 test.beforeEach(async ({ page }) => { page.on('pageerror', error => { console.error(error); }); });
+test('closing crawl confirmation returns focus to the initiating action', async ({ page, context }) => {
+  await asAdmin(context); await page.goto('/admin/sites/failed');
+  const action = page.getByRole('button', { name: '지금 수집', exact: true });
+  await action.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(action).toBeFocused();
+});
+test('site list shows the active crawl even after an earlier successful completion', async ({ page, context }) => {
+  await asAdmin(context); await page.goto('/admin/sites');
+  await expect(page.locator('li').filter({ has: page.getByRole('link', { name: 'Running source' }) })).toContainText('실행 중');
+});
+test('the 51st dashboard failure has an actionable name and independent site pagination', async ({ page, context }) => {
+  await asAdmin(context);
+  await context.addCookies([{ name: 'admin-fault', value: 'large', domain: '127.0.0.1', path: '/' }]);
+  await page.goto('/admin');
+  const cursors: string[] = [];
+  page.on('request', request => { if (request.url().endsWith('/graphql')) { const body = request.postDataJSON(); if (body.operationName === 'AdminOperationsSitesQuery') cursors.push(body.variables.after); } });
+  await page.getByRole('button', { name: '더 보기' }).click();
+  await expect(page.getByRole('link', { name: 'Source 51', exact: true })).toHaveAttribute('href', '/admin/sites/large-51');
+  await expect(page.locator('li').filter({ has: page.getByRole('link', { name: 'Source 51', exact: true }) })).toContainText('실패');
+  expect(cursors).toContain('site-page-50');
+});
+test('site detail exposes enabled interval and exact site audit navigation', async ({ page, context }) => {
+  await asAdmin(context); await page.goto('/admin/sites/failed');
+  await expect(page.getByText('수집 활성화', { exact: true })).toBeVisible();
+  await expect(page.getByText('3600초', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '이 사이트 변경 감사 기록' }).click();
+  await expect(page).toHaveURL(/atCareerSite=failed/);
+  await expect(page.getByLabel('사이트 ID')).toHaveValue('failed');
+  await page.getByRole('button', { name: '필터 적용' }).click();
+  await expect(page).toHaveURL(/atCareerSite=failed/);
+});
 async function asAdmin(context: any) {
   await context.addCookies([{ name: 'admin-role', value: 'ADMIN', domain: '127.0.0.1', path: '/' }]);
 }
