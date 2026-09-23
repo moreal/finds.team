@@ -32,15 +32,17 @@ object GraphqlRuntime {
             is JobPostingDto -> "JobPosting"
             is CareerSiteDto -> "CareerSite"
             is SkillDto -> "Skill"
+            is UserDto -> "User"
+            is CrawlRunDto -> "CrawlRun"
+            is AuditEventDto -> "AuditEvent"
             else -> null
           }
           name?.let(environment.schema::getObjectType)
         }
       }
       .discovery(facade)
-      .type("Query") { type ->
-        type.dataFetcher("crawlStatuses") { facade.crawlStatuses() }
-      }
+      .viewer(facade)
+      .operations()
       .type("Mutation") { type ->
         type.dataFetcher("registerCareerSite") { environment ->
           val input = requireNotNull(environment.getArgument<Map<String, Any>>("input"))
@@ -50,15 +52,16 @@ object GraphqlRuntime {
                 input.getValue("url") as String,
                 input.getValue("displayName") as String,
                 input.getValue("idempotencyKey") as String,
+                input["clientMutationId"] as String?,
               ),
               environment.graphQlContext.get<SessionPrincipal>(SESSION_PRINCIPAL),
-            )
+            ).copy(clientMutationId = input["clientMutationId"] as String?)
           }
         }.dataFetcher("triggerCrawl") { environment ->
+          val input = requireNotNull(environment.getArgument<Map<String, Any?>>("input"))
           scope.future {
-            facade.triggerCrawl(requireNotNull(environment.getArgument("careerSiteId")),
-              requireNotNull(environment.getArgument("idempotencyKey")),
-              environment.graphQlContext.get<SessionPrincipal>(SESSION_PRINCIPAL))
+            facade.triggerCrawl(input.getValue("careerSiteId") as String, input.getValue("idempotencyKey") as String,
+              environment.graphQlContext.get<SessionPrincipal>(SESSION_PRINCIPAL)).copy(clientMutationId = input["clientMutationId"] as String?)
           }
         }
       }
@@ -69,9 +72,12 @@ object GraphqlRuntime {
         var exception = parameters.exception
         while (exception is java.util.concurrent.CompletionException && exception.cause != null) exception = exception.cause!!
         val expected = exception as? GraphqlRequestException
+        val forbidden = exception is dev.moreal.finds.application.usecase.QueryForbidden
+        val extensions = mutableMapOf<String, Any>("code" to (if (forbidden) "FORBIDDEN" else expected?.code?.name ?: "INTERNAL"))
+        if (!forbidden && expected == null) extensions["correlationId"] = java.util.UUID.randomUUID().toString()
         val error = GraphqlErrorBuilder.newError(parameters.dataFetchingEnvironment)
-          .message(expected?.message ?: "Request failed")
-          .extensions(mapOf("code" to (expected?.code?.name ?: "INTERNAL")))
+          .message(if (forbidden) "Access forbidden" else expected?.message ?: "Request failed")
+          .extensions(extensions)
           .build()
         CompletableFuture.completedFuture(DataFetcherExceptionHandlerResult.newResult().error(error).build())
       }.build()

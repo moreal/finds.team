@@ -23,7 +23,10 @@ import java.util.concurrent.CompletableFuture
 /** Created for each execution, including direct engine calls and HTTP/SSR requests. No shared cache. */
 internal class DiscoveryLoaderInstrumentation(private val facade: FindsGraphqlFacade) : SimplePerformantInstrumentation() {
   override fun instrumentExecutionInput(input: ExecutionInput, parameters: InstrumentationExecutionParameters,
-    state: InstrumentationState?): ExecutionInput = input.transform { it.dataLoaderRegistry(loaders()) }
+    state: InstrumentationState?): ExecutionInput = input.transform {
+      input.graphQLContext.put("requestTime", facade.now())
+      it.dataLoaderRegistry(loaders().accountLoaders(facade).operationsLoaders(facade, input.graphQLContext.get(GraphqlRuntime.SESSION_PRINCIPAL)))
+    }
 
   private fun loaders(): DataLoaderRegistry {
     val queries = facade.discoveryBatches
@@ -71,7 +74,9 @@ internal fun RuntimeWiring.Builder.discovery(facade: FindsGraphqlFacade): Runtim
         NodeType.JobPosting -> env.posting(id.value.toLong())
         NodeType.CareerSite -> env.site(id.value.toLong())
         NodeType.Skill -> SkillNodeIds.slug(id.value.toLong())?.let(::skillBySlug) ?: missingNode()
-        NodeType.User, NodeType.CrawlRun, NodeType.AuditEvent -> missingNode()
+        NodeType.User -> env.ownUser(id.value)
+        NodeType.CrawlRun -> env.crawlRun(id.value.toLong())
+        NodeType.AuditEvent -> env.auditEvent(java.util.UUID.fromString(id.value))
       }
     }.dataFetcher("jobPosting") { env ->
       env.posting(GlobalIdCodec.decode(NodeType.JobPosting, requireNotNull(env.getArgument("id"))).toLong())

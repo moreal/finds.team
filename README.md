@@ -59,9 +59,17 @@ A small GraphQL smoke query is:
 ```sh
 curl --fail-with-body \
   -H 'content-type: application/json' \
-  --data '{"query":"{ jobPostings { totalCount } crawlStatuses { careerSiteId outcome } }"}' \
+  --data '{"query":"{ jobPostings { totalCount } viewer { user { id roles } } }"}' \
   http://localhost:8080/graphql
 ```
+
+`viewer` is null anonymously. Public company pages can read `crawlSummary`;
+`crawlHistory`, `crawlStatuses` and `auditEvents` require an administrator.
+These collections use bounded Relay connections (`edges`, `pageInfo`,
+`totalCount`) with `first` from 1–100 and opaque `after` cursors. Account and
+administrator mutations use input objects with UUID `idempotencyKey` and optional
+`clientMutationId`; `triggerCrawl` takes `TriggerCrawlInput`. Authenticated
+mutations still require a session CSRF token and application authorization.
 
 Stop the local database without deleting its named volume:
 

@@ -2,7 +2,19 @@ scalar DateTime
 
 interface Node { id: ID! }
 
-type User implements Node { id: ID! }
+enum UserRole { USER ADMIN }
+type User implements Node { id: ID!, roles: [UserRole!]! }
+type Viewer {
+  user: User!
+  passkeys(first: Int = 20, after: String): PasskeyConnection!
+  sessions(first: Int = 20, after: String): SessionConnection!
+}
+type Passkey { id: ID!, label: String!, createdAt: DateTime!, lastUsedAt: DateTime }
+type Session { id: ID!, createdAt: DateTime!, expiresAt: DateTime!, current: Boolean! }
+type PasskeyEdge { cursor: String!, node: Passkey! }
+type SessionEdge { cursor: String!, node: Session! }
+type PasskeyConnection { edges: [PasskeyEdge!]!, pageInfo: PageInfo!, totalCount: Int!, error: DiscoveryError }
+type SessionConnection { edges: [SessionEdge!]!, pageInfo: PageInfo!, totalCount: Int!, error: DiscoveryError }
 type Skill implements Node {
   id: ID!
   slug: String!
@@ -12,8 +24,48 @@ type Skill implements Node {
   requirementCounts: SkillRequirementCounts!
   relatedSkills(orderBy: SkillOrder = SLUG_ASC, first: Int = 20, after: String): SkillConnection!
 }
-type CrawlRun implements Node { id: ID! }
-type AuditEvent implements Node { id: ID! }
+type CrawlRun implements Node {
+  id: ID!
+  careerSiteId: ID!
+  startedAt: DateTime!
+  finishedAt: DateTime
+  outcome: CrawlOutcome
+  counts: CrawlChangeCounts!
+  error: ApiError
+}
+type CrawlRunEdge { cursor: String!, node: CrawlRun! }
+type CrawlRunConnection { edges: [CrawlRunEdge!]!, pageInfo: PageInfo!, totalCount: Int!, error: DiscoveryError }
+type CrawlSummary { outcome: CrawlOutcome, finishedAt: DateTime }
+enum AuditActorKind { USER SYSTEM }
+enum AuditAction {
+  ROLE_GRANTED ROLE_REVOKED CAREER_SITE_REGISTERED CAREER_SITE_SETTINGS_CHANGED MANUAL_CRAWL_TRIGGERED
+  PASSKEY_REGISTERED PASSKEY_REMOVED PASSKEY_RENAMED RECOVERY_CODE_ROTATED ACCOUNT_RECOVERY_COMPLETED
+  SESSION_REVOKED ADMIN_CONFIGURATION_CHANGED
+}
+enum AuditOutcome { SUCCEEDED }
+type AuditDetails { role: UserRole, provider: SourceProvider, enabled: Boolean }
+type AuditEvent implements Node {
+  id: ID!
+  occurredAt: DateTime!
+  actorKind: AuditActorKind!
+  actorUserId: ID
+  action: AuditAction!
+  targetType: String!
+  targetId: String!
+  outcome: AuditOutcome!
+  details: AuditDetails!
+}
+input AuditFilterInput {
+  actorUserId: ID
+  actorKind: AuditActorKind
+  action: AuditAction
+  targetType: String
+  targetId: String
+  from: DateTime
+  until: DateTime
+}
+type AuditEventEdge { cursor: String!, node: AuditEvent! }
+type AuditEventConnection { edges: [AuditEventEdge!]!, pageInfo: PageInfo!, totalCount: Int!, error: DiscoveryError }
 
 enum SourceProvider { FLEX GREETING NINEHIRE }
 enum PostingStatus { OPEN CLOSED }
@@ -45,6 +97,7 @@ enum ApiErrorCode {
   INTERNAL
   FORBIDDEN
   IDEMPOTENCY_CONFLICT
+  LAST_CREDENTIAL
 }
 
 type ApiError {
@@ -132,10 +185,20 @@ type CareerSite implements Node {
   enabled: Boolean!
   successfulIntervalSeconds: Int!
   openPostings(orderBy: PostingOrder = UPDATED_DESC, first: Int = 20, after: String): JobPostingConnection!
+  crawlSummary: CrawlSummary
+  crawlHistory(first: Int = 20, after: String): CrawlRunConnection!
 }
 
-input RegisterCareerSiteInput { url: String!, displayName: String!, idempotencyKey: ID! }
-type RegisterCareerSitePayload { site: CareerSite, error: ApiError }
+input RegisterCareerSiteInput { url: String!, displayName: String!, idempotencyKey: ID!, clientMutationId: String }
+type RegisterCareerSitePayload { site: CareerSite, error: ApiError, clientMutationId: String }
+input TriggerCrawlInput { careerSiteId: ID!, idempotencyKey: ID!, clientMutationId: String }
+input RenamePasskeyInput { passkeyId: ID!, label: String!, idempotencyKey: ID!, clientMutationId: String }
+input RemovePasskeyInput { passkeyId: ID!, idempotencyKey: ID!, clientMutationId: String }
+input RevokeSessionInput { sessionId: ID!, idempotencyKey: ID!, clientMutationId: String }
+input SecurityCommandInput { idempotencyKey: ID!, clientMutationId: String }
+enum SecurityChangeOutcome { CHANGED UNCHANGED SIGNED_OUT ROTATED ALREADY_ROTATED REJECTED }
+type SecurityChangePayload { outcome: SecurityChangeOutcome!, error: ApiError, clientMutationId: String }
+type RotateRecoveryCodePayload { outcome: SecurityChangeOutcome!, recoveryCode: String, error: ApiError, clientMutationId: String }
 
 enum CrawlTriggerOutcome {
   TRIGGERED FORBIDDEN INVALID_INPUT IDEMPOTENCY_CONFLICT
@@ -153,6 +216,7 @@ type CrawlChangeCounts {
 }
 
 type TriggerCrawlPayload {
+  clientMutationId: String
   outcome: CrawlTriggerOutcome!
   runId: ID
   counts: CrawlChangeCounts
@@ -167,6 +231,8 @@ type CrawlStatus {
   finishedAt: DateTime
   error: ApiError
 }
+type CrawlStatusEdge { cursor: String!, node: CrawlStatus! }
+type CrawlStatusConnection { edges: [CrawlStatusEdge!]!, pageInfo: PageInfo!, totalCount: Int!, error: DiscoveryError }
 
 type Query {
   node(id: ID!): Node
@@ -176,10 +242,17 @@ type Query {
   careerSites(orderBy: CareerSiteOrder = ID_ASC, first: Int = 20, after: String): CareerSiteConnection!
   skill(slug: String!): Skill
   skills(query: String, orderBy: SkillOrder = SLUG_ASC, first: Int = 20, after: String): SkillConnection!
-  crawlStatuses: [CrawlStatus!]!
+  viewer: Viewer
+  crawlStatuses(first: Int = 50, after: String): CrawlStatusConnection!
+  auditEvents(filter: AuditFilterInput, first: Int = 50, after: String): AuditEventConnection!
 }
 
 type Mutation {
   registerCareerSite(input: RegisterCareerSiteInput!): RegisterCareerSitePayload!
-  triggerCrawl(careerSiteId: ID!, idempotencyKey: ID!): TriggerCrawlPayload!
+  triggerCrawl(input: TriggerCrawlInput!): TriggerCrawlPayload!
+  renamePasskey(input: RenamePasskeyInput!): SecurityChangePayload!
+  removePasskey(input: RemovePasskeyInput!): SecurityChangePayload!
+  rotateRecoveryCode(input: SecurityCommandInput!): RotateRecoveryCodePayload!
+  revokeSession(input: RevokeSessionInput!): SecurityChangePayload!
+  revokeOtherSessions(input: SecurityCommandInput!): SecurityChangePayload!
 }

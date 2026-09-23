@@ -26,10 +26,10 @@ class SchemaContractTest {
         .type("Node") { it.typeResolver { null } }.build(),
     )
 
-    assertEquals(setOf("node", "jobPosting", "jobPostings", "careerSite", "careerSites", "skill", "skills", "crawlStatuses"),
+    assertEquals(setOf("node", "jobPosting", "jobPostings", "careerSite", "careerSites", "skill", "skills", "viewer", "crawlStatuses", "auditEvents"),
       schema.queryType.fieldDefinitions.map { it.name }.toSet())
     assertEquals(
-      setOf("registerCareerSite", "triggerCrawl"),
+      setOf("registerCareerSite", "triggerCrawl", "renamePasskey", "removePasskey", "rotateRecoveryCode", "revokeSession", "revokeOtherSessions"),
       requireNotNull(schema.mutationType).fieldDefinitions.map { it.name }.toSet(),
     )
     assertNotNull(schema.getType("PostingFilterInput"))

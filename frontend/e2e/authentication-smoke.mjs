@@ -69,6 +69,7 @@ try {
     return response.status;
   }
   await refresh(); const initialCookie = await cookie();
+  assert.equal((await call("/graphql", { query: "{ viewer { user { id } } }" })).data.data.viewer, null);
   const otp = await delivered("enrollment");
   assert.equal((await call("/auth/enrollment/otp/verify", { email: config.email, otp })).status, 200);
   assert.notEqual(await cookie(), initialCookie);
@@ -80,6 +81,20 @@ try {
   assert.equal((await call("/auth/session")).status, 401);
   assert.equal(await login(), 200);
   const session = await call("/auth/session"); assert.equal(session.status, 200); assert.deepEqual(session.data.roles, ["USER"]);
+  const viewerQuery = "{ viewer { user { id roles } passkeys { edges { node { id label } } } sessions { edges { node { id current } } } } }";
+  const viewer = (await call("/graphql", { query: viewerQuery })).data;
+  assert.equal(viewer.errors, undefined);
+  assert.deepEqual(viewer.data.viewer.user.roles, ["USER"]);
+  assert.equal(viewer.data.viewer.passkeys.edges[0].node.label, "Browser test");
+  assert.equal(viewer.data.viewer.sessions.edges[0].node.current, true);
+  assert.ok(!JSON.stringify(viewer).includes(first.credentialId));
+  assert.equal((await call("/graphql", { query: "{ auditEvents { totalCount } }" })).data.errors[0].extensions.code, "FORBIDDEN");
+  const rename = { query: "mutation Rename($input: RenamePasskeyInput!) { renamePasskey(input: $input) { outcome clientMutationId } }",
+    variables: { input: { passkeyId: viewer.data.viewer.passkeys.edges[0].node.id, label: "My browser",
+      idempotencyKey: randomUUID(), clientMutationId: "browser-rename" } } };
+  assert.equal((await call("/graphql", rename, randomUUID(), "")).status, 403);
+  for (let i = 0; i < 2; i++) assert.deepEqual((await call("/graphql", rename)).data.data.renamePasskey,
+    { outcome: "CHANGED", clientMutationId: "browser-rename" });
   const saved = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials;
   assert.equal(saved.length, 1); assert.equal(saved[0].isResidentCredential, true); assert.equal(saved[0].rpId, "localhost");
   const oldContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -117,6 +132,8 @@ try {
   const replacement = await register(); assert.ok(replacement.recoveryCode !== first.recoveryCode, "recovery rotates the saved code");
   const fresh = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials[0];
   assert.equal((await oldContext.request.get(`${config.origin}/auth/session`)).status(), 401);
+  const revokedViewer = await oldContext.request.post(`${config.origin}/graphql`, { data: { query: viewerQuery } });
+  assert.equal((await revokedViewer.json()).data.viewer, null);
   // Put the old private key back into the authenticator: server must reject its valid signature.
   await cdp.send("WebAuthn.clearCredentials", { authenticatorId });
   await cdp.send("WebAuthn.addCredential", { authenticatorId, credential: saved[0] });

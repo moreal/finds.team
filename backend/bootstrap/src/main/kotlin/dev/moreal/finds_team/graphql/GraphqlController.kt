@@ -38,7 +38,9 @@ class GraphqlController(
     consumes = [MediaType.APPLICATION_JSON_VALUE],
     produces = [MediaType.APPLICATION_JSON_VALUE],
   )
-  fun execute(@RequestBody request: GraphqlRequest, authentication: Authentication?, servletRequest: HttpServletRequest): CompletableFuture<Map<String, Any>> {
+  fun execute(@RequestBody request: GraphqlRequest, authentication: Authentication?, servletRequest: HttpServletRequest,
+    response: jakarta.servlet.http.HttpServletResponse): CompletableFuture<Map<String, Any>> {
+    response.setHeader("Cache-Control", "no-store")
     // graphql-java treats an empty name differently from null and can execute the first operation.
     // Reject it before selection so execution cannot bypass the selected mutation's CSRF check.
     if (request.operationName == "") throw ResponseStatusException(HttpStatus.BAD_REQUEST)

@@ -39,16 +39,14 @@ class DiscoveryGraphqlTest {
   }
 
   @Test fun `populated crawl statuses encode both global identity types and preserve absent run`() = runTest {
-    val graph = GraphqlRuntime.create(facade(listOf(
+    val statuses = listOf(
       CrawlStatus(CareerSiteId(7), CrawlRunId(9), CrawlOutcome.SUCCESS, Instant.EPOCH, null),
       CrawlStatus(CareerSiteId(8), null, null, null, null),
-    )), this)
-    val result = graph.execute("{ crawlStatuses { careerSiteId runId outcome finishedAt error { code } } }")
-    assertEquals(emptyList(), result.errors)
-    assertEquals(mapOf("crawlStatuses" to listOf(
-      mapOf("careerSiteId" to "djE6Q2FyZWVyU2l0ZTo3", "runId" to "djE6Q3Jhd2xSdW46OQ", "outcome" to "SUCCESS", "finishedAt" to "1970-01-01T00:00:00Z", "error" to null),
-      mapOf("careerSiteId" to "djE6Q2FyZWVyU2l0ZTo4", "runId" to null, "outcome" to null, "finishedAt" to null, "error" to null),
-    )), result.getData())
+    ).map(AdminGraphqlMapping::status)
+    assertEquals(listOf(
+      CrawlStatusDto("djE6Q2FyZWVyU2l0ZTo3", "djE6Q3Jhd2xSdW46OQ", CrawlOutcome.SUCCESS, "1970-01-01T00:00:00Z", null),
+      CrawlStatusDto("djE6Q2FyZWVyU2l0ZTo4", null, null, null, null),
+    ), statuses)
   }
 
   @Test fun `all catalog skill nodes refetch uniquely with fixed stable identities`() = runTest {

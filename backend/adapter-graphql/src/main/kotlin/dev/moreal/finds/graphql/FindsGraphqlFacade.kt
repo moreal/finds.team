@@ -26,7 +26,7 @@ enum class ApiErrorCode {
   INVALID_INPUT, INVALID_URL, UNSUPPORTED_PROVIDER, AMBIGUOUS_PROVIDER,
   DISCOVERY_FAILED, ALREADY_REGISTERED, NOT_FOUND, NOT_DUE, DISABLED, BUSY,
   CRAWL_FAILED, INTERNAL, FORBIDDEN, IDEMPOTENCY_CONFLICT,
-  INVALID_FILTER, UNKNOWN_SKILL, INVALID_CURSOR, INVALID_PAGE,
+  INVALID_FILTER, UNKNOWN_SKILL, INVALID_CURSOR, INVALID_PAGE, LAST_CREDENTIAL,
 }
 
 data class ApiErrorDto(
@@ -46,8 +46,8 @@ data class CareerSiteDto(
   val slug: String? = null,
 )
 
-data class RegisterCareerSiteInput(val url: String, val displayName: String, val idempotencyKey: String)
-data class RegisterCareerSitePayload(val site: CareerSiteDto?, val error: ApiErrorDto?)
+data class RegisterCareerSiteInput(val url: String, val displayName: String, val idempotencyKey: String, val clientMutationId: String? = null)
+data class RegisterCareerSitePayload(val site: CareerSiteDto?, val error: ApiErrorDto?, val clientMutationId: String? = null)
 
 enum class CrawlTriggerOutcome {
   TRIGGERED, FORBIDDEN, INVALID_INPUT, IDEMPOTENCY_CONFLICT,
@@ -60,6 +60,7 @@ data class TriggerCrawlPayload(
   val counts: dev.moreal.finds.application.model.CrawlChangeCounts? = null,
   val nextEligibleAt: String? = null,
   val error: ApiErrorDto? = null,
+  val clientMutationId: String? = null,
 )
 
 data class CrawlStatusDto(
@@ -79,6 +80,8 @@ class FindsGraphqlFacade(
   private val clock: ClockPort = ClockPort(Instant::now),
   val discovery: DiscoveryQueryPort? = null,
   val discoveryBatches: DiscoveryBatchQueryPort? = null,
+  val accounts: dev.moreal.finds.application.usecase.AccountManagement? = null,
+  val operations: dev.moreal.finds.application.usecase.OperationsQueries? = null,
 ) {
   constructor(
     search: SearchPostings,
@@ -89,7 +92,11 @@ class FindsGraphqlFacade(
     clock: ClockPort = ClockPort(Instant::now),
     discovery: DiscoveryQueryPort? = null,
     discoveryBatches: DiscoveryBatchQueryPort? = null,
-  ) : this(search::execute, register::execute, crawl::execute, statuses::execute, securityEvents, clock, discovery, discoveryBatches)
+    accounts: dev.moreal.finds.application.usecase.AccountManagement? = null,
+    operations: dev.moreal.finds.application.usecase.OperationsQueries? = null,
+  ) : this(search::execute, register::execute, crawl::execute, statuses::execute, securityEvents, clock, discovery, discoveryBatches, accounts, operations)
+
+  fun now(): Instant = clock.now()
 
   fun jobPostings(filter: PostingFilterInput?, first: Int?, after: String?): JobPostingConnectionDto =
     PostingGraphqlMapping.connection(

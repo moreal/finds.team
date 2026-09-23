@@ -53,10 +53,10 @@ class GraphqlHttpTest {
 
   @Test
   fun `HTTP endpoint preserves GraphQL data and errors semantics`() {
-    graphql("""{"query":"{ jobPostings { totalCount } crawlStatuses { careerSiteId } }"}""")
+    graphql("""{"query":"{ jobPostings { totalCount } viewer { user { id } } }"}""")
       .andExpect(status().isOk)
       .andExpect(jsonPath("$.data.jobPostings.totalCount").value(0))
-      .andExpect(jsonPath("$.data.crawlStatuses").isArray)
+      .andExpect(jsonPath("$.data.viewer").isEmpty)
 
     mvc.perform(post("/graphql").contentType(MediaType.APPLICATION_JSON).content(
       """{"query":"mutation { triggerCrawl(careerSiteId: \"1\") { outcome } }"}"""))
@@ -80,7 +80,7 @@ class GraphqlHttpTest {
 
   @Test fun `missing deferred CSRF token records exactly one authorization denial`() {
     mvc.perform(post("/graphql").contentType(MediaType.APPLICATION_JSON).content(
-      """{"query":"mutation { triggerCrawl(careerSiteId: \"1\", idempotencyKey: \"00000000-0000-0000-0000-000000000001\") { outcome } }"}"""))
+      """{"query":"mutation { triggerCrawl(input: {careerSiteId: \"1\", idempotencyKey: \"00000000-0000-0000-0000-000000000001\"}) { outcome } }"}"""))
       .andExpect(status().isForbidden)
     kotlin.test.assertEquals(1, securityEvents.size)
     kotlin.test.assertEquals(dev.moreal.finds.application.port.SecurityEventAction.AUTHORIZATION_DENIED, securityEvents.single().action)

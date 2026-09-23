@@ -44,7 +44,8 @@ class GraphqlRuntimeTest {
       val value = if (type in setOf(NodeType.User, NodeType.AuditEvent)) "a6c5b651-4c67-4c17-aa5c-6476f3a1c111" else "123"
       val id = GlobalIdCodec.encode(type, value)
       val unavailable = graphQL.execute("""{ node(id: "$id") { __typename id } }""")
-      assertEquals("NOT_FOUND", unavailable.errors.single().extensions?.get("code"))
+      assertEquals(if (type in setOf(NodeType.User, NodeType.CrawlRun, NodeType.AuditEvent)) "FORBIDDEN" else "NOT_FOUND",
+        unavailable.errors.single().extensions?.get("code"))
       assertEquals(mapOf("node" to null), unavailable.getData())
     }
     val filter = graphQL.execute("""{ jobPostings(filter: {not: {atSite: "djE6Sm9iUG9zdGluZzox"}}) { totalCount } }""")
@@ -57,7 +58,7 @@ class GraphqlRuntimeTest {
       SecurityEventPort { error("database credential=secret") })
     val result = kotlinx.coroutines.supervisorScope {
       GraphqlRuntime.create(facade, this).executeAsync(ExecutionInput.newExecutionInput()
-        .query("""mutation { triggerCrawl(careerSiteId: "1", idempotencyKey: "c6c5b651-4c67-4c17-aa5c-6476f3a1c111") { outcome } }""")).await()
+        .query("""mutation { triggerCrawl(input: {careerSiteId: "1", idempotencyKey: "c6c5b651-4c67-4c17-aa5c-6476f3a1c111"}) { outcome } }""")).await()
     }
     assertEquals("Request failed", result.errors.single().message)
     assertEquals("INTERNAL", result.errors.single().extensions?.get("code"))
@@ -71,7 +72,7 @@ class GraphqlRuntimeTest {
     val facade = FindsGraphqlFacade({ _, _ -> SearchPage(emptyList(), null, 0) },
       { RegisterCareerSiteResult.UnsupportedProvider }, { calls++; CrawlSiteResult.NotFound }, { emptyList() }, SecurityEventPort {})
     val result = GraphqlRuntime.create(facade, this).executeAsync(ExecutionInput.newExecutionInput()
-      .query("""mutation { ...Crawl } fragment Crawl on Mutation { aliased: triggerCrawl(careerSiteId: "djE6Q2FyZWVyU2l0ZTox", idempotencyKey: "c6c5b651-4c67-4c17-aa5c-6476f3a1c111") { outcome error { code } } }""")
+      .query("""mutation { ...Crawl } fragment Crawl on Mutation { aliased: triggerCrawl(input: {careerSiteId: "djE6Q2FyZWVyU2l0ZTox", idempotencyKey: "c6c5b651-4c67-4c17-aa5c-6476f3a1c111"}) { outcome error { code } } }""")
       .graphQLContext { it.put(GraphqlRuntime.SESSION_PRINCIPAL, principal) }.build()).await()
     assertEquals(emptyList(), result.errors)
     assertEquals(1, calls)
@@ -82,7 +83,7 @@ class GraphqlRuntimeTest {
     val facade = FindsGraphqlFacade({ _, _ -> SearchPage(emptyList(), null, 0) },
       { RegisterCareerSiteResult.UnsupportedProvider }, { crawls++; CrawlSiteResult.NotFound }, { emptyList() }, SecurityEventPort {})
     val graphQL = GraphqlRuntime.create(facade, this)
-    val result = graphQL.executeAsync(ExecutionInput.newExecutionInput().query("mutation { ...Closed } fragment Closed on Mutation { aliased: triggerCrawl(careerSiteId: \"1\", idempotencyKey: \"c6c5b651-4c67-4c17-aa5c-6476f3a1c111\") { outcome } }")).await()
+    val result = graphQL.executeAsync(ExecutionInput.newExecutionInput().query("mutation { ...Closed } fragment Closed on Mutation { aliased: triggerCrawl(input: {careerSiteId: \"1\", idempotencyKey: \"c6c5b651-4c67-4c17-aa5c-6476f3a1c111\"}) { outcome } }")).await()
     assertEquals(0, crawls)
     assertEquals(emptyList(), result.errors)
     assertEquals("FORBIDDEN", result.getData<Map<String, Map<String, String>>>()?.get("aliased")?.get("outcome"))
@@ -108,7 +109,7 @@ class GraphqlRuntimeTest {
     )
     val graphQL = GraphqlRuntime.create(facade, this)
 
-    val query = graphQL.execute("{ jobPostings { totalCount pageInfo { hasNextPage hasPreviousPage startCursor endCursor } } crawlStatuses { careerSiteId } }")
+    val query = graphQL.execute("{ jobPostings { totalCount pageInfo { hasNextPage hasPreviousPage startCursor endCursor } } viewer { user { id } } }")
     assertEquals(emptyList(), query.errors)
     val postings = query.getData<Map<String, Map<String, Any?>>>()?.get("jobPostings")
     assertEquals(mapOf("hasNextPage" to false, "hasPreviousPage" to false, "startCursor" to null, "endCursor" to null),

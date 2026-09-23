@@ -76,7 +76,19 @@ class MigrationDataSourceConfigurationTest {
         context.getBean(Flyway::class.java).configuration.dataSource.connection.use {
           assertEquals("finds_migrator", it.metaData.userName)
         }
-        assertEquals(8, context.getBean(Flyway::class.java).info().applied().size)
+        assertEquals(9, context.getBean(Flyway::class.java).info().applied().size)
+        val transactions = context.getBean(dev.moreal.finds.application.port.TransactionPort::class.java)
+        val user = dev.moreal.finds.domain.identity.User(dev.moreal.finds.domain.identity.UserId(java.util.UUID.randomUUID()),
+          dev.moreal.finds.domain.identity.EmailAddress("runtime-permissions@example.test"))
+        val credentialId = dev.moreal.finds.domain.identity.CredentialId("runtime-credential")
+        transactions.execute { tx ->
+          tx.users.lockByEmail(user.email); tx.users.save(user)
+          assertTrue(tx.credentials.insert(dev.moreal.finds.application.port.PasskeyCredential(user.id,
+            dev.moreal.finds.application.port.PasskeyCredentialMaterial(credentialId, byteArrayOf(1), 0, emptySet(), false, false), java.time.Instant.now())))
+          tx.credentials.remove(credentialId)
+        }
+        assertEquals(1, context.getBean(DSLContext::class.java).fetchValue(
+          "select count(*)::int from passkey_management_references where user_id = ?", user.id.value))
       }
     }
   }

@@ -88,11 +88,11 @@ class BootstrapVerticalSliceTest {
         context.getBean(MailOutboxDispatcher::class.java)
         context.getBean(TransactionPort::class.java).execute { it.careerSites.findEnabled() }
         val result = context.getBean(graphql.GraphQL::class.java).execute(
-          "{ jobPostings { totalCount } crawlStatuses { careerSiteId } }",
+          "{ jobPostings { totalCount } viewer { user { id } } }",
         ).requireSuccess()
         val data = result.data<Map<String, Any?>>()
         assertTrue(data.containsKey("jobPostings"))
-        assertTrue(data.containsKey("crawlStatuses"))
+        assertTrue(data.containsKey("viewer"))
         val messageId = DeliveryRequestId(UUID.randomUUID())
         val correlationId = UUID.randomUUID()
         context.getBean(TransactionPort::class.java).execute {
@@ -189,6 +189,7 @@ class BootstrapVerticalSliceTest {
       crawling,
       GetCrawlStatus(runs),
       JooqSecurityEventLog(context),
+      operations = dev.moreal.finds.application.usecase.OperationsQueries(dev.moreal.finds.persistence.JooqOperationsQuery(context)),
     )
 
     ManagedCoroutineScope().use { scope ->
@@ -207,9 +208,9 @@ class BootstrapVerticalSliceTest {
       val crawled = runBlocking { facade.triggerCrawl(siteId, UUID.randomUUID().toString(), principal) }
       assertEquals(dev.moreal.finds.graphql.CrawlTriggerOutcome.TRIGGERED, crawled.outcome)
 
-      val queried = graphQL.execute(
-        """{ jobPostings(filter: {textContains: "Kotlin"}) { totalCount edges { node { title status canonicalUrl } } } crawlStatuses { careerSiteId outcome error { code } } }""",
-      ).requireSuccess()
+      val queried = graphQL.execute(ExecutionInput.newExecutionInput().query(
+        """{ jobPostings(filter: {textContains: "Kotlin"}) { totalCount edges { node { title status canonicalUrl } } } crawlStatuses { edges { node { careerSiteId outcome error { code } } } } }""")
+        .graphQLContext { it.put(GraphqlRuntime.SESSION_PRINCIPAL, principal) }.build()).requireSuccess()
       val data = queried.data<Map<String, Any?>>()
       val connection = assertIs<Map<String, Any?>>(data["jobPostings"])
       assertEquals(1, connection["totalCount"])
@@ -217,7 +218,9 @@ class BootstrapVerticalSliceTest {
       val posting = assertIs<Map<String, Any?>>(edge["node"])
       assertEquals("Backend Engineer", posting["title"])
       assertEquals("OPEN", posting["status"].toString())
-      val status = assertIs<Map<String, Any?>>(assertIs<List<*>>(data["crawlStatuses"]).single())
+      val statusConnection = assertIs<Map<String, Any?>>(data["crawlStatuses"])
+      val statusEdge = assertIs<Map<String, Any?>>(assertIs<List<*>>(statusConnection["edges"]).single())
+      val status = assertIs<Map<String, Any?>>(statusEdge["node"])
       assertEquals(siteId, status["careerSiteId"].toString())
       assertEquals("SUCCESS", status["outcome"].toString())
     }

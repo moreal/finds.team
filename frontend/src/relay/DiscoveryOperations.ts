@@ -39,6 +39,7 @@ export const companyQuery = graphql`
   query DiscoveryOperationsCompanyQuery($slug: String!, $first: Int = 20, $after: String) {
     careerSite(slug: $slug) {
       id slug displayName canonicalBaseUrl provider
+      crawlSummary { outcome finishedAt }
       openPostings(first: $first, after: $after, orderBy: UPDATED_DESC)
       @connection(key: "DiscoveryOperationsCompany_openPostings", filters: ["orderBy"]) {
         edges { cursor node { ...DiscoveryOperations_job } }

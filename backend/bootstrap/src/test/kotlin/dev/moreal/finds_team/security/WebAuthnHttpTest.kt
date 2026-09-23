@@ -310,7 +310,7 @@ class WebAuthnHttpTest {
     for (crawl in listOf(false, true)) for (multiple in listOf(false, true)) for (invalidCsrf in listOf(false, true)) {
       val input = """{url: "https://jobs-${UUID.randomUUID()}.example.test", displayName: "Acme", idempotencyKey: "${UUID.randomUUID()}"}"""
       val query = if (crawl)
-        "mutation Private { ...Crawl } ${if (multiple) "query Public { __typename }" else ""} fragment Crawl on Mutation { aliased: triggerCrawl(careerSiteId: \"1\", idempotencyKey: \"${UUID.randomUUID()}\") { runId } }"
+        "mutation Private { ...Crawl } ${if (multiple) "query Public { __typename }" else ""} fragment Crawl on Mutation { aliased: triggerCrawl(input: {careerSiteId: \"1\", idempotencyKey: \"${UUID.randomUUID()}\"}) { runId } }"
         else if (multiple)
         "mutation Private { ...Registration } query Public { __typename } fragment Registration on Mutation { aliased: registerCareerSite(input: $input) { site { id } } }"
         else "mutation { registerCareerSite(input: $input) { site { id } } }"
@@ -371,7 +371,7 @@ class WebAuthnHttpTest {
     val database = context.getBean(org.jooq.DSLContext::class.java)
     val key = UUID.randomUUID()
     val siteGlobalId = dev.moreal.finds.graphql.GlobalIdCodec.encode(dev.moreal.finds.graphql.NodeType.CareerSite, site.id.value)
-    val query = """mutation Crawl { ...Trigger } fragment Trigger on Mutation { aliased: triggerCrawl(careerSiteId: "$siteGlobalId", idempotencyKey: "$key") { runId outcome error { code } } }"""
+    val query = """mutation Crawl { ...Trigger } fragment Trigger on Mutation { aliased: triggerCrawl(input: {careerSiteId: "$siteGlobalId", idempotencyKey: "$key"}) { runId outcome error { code } } }"""
     val body = json.writeValueAsString(mapOf("query" to query))
     val beforeEvents = database.fetchValue("SELECT count(*)::int FROM security_events WHERE action = 'crawl.trigger_denied'") as Int
     fun trigger(session: MockHttpSession?): JsonNode {
