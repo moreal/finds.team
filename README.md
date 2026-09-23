@@ -84,7 +84,7 @@ docker compose --profile app up -d --build
 pnpm --dir frontend exec playwright test e2e/same-origin-routing.spec.ts
 ```
 
-Caddy sends `/graphql`, `/auth/*`, and `/webauthn/*` directly to Spring and
+Caddy sends `/graphql`, `/auth/*`, `/webauthn/*`, and `/login/webauthn` directly to Spring and
 sends every other path to the Start production server. The browser therefore
 uses relative `/graphql` requests without CORS, while Start SSR alone receives
 `FINDS_INTERNAL_GRAPHQL_URL=http://backend:8080/graphql`. The backend and
@@ -113,6 +113,52 @@ docker compose --profile app down
 ```
 
 ## Configuration
+
+### Passkey authentication
+
+Passkeys require an HTTPS browser origin, including local development. The plain
+HTTP Compose topology above remains useful for public pages and queries. To use
+the explicit local origin `https://localhost:8443` and RP ID `localhost`:
+
+```sh
+docker compose -f compose.yaml -f compose.https.yaml --profile app up -d --build
+docker compose -f compose.yaml -f compose.https.yaml exec -T proxy cat /data/caddy/pki/authorities/local/root.crt > /tmp/finds-local-root.crt
+```
+
+Trust that development CA in your browser/OS before opening the site. Only the
+public root certificate is exported. The proxy runs unprivileged and keeps its
+development CA in memory-backed storage, so recreating it requires trusting a new
+root. Do not use this override or local profiles in production.
+If port 8443 is occupied, set `FINDS_TLS_PORT` on both Compose commands and use
+that port in the browser; the override also sets the matching backend origin.
+
+Production startup requires `FINDS_WEBAUTHN_RP_ID`, exact HTTPS
+`FINDS_WEBAUTHN_ORIGINS` (comma-separated), and externally injected
+`finds.security.hash-keys.<version>` values (Base64 random keys of at least 32
+bytes). Set `FINDS_IDENTITY_HASH_VERSION` to an available positive version and
+retain old versions while stored challenges/recovery proofs remain valid. The
+adapter derives independent HMAC keys for each identity purpose. Only an explicit
+`dev` or `test` profile allows temporary in-memory keys and the local RP/origin
+defaults; adding a production profile disables these defaults.
+Keep `finds.security.command-scope-hash-version` (default `1`) and its key stable
+through the command retention window when rotating the active proof-hash key.
+Each minute, maintenance removes at most 100 restricted sessions after their
+24-hour replay window and 100 authentication challenges after expiry plus 24
+hours. Registration challenges are deleted with their parent restricted session.
+
+`FINDS_INITIAL_ADMIN_EMAILS` is an exact normalized-email allowlist, evaluated
+only after email ownership verification. It does not match domains, wildcards,
+plus-tags, or dot variations. Call `GET /auth/csrf` to obtain the session-bound
+token and header name before ceremony POSTs. Cookies are always `Secure`,
+`HttpOnly`, and `SameSite=Lax`; normal sessions require a discoverable Passkey
+with user verification. Public GraphQL queries remain open; HTTP GraphQL
+mutations stay closed until the audited command adapters are connected.
+
+Registration completion uses `Idempotency-Key` (UUID), with optional UUID
+`X-Request-ID` and `X-Correlation-ID`. Only a server-bound restricted enrollment,
+recovery or additional-Passkey session can register. Completion returns the
+recovery code once; same-command retries return success without the secret.
+OTP/recovery initiation and security-management HTTP routes are added separately.
 
 Defaults live in `backend/bootstrap/src/main/resources/application.yml`. The
 most commonly deployed overrides are:

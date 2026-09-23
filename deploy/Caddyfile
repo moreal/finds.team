@@ -5,7 +5,7 @@
 }
 
 :8080 {
-	@backend path /graphql /auth/* /webauthn/*
+	@backend path /graphql /auth/* /webauthn/* /login/webauthn
 
 	handle @backend {
 		header X-Finds-Upstream backend

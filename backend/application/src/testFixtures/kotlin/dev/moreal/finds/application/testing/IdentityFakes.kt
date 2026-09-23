@@ -161,6 +161,15 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
       }
     }
     val challengeRepository = object : WebAuthnChallengeRepository {
+      override fun purgeExpired(now: Instant, limit: Int): Int {
+        checkActive()
+        require(limit in 1..1000) { "Invalid identity cleanup limit" }
+        val expired = challenges.values.filter { it.restrictedSessionId == null &&
+          it.expiresAt <= now.minusSeconds(RestrictedSession.REPLAY_RETENTION_SECONDS) }
+          .sortedWith(compareBy<WebAuthnChallenge> { it.expiresAt }.thenBy { it.id }).take(limit)
+        expired.forEach { challenges.remove(it.id) }
+        return expired.size
+      }
       override fun findById(id: UUID): WebAuthnChallenge? { checkActive(); return challenges[id] }
       override fun save(challenge: WebAuthnChallenge) {
         checkActive()

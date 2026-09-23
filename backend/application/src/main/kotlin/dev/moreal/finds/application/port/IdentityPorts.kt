@@ -227,4 +227,6 @@ interface WebAuthnChallengeRepository {
   fun save(challenge: WebAuthnChallenge)
   /** Atomically consume once, matching every trusted binding and expiry; no network/verification inside. */
   fun consume(expected: WebAuthnChallenge, now: Instant): Boolean
+  /** Bounded maintenance after expiry +24h; registration rows belong to restricted-session cleanup. */
+  fun purgeExpired(now: Instant, limit: Int): Int
 }

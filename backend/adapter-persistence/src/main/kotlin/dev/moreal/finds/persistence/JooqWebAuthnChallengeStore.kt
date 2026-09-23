@@ -10,6 +10,15 @@ import org.jooq.DSLContext
 import org.jooq.impl.DSL
 
 internal class JooqWebAuthnChallengeStore(private val db: DSLContext, private val access: IdentityAccess) : WebAuthnChallengeRepository {
+  override fun purgeExpired(now: Instant, limit: Int): Int = access.access {
+    require(limit in 1..1000) { "Invalid identity cleanup limit" }
+    // Registration rows cascade only with their restricted-session tombstone, whose replay
+    // deadline can be later. Login challenges retain 24h of diagnostics after expiry.
+    val expired = db.select(C.ID).from(C).where(C.RESTRICTED_SESSION_ID.isNull)
+      .and(C.EXPIRES_AT.le(now.minusSeconds(RestrictedSession.REPLAY_RETENTION_SECONDS).sqlTime()))
+      .orderBy(C.EXPIRES_AT, C.ID).limit(limit).forUpdate().skipLocked()
+    db.deleteFrom(C).where(C.ID.`in`(expired)).execute()
+  }
   override fun findById(id: UUID): WebAuthnChallenge? = access.access {
     db.selectFrom(C).where(C.ID.eq(id)).fetchOne()?.let {
       WebAuthnChallenge(id, WebAuthnChallengePurpose.valueOf(checkNotNull(it.purpose)), checkNotNull(it.rpId),

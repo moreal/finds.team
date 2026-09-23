@@ -18,6 +18,8 @@ class MigrationDataSourceConfigurationTest {
   private val mailConfiguration = arrayOf(
     "--finds.mail.smtp.enabled=true", "--finds.mail.smtp.host=localhost", "--finds.mail.scan-interval=1h",
     "--finds.mail.encryption-key=${Base64.getEncoder().encodeToString(ByteArray(32) { 7 })}",
+    "--finds.security.rp-id=finds.team", "--finds.security.allowed-origins=https://finds.team",
+    "--finds.security.hash-keys.1=${Base64.getEncoder().encodeToString(ByteArray(32) { 8 })}",
   )
 
   @Test

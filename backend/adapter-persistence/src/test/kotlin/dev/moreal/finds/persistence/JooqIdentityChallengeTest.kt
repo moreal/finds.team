@@ -11,6 +11,28 @@ class JooqIdentityChallengeTest : PostgresIntegrationTest() {
   private val email = EmailAddress("handle@example.test")
   private val id = UserId(UUID.randomUUID())
 
+  @Test fun `challenge cleanup is bounded transactional and retains live and diagnostic-window rows`() {
+    val (_, db) = migratedContext()
+    val tx = JooqTransactionAdapter(db) { null }
+    fun challenge(start: Instant) = WebAuthnChallenge(UUID.randomUUID(), WebAuthnChallengePurpose.AUTHENTICATION, "finds.team",
+      KeyedIdentityHash(1, ByteArray(32) { 1 }), KeyedIdentityHash(1, ByteArray(32) { 2 }), null, null, start, start.plusSeconds(300))
+    val live = challenge(now)
+    val recent = challenge(now.minusSeconds(600))
+    val old = (1..3).map { challenge(now.minusSeconds(87000)) }
+    tx.execute {
+      (old + live + recent).forEach(it.webauthnChallenges::save)
+      assertTrue(it.webauthnChallenges.consume(recent, recent.createdAt))
+      assertTrue(it.webauthnChallenges.consume(old.first(), old.first().createdAt))
+    }
+    assertFailsWith<IllegalStateException> { tx.execute { assertEquals(2, it.webauthnChallenges.purgeExpired(now, 2)); error("rollback") } }
+    assertNotNull(tx.execute { it.webauthnChallenges.findById(old.first().id) })
+    assertEquals(2, tx.execute { it.webauthnChallenges.purgeExpired(now, 2) })
+    assertEquals(1, tx.execute { it.webauthnChallenges.purgeExpired(now, 2) })
+    assertNotNull(tx.execute { it.webauthnChallenges.findById(live.id) })
+    assertNotNull(tx.execute { it.webauthnChallenges.findById(recent.id) })
+    assertFailsWith<IllegalArgumentException> { tx.execute { it.webauthnChallenges.purgeExpired(now, 1001) } }
+  }
+
   @Test fun `user handle is stable opaque independent of account UUID and defensive`() {
     val (_, db) = migratedContext()
     val tx = JooqTransactionAdapter(db) { null }

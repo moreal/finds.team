@@ -1,0 +1,18 @@
+# Optional local Passkey origin. Caddy's local CA must be trusted by the browser.
+services:
+  backend:
+    environment:
+      FINDS_WEBAUTHN_RP_ID: localhost
+      FINDS_WEBAUTHN_ORIGINS: https://localhost:${FINDS_TLS_PORT:-8443}
+  proxy:
+    environment:
+      FINDS_TLS_PORT: ${FINDS_TLS_PORT:-8443}
+    ports:
+      - "127.0.0.1:${FINDS_TLS_PORT:-8443}:${FINDS_TLS_PORT:-8443}"
+    volumes:
+      - ./deploy/Caddyfile.https:/etc/caddy/Caddyfile:ro
+    tmpfs:
+      - /data:uid=65534,gid=65534,mode=0700
+      - /config:uid=65534,gid=65534,mode=0700
+    healthcheck:
+      test: [CMD-SHELL, 'wget --no-check-certificate -q --spider "https://localhost:$${FINDS_TLS_PORT}/"']

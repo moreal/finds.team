@@ -53,12 +53,9 @@ class GraphqlHttpTest {
       .andExpect(jsonPath("$.data.jobPostings.totalCount").value(0))
       .andExpect(jsonPath("$.data.crawlStatuses").isArray)
 
-    graphql(
-      """{"query":"mutation(${'$'}url: String!) { registerCareerSite(input: {url: ${'$'}url, displayName: \"Acme\"}) { error { code } } triggerCrawl(careerSiteId: \"1\") { outcome } }","variables":{"url":"https://jobs.example"}}""",
-    )
-      .andExpect(status().isOk)
-      .andExpect(jsonPath("$.data.registerCareerSite.error.code").value("UNSUPPORTED_PROVIDER"))
-      .andExpect(jsonPath("$.data.triggerCrawl.outcome").value("NOT_FOUND"))
+    mvc.perform(post("/graphql").contentType(MediaType.APPLICATION_JSON).content(
+      """{"query":"mutation { triggerCrawl(careerSiteId: \"1\") { outcome } }"}"""))
+      .andExpect(status().isForbidden)
 
     graphql("{\"query\":\"{ unknownField }\"}")
       .andExpect(status().isOk)

@@ -1,0 +1,22 @@
+{
+	admin off
+	persist_config off
+	skip_install_trust
+}
+
+:8080 {
+	redir https://localhost:{$FINDS_TLS_PORT:8443}{uri} permanent
+}
+
+https://localhost:{$FINDS_TLS_PORT:8443} {
+	tls internal
+	@backend path /graphql /auth/* /webauthn/* /login/webauthn
+	handle @backend {
+		header X-Finds-Upstream backend
+		reverse_proxy backend:8080
+	}
+	handle {
+		header X-Finds-Upstream frontend
+		reverse_proxy frontend:3000
+	}
+}

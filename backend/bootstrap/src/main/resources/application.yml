@@ -22,6 +22,14 @@ logging:
     level: "%5p %kvp"
 
 server:
+  servlet:
+    session:
+      timeout: 12h
+      tracking-modes: cookie
+      cookie:
+        secure: true
+        http-only: true
+        same-site: lax
   error:
     whitelabel:
       enabled: false
@@ -38,6 +46,13 @@ management:
         enabled: true
 
 finds:
+  security:
+    rp-id: ${FINDS_WEBAUTHN_RP_ID:}
+    allowed-origins: ${FINDS_WEBAUTHN_ORIGINS:}
+    admin-emails: ${FINDS_INITIAL_ADMIN_EMAILS:}
+    active-hash-version: ${FINDS_IDENTITY_HASH_VERSION:1}
+    # Supply finds.security.hash-keys.<version> (base64, >=32 bytes) in production.
+    cleanup-interval: 1m
   mail:
     sender: ${FINDS_MAIL_SENDER:verify@finds.team}
     sender-name: ${FINDS_MAIL_SENDER_NAME:finds.team}

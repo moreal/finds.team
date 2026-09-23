@@ -77,13 +77,13 @@ test("browser GraphQL stays same-origin and bypasses Start", async ({ page }) =>
 });
 
 test("backend-owned auth prefixes bypass Start", async ({ request }) => {
-  for (const path of ["/auth/session", "/webauthn/registration"]) {
+  for (const path of ["/auth/session", "/webauthn/registration", "/login/webauthn"]) {
     const response = await request.get(`${publicOrigin}${path}`, {
       headers: { accept: "application/json" },
     });
 
-    expect(response.status()).toBe(404);
-    expect(response.headers()["content-type"]).toMatch(/^application\/json(?:;|$)/);
+    expect(response.status()).toBe(401);
+    expect(response.headers()["content-type"]).toMatch(/^application\/problem\+json(?:;|$)/);
     expect(response.headers()["x-finds-upstream"]).toBe("backend");
   }
 });
