@@ -123,7 +123,7 @@ class WebAuthnCeremonies(
       if (previous.fingerprint != registrationFingerprint(publicKey)) throw CeremonyConflict()
       // Only a server-retained verified proof may reach application same-command replay. It never
       // restores a usable restricted session and the application never returns recovery plaintext.
-      return@synchronized complete(transactions, previous.scope, previous.proof, metadata, publicKey.label, authentication)
+      return@synchronized complete(transactions, previous.scope, previous.proof, metadata, publicKey.label, authentication, previous.passkeyId)
     }
     val ceremony = request.getSession(false)?.getAttribute(REGISTRATION) as? Ceremony<*> ?: throw CeremonyRejected(replayed = previous != null)
     val options = ceremony.options as? PublicKeyCredentialCreationOptions ?: throw CeremonyRejected()
@@ -160,7 +160,7 @@ class WebAuthnCeremonies(
       }
     }
     val result = complete(completionTransactions, scope, proof, metadata, publicKey.label, authentication)
-    request.session.setAttribute(COMPLETION, Completion(scope, proof, checkNotNull(metadata.idempotencyKey), registrationFingerprint(publicKey), ceremony.challenge))
+    request.session.setAttribute(COMPLETION, Completion(scope, proof, checkNotNull(metadata.idempotencyKey), registrationFingerprint(publicKey), ceremony.challenge, result["passkeyId"] as? String))
     request.session.removeAttribute(REGISTRATION)
     // Additional registration extends a live Passkey session; it must not leave that
     // session restricted. Enrollment/recovery still require a separate Passkey login.
@@ -169,7 +169,7 @@ class WebAuthnCeremonies(
   }
 
   private fun complete(tx: TransactionPort, scope: RestrictedSession, proof: VerifiedPasskeyRegistration,
-    metadata: CommandMetadata, label: String, authentication: Authentication?): Map<String, Any> = when (scope.scope) {
+    metadata: CommandMetadata, label: String, authentication: Authentication?, previousPasskeyId: String? = null): Map<String, Any> = when (scope.scope) {
     RestrictedSessionScope.ENROLLMENT -> when (val result = CompletePasskeyEnrollment(tx, clock, random, hashes, roles)
       .execute(CompletePasskeyEnrollmentCommand(scope.id, proof, metadata, label))) {
       is CompletePasskeyEnrollmentResult.Completed -> mapOf("success" to true, "recoveryCode" to result.recoveryCode.format())
@@ -186,9 +186,22 @@ class WebAuthnCeremonies(
     }
     RestrictedSessionScope.ADDITIONAL_PASSKEY -> {
       val principal = actors.sessionPrincipal(authentication) ?: throw CeremonyRejected()
-      val result = RegisterAdditionalPasskey(tx, clock, random).execute(RegisterAdditionalPasskeyCommand(principal, scope.id, proof, label, metadata))
+      var passkeyId = previousPasskeyId
+      // Capture the management identity under the same account lock and transaction as insertion.
+      // Replay retains this metadata even if the credential has since been removed.
+      val receiptTransactions = object : TransactionPort {
+        override fun <T> execute(block: (TransactionContext) -> T): T = tx.execute { context ->
+          block(context).also { result ->
+            if ((result == SecurityChangeResult.Changed || result == SecurityChangeResult.Unchanged) && passkeyId == null) {
+              val id = context.passkeyRegistrationReceipts.managementId(scope.userId, proof.credential.id) ?: throw CeremonyRejected()
+              passkeyId = dev.moreal.finds.graphql.ManagementIds.encode("Passkey", id)
+            }
+          }
+        }
+      }
+      val result = RegisterAdditionalPasskey(receiptTransactions, clock, random).execute(RegisterAdditionalPasskeyCommand(principal, scope.id, proof, label, metadata))
       if (result != SecurityChangeResult.Changed && result != SecurityChangeResult.Unchanged) throw CeremonyRejected()
-      mapOf("success" to true)
+      mapOf("success" to true, "passkeyId" to checkNotNull(passkeyId))
     }
   }
 
@@ -238,7 +251,7 @@ class WebAuthnCeremonies(
   private fun <T> verify(block: () -> T): T = try { block() } catch (_: Exception) { throw CeremonyRejected() }
   private class Ceremony<T>(val challenge: WebAuthnChallenge, val options: T)
   private class Completion(val scope: RestrictedSession, val proof: VerifiedPasskeyRegistration, val key: UUID,
-    val fingerprint: dev.moreal.finds.application.port.CommandRequestHash, val challenge: WebAuthnChallenge)
+    val fingerprint: dev.moreal.finds.application.port.CommandRequestHash, val challenge: WebAuthnChallenge, val passkeyId: String?)
   companion object {
     const val RESTRICTED_SESSION = "finds.restricted-session"
     private const val AUTHENTICATION = "finds.webauthn.authentication"

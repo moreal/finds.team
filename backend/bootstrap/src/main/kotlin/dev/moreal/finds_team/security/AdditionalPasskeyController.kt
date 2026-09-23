@@ -41,6 +41,9 @@ class AdditionalPasskeyController(
       val canceled = session.getAttribute(CANCELED) as? CanceledHistory
       if (canceled?.commands?.containsKey(key) == true) return@synchronized denied(request, HttpStatus.FORBIDDEN)
       val previous = session.getAttribute(BEGIN) as? Begin
+      val accepted = session.getAttribute(ACCEPTED) as? AcceptedHistory
+      if (previous?.key != key && accepted?.keys?.contains(key) == true)
+        return@synchronized denied(request, HttpStatus.FORBIDDEN)
       if (previous?.key == key) {
         val usable = previous.scopeId == session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) && transactions.execute { tx ->
           val scope = tx.restrictedSessions.findById(previous.scopeId)
@@ -49,13 +52,14 @@ class AdditionalPasskeyController(
         }
         if (!usable) return@synchronized denied(request, HttpStatus.FORBIDDEN)
       } else {
-        // Never evict canceled keys: delayed begin retries must stay canceled for this HTTP session.
-        if ((canceled?.commands?.size ?: 0) >= MAX_CANCELED_COMMANDS) return@synchronized denied(request, HttpStatus.FORBIDDEN)
+        // Never evict accepted keys: superseded, completed and canceled commands stay obsolete.
+        if ((accepted?.keys?.size ?: 0) >= MAX_ACCEPTED_COMMANDS) return@synchronized denied(request, HttpStatus.FORBIDDEN)
         when (val result = begin.execute(principal)) {
           AdditionalPasskeySessionResult.Forbidden -> return@synchronized denied(request, HttpStatus.FORBIDDEN)
           is AdditionalPasskeySessionResult.Ready -> {
             session.setAttribute(WebAuthnCeremonies.RESTRICTED_SESSION, result.session.id)
             session.setAttribute(BEGIN, Begin(key, result.session.id))
+            session.setAttribute(ACCEPTED, AcceptedHistory((accepted?.keys ?: emptySet()) + key))
           }
         }
       }
@@ -112,10 +116,12 @@ class AdditionalPasskeyController(
 
   private class Begin(val key: UUID, val scopeId: RestrictedSessionId)
   private class CanceledHistory(val commands: Map<UUID, UserSessionId>)
+  private class AcceptedHistory(val keys: Set<UUID>)
   private companion object {
     const val BEGIN = "finds.webauthn.additional-begin"
     const val CANCELED = "finds.webauthn.additional-canceled"
-    const val MAX_CANCELED_COMMANDS = 64
+    const val ACCEPTED = "finds.webauthn.additional-accepted"
+    const val MAX_ACCEPTED_COMMANDS = 64
     val UUID_PATTERN = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
   }
 }

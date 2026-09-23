@@ -52,6 +52,8 @@ export type AdditionalPasskeyCommand = {
   readonly beginKey: string;
   readonly label: string;
   stage: 'begin' | 'credential' | 'complete' | 'cancel';
+  /** Opaque management metadata, never the WebAuthn credential ID. */
+  passkeyId?: string;
   completion?: { key: string; body: { publicKey: { credential: ReturnType<typeof serializedCredential>; label: string } } };
 };
 export function additionalPasskeyCommand(label: string): AdditionalPasskeyCommand {
@@ -86,8 +88,10 @@ export async function beginAdditionalPasskey(command: AdditionalPasskeyCommand):
     }
   }
   const completion = command.completion!;
-  const result = await securityPost<{ success: boolean }>('/webauthn/register', completion.body, completion.key);
+  const result = await securityPost<{ success: boolean; passkeyId?: string }>('/webauthn/register', completion.body, completion.key);
   if (!result.success) throw new Error('등록을 확인하지 못했어요. 같은 요청을 다시 시도해 주세요.');
+  command.passkeyId = typeof result.passkeyId === 'string' ? result.passkeyId : undefined;
+  command.completion = undefined;
   return 'added';
 }
 export async function loginPasskey() {

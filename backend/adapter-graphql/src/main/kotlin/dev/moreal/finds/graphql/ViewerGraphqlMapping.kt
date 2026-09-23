@@ -104,7 +104,7 @@ private fun rejected(code: ApiErrorCode) = SecurityChangePayload("REJECTED", Api
 private fun DataFetchingEnvironment.accountPage() = DiscoveryGraphqlMapping.page(getArgument("first"), getArgument("after"))
 
 /** Management references are typed and opaque but are not bearer credentials or Node identities. */
-internal object ManagementIds {
+object ManagementIds {
   fun encode(type: String, id: UUID) = Base64.getUrlEncoder().withoutPadding().encodeToString("v1:$type:$id".toByteArray(Charsets.UTF_8))
   fun decode(type: String, id: String): UUID = try {
     require(id.length in 1..128 && Regex("[A-Za-z0-9_-]+").matches(id))

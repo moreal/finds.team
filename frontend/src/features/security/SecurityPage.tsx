@@ -19,6 +19,7 @@ type Viewer = NonNullable<AccountOperationsViewerQuery['response']['viewer']>;
 type Payload = { outcome: string; error?: { code: string }; recoveryCode?: string };
 type Confirmation = { title: string; description: string; button: string; document: GraphQLTaggedNode; field: string; input: Variables };
 type PendingCommand = { document: GraphQLTaggedNode; field: string; input: Variables };
+type AccountRegistration = AdditionalPasskeyCommand & { accountId: string };
 class AccountActionError extends Error {}
 function mutationError(code?: string) {
   if (code === 'LAST_CREDENTIAL') return '마지막 Passkey는 삭제할 수 없어요.';
@@ -45,7 +46,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
   const [confirmation, setConfirmation] = createSignal<Confirmation>();
   const [unresolved, setUnresolved] = createSignal<PendingCommand>();
   const [newLabel, setNewLabel] = createSignal('');
-  const [registration, setRegistration] = createSignal<AdditionalPasskeyCommand>();
+  const [registration, setRegistration] = createSignal<AccountRegistration>();
   const [cancelRecovery, setCancelRecovery] = createSignal(false);
   const controlsDisabled = () => !ready() || pending() || !!unresolved() || !!registration();
   let disposed = false;
@@ -55,7 +56,8 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     setViewer(undefined); setCode(''); setConfirmation(undefined); setUnresolved(undefined); setMessage('');
     clearAccountRecords(environment());
   }
-  async function load(kind?: 'passkeys' | 'sessions') {
+  function accountId(value: Viewer) { return readFragment<AccountOperations_user$key>(environment(), operations.user, value.user).id; }
+  async function load(kind?: 'passkeys' | 'sessions', expectedAccountId?: string) {
     const current = viewer();
     const variables = kind && current ? { [`${kind}After`]: current[kind].pageInfo.endCursor } : {};
     const result = await RelayRuntime.fetchQuery<AccountOperationsViewerQuery>(environment(), operations.viewer, variables, { fetchPolicy: 'network-only' }).toPromise();
@@ -63,12 +65,18 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     const next = result?.viewer;
     if (!next) { clearProtectedState(); setError('로그인이 필요해요. Passkey로 로그인해 주세요.'); }
     else {
+      if (expectedAccountId && accountId(next) !== expectedAccountId) {
+        clearProtectedState();
+        throw new AccountActionError('계정이 변경되어 등록 결과를 확인하지 못했어요. Passkey로 다시 로그인해 주세요.');
+      }
       if ([next.passkeys.error, next.sessions.error].some(error => error?.code === 'FORBIDDEN')) {
         clearProtectedState();
         throw new AccountActionError(accountFailureMessage({ status: 403 }));
       }
       if (next.passkeys.error || next.sessions.error) throw new AccountActionError(mutationError(next.passkeys.error?.code ?? next.sessions.error?.code));
-      setViewer(kind && current ? { ...current, [kind]: { ...next[kind], edges: [...current[kind].edges, ...next[kind].edges] } } : next);
+      const loaded = kind && current ? { ...current, [kind]: { ...next[kind], edges: [...current[kind].edges, ...next[kind].edges] } } : next;
+      setViewer(loaded);
+      return loaded;
     }
   }
   function failure(error: unknown) {
@@ -112,7 +120,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
   function abandonCommand() { setUnresolved(undefined); setConfirmation(undefined); setError(''); }
   async function addPasskey(cancel = false) {
     if (pending() || unresolved()) return;
-    const command = registration() ?? additionalPasskeyCommand(newLabel().trim());
+    const command = registration() ?? { ...additionalPasskeyCommand(newLabel().trim()), accountId: accountId(viewer()!) };
     setRegistration(command); setPending(true); setError(''); setMessage('');
     try {
       const result = cancel ? (await cancelAdditionalPasskey(command), 'cancelled') : await beginAdditionalPasskey(command);
@@ -122,8 +130,19 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
         // The ceremony is acknowledged. A viewer failure must never restore it
         // as an uncertain registration or offer another credential submission.
         try {
-          await load();
-          if (viewer()) setMessage('Passkey를 추가했어요. 현재 로그인은 유지돼요.');
+          let refreshed = await load(undefined, command.accountId);
+          const cursors = new Set<string>();
+          while (refreshed && command.passkeyId && !refreshed.passkeys.edges.some(edge => edge.node.id === command.passkeyId) && refreshed.passkeys.pageInfo.hasNextPage) {
+            const cursor = refreshed.passkeys.pageInfo.endCursor;
+            if (!cursor || cursors.has(cursor)) break;
+            cursors.add(cursor);
+            refreshed = await load('passkeys', command.accountId);
+          }
+          if (refreshed) {
+            if (!command.passkeyId || !refreshed.passkeys.edges.some(edge => edge.node.id === command.passkeyId))
+              throw new AccountActionError('등록 응답을 받았지만 새 Passkey를 확인하지 못했어요. 목록을 다시 불러오거나 Passkey로 다시 인증해 주세요.');
+            setMessage('Passkey를 추가했어요. 현재 로그인은 유지돼요.');
+          }
         } catch (error) { setError(failure(error)); }
       } else setMessage('Passkey 등록을 취소했어요. 계정 관리를 계속할 수 있어요.');
     } catch (error) {

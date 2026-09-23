@@ -20,6 +20,45 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 class AdditionalPasskeyHttpTest : OtpHttpSupport() {
   private val sql get() = context.getBean(DSLContext::class.java)
 
+  @Test fun `superseded and completed begin retries cannot replace a later ceremony`() {
+    for (completeFirst in listOf(false, true)) {
+      val (user, session) = enroll()
+      val first = UUID.randomUUID()
+      begin(session, first).andExpect(status().isOk)
+      if (completeFirst) postJson("/webauthn/register", registration(session, Fixture()), session).andExpect(status().isOk)
+      val second = UUID.randomUUID()
+      begin(session, second).andExpect(status().isOk)
+      val active = scope(session)
+      val body = registration(session, Fixture())
+      val ceremony = session.getAttribute("finds.webauthn.registration")
+      val audit = audits(user)
+      val count = tx.execute { it.credentials.findByUserId(user).size }
+      begin(session, first).andExpect(status().isForbidden)
+      begin(session, second).andExpect(status().isOk)
+      assertEquals(active, scope(session))
+      assertSame(ceremony, session.getAttribute("finds.webauthn.registration"))
+      assertTrue(tx.execute { it.restrictedSessions.findById(active)!!.isUsable(now) })
+      assertEquals(2, scopes(user))
+      assertEquals(count, tx.execute { it.credentials.findByUserId(user).size })
+      assertEquals(audit, audits(user))
+      postJson("/webauthn/register", body, session).andExpect(status().isOk)
+      assertEquals(count + 1, tx.execute { it.credentials.findByUserId(user).size })
+      assertEquals(audit + 1, audits(user))
+    }
+  }
+
+  @Test fun `accepted begin history fails closed without evicting superseded keys`() {
+    val (user, session) = enroll()
+    val keys = List(64) { UUID.randomUUID() }
+    keys.forEach { begin(session, it).andExpect(status().isOk) }
+    val active = scope(session)
+    begin(session).andExpect(status().isForbidden)
+    begin(session, keys.first()).andExpect(status().isForbidden)
+    begin(session, keys.last()).andExpect(status().isOk)
+    assertEquals(active, scope(session))
+    assertEquals(64, scopes(user))
+  }
+
   @Test fun `canceled begin retry cannot replace a later active registration`() {
     val (user, session) = enroll()
     val first = UUID.randomUUID()
@@ -415,7 +454,17 @@ class AdditionalPasskeyHttpTest : OtpHttpSupport() {
       assertTrue(tx.execute { it.restrictedSessions.findById(restricted)!!.isUsable(now) })
       assertNull(sql.fetchOne("select consumed_at from webauthn_challenges where restricted_session_id = ?", restricted.value)!!.get("consumed_at"))
     } finally { sql.execute("alter table audit_events drop constraint additional_audit_failure") }
-    repeat(2) { submit().andExpect(status().isOk).andExpect(content().string("""{"success":true}""")) }
+    val receipt = json.readTree(submit().andExpect(status().isOk).andReturn().response.contentAsString)
+    val managementId = assertNotNull(receipt["passkeyId"]).asText()
+    assertEquals(setOf("success", "passkeyId"), receipt.properties().map { it.key }.toSet())
+    val decoded = String(java.util.Base64.getUrlDecoder().decode(managementId))
+    assertTrue(decoded.startsWith("v1:Passkey:"))
+    assertEquals(1, sql.fetchCount(sql.selectFrom("passkey_credentials").where("user_id = ? and management_id = ?::uuid", user.value, decoded.removePrefix("v1:Passkey:"))))
+    val credentialId = CredentialId(json.readTree(body)["publicKey"]["credential"]["id"].asText())
+    val receipts = dev.moreal.finds.persistence.JooqPasskeyRegistrationReceipt(sql)
+    assertEquals(UUID.fromString(decoded.removePrefix("v1:Passkey:")), receipts.managementId(user, credentialId))
+    assertNull(receipts.managementId(UserId(UUID.randomUUID()), credentialId))
+    submit().andExpect(status().isOk).andExpect(content().json(receipt.toString(), true))
     assertEquals(2, tx.execute { it.credentials.findByUserId(user).size })
     assertEquals(audit + 1, audits(user))
     assertEquals(browserId, session.id)
@@ -428,6 +477,15 @@ class AdditionalPasskeyHttpTest : OtpHttpSupport() {
     mvc.perform(post("/webauthn/authenticate/options").secure(true).session(session).header("X-CSRF-TOKEN", token)).andExpect(status().isOk)
     begin(session, beginKey).andExpect(status().isForbidden)
     assertEquals(1, scopes(user))
+    tx.execute {
+      val current = it.users.lockByEmail(it.users.findById(user)!!.email)!!
+      it.credentials.remove(credentialId)
+      it.users.save((current.removeCredential(credentialId) as UserChange.Updated).user)
+    }
+    assertNull(receipts.managementId(user, credentialId))
+    submit().andExpect(status().isOk).andExpect(content().json(receipt.toString(), true))
+    assertEquals(1, tx.execute { it.credentials.findByUserId(user).size })
+    assertEquals(audit + 1, audits(user))
   }
 
   @Test fun `same command in another authenticated browser creates its own scope instead of replaying the first`() {

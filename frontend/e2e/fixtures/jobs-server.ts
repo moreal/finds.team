@@ -3,6 +3,8 @@ import { detailData } from "./discovery-data.ts";
 
 const requests: { variables: any }[] = [];
 const pendingRegistrations = new Map<string, string>();
+const acceptedRegistrations = new Map<string, Set<string>>();
+const canceledRegistrations = new Map<string, Set<string>>();
 createServer(async (req, res) => {
   const account = /(?:^|;\s*)security-account=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
   if (req.url === '/auth/csrf') {
@@ -12,12 +14,22 @@ createServer(async (req, res) => {
   if (['/webauthn/register/begin', '/webauthn/register/cancel'].includes(req.url ?? '')) {
     const key = req.headers['idempotency-key'];
     const pending = account ? pendingRegistrations.get(account) : undefined;
+    const begin = req.url!.endsWith('/begin');
+    const accepted = acceptedRegistrations.get(account ?? '') ?? new Set<string>();
+    const canceled = canceledRegistrations.get(account ?? '') ?? new Set<string>();
     const status = req.method !== 'POST' ? 405 : !account ? 401 : req.headers['x-csrf-token'] !== 'fixture-csrf' || account === 'stale' ? 403
-      : typeof key !== 'string' ? 400 : pending && pending !== key ? 409 : 200;
-    res.writeHead(status, { 'content-type': 'application/json' });
+      : typeof key !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key) ? 400
+      : begin ? pending === key ? 200 : accepted.has(key) || accepted.size >= 64 ? 403 : 200
+      : pending === key || !pending && canceled.has(key) ? 200 : 403;
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     if (status !== 200) { res.end(JSON.stringify({ status })); return; }
-    if (req.url!.endsWith('/begin')) pendingRegistrations.set(account!, key as string);
-    else pendingRegistrations.delete(account!);
+    if (begin) {
+      pendingRegistrations.set(account!, key as string);
+      accepted.add(key as string); acceptedRegistrations.set(account!, accepted);
+    } else {
+      pendingRegistrations.delete(account!);
+      canceled.add(key as string); canceledRegistrations.set(account!, canceled);
+    }
     res.end(JSON.stringify(req.url!.endsWith('/begin') ? { ready: true } : { success: true })); return;
   }
   if (req.url === "/__requests") {

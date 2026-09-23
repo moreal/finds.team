@@ -53,6 +53,9 @@ class JooqTransactionAdapter(
     override val users = JooqIdentityRepository(db, identityAccess)
     override val otpChallenges = JooqOtpChallengeStore(db, identityAccess)
     override val credentials = JooqCredentialRepository(db, identityAccess)
+    override val passkeyRegistrationReceipts = dev.moreal.finds.application.port.PasskeyRegistrationReceiptPort { userId, credentialId ->
+      scope.access { JooqPasskeyRegistrationReceipt(db).managementId(userId, credentialId) }
+    }
     override val restrictedSessions = JooqRestrictedSessionRepository(db, identityAccess)
     override val recoveryCodes = JooqRecoveryCodeRepository(db, identityAccess)
     override val userSessions = JooqSessionRepository(db, identityAccess)
