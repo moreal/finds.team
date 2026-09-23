@@ -5,6 +5,8 @@ import dev.moreal.finds.persistence.jooq.generated.tables.references.CRAWL_LEASE
 import dev.moreal.finds.persistence.jooq.generated.tables.references.CRAWL_RUNS
 import dev.moreal.finds.persistence.jooq.generated.tables.references.JOB_POSTINGS
 import dev.moreal.finds.persistence.jooq.generated.tables.references.POSTING_SKILLS
+import dev.moreal.finds.persistence.jooq.generated.tables.references.MAIL_OUTBOX
+import dev.moreal.finds.persistence.jooq.generated.tables.references.MAIL_DELIVERY_ATTEMPTS
 import org.flywaydb.core.Flyway
 import org.jooq.Table
 import kotlin.test.Test
@@ -15,7 +17,7 @@ class GeneratedSchemaTest : PostgresIntegrationTest() {
   @Test
   fun `generated types expose every migrated table and required identity columns`() {
     assertEquals(
-      setOf("career_sites", "crawl_leases", "crawl_runs", "job_postings", "posting_skills"),
+      setOf("career_sites", "crawl_leases", "crawl_runs", "job_postings", "posting_skills", "mail_outbox", "mail_delivery_attempts"),
       generatedTables().map(Table<*>::getName).toSet(),
     )
     assertNotNull(CAREER_SITES.ID)
@@ -47,5 +49,7 @@ class GeneratedSchemaTest : PostgresIntegrationTest() {
     CRAWL_RUNS,
     JOB_POSTINGS,
     POSTING_SKILLS,
+    MAIL_OUTBOX,
+    MAIL_DELIVERY_ATTEMPTS,
   )
 }

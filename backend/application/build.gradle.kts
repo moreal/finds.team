@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
   implementation(project(":domain"))
+  api(project(":mail-core"))
   implementation(libs.kotlinx.coroutines.core)
   testImplementation(libs.kotlin.test.junit5)
   testImplementation(libs.junit.jupiter)
