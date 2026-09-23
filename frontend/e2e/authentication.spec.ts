@@ -513,6 +513,31 @@ for (const status of [401, 403]) test(`HTTP ${status} on refresh after a complet
   await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toHaveCount(0);
 });
 
+test('ordinary refresh after an account switch clears protected records and requires reauthentication', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/graphql', route => {
+    const { operationName } = route.request().postDataJSON();
+    if (operationName === 'AccountOperationsViewerQuery') return route.fulfill({ json: { data: { viewer: {
+      ...accountResponse.data.viewer,
+      user: { id: 'user-2', roles: ['USER'] },
+      passkeys: { ...accountResponse.data.viewer.passkeys, edges: [{ cursor: 'key-2', node: { __typename: 'Passkey', id: 'key-2', label: 'Other account private key', createdAt: '2026-09-20T00:00:00Z', lastUsedAt: null } }] },
+    } } } });
+    return route.fulfill({ json: { data: { renamePasskey: { outcome: 'REJECTED', error: { code: 'INVALID_INPUT' }, clientMutationId: null } } } });
+  });
+  await page.goto('/account/security');
+  await expect(page.getByLabel('Laptop 이름')).toBeVisible();
+  await page.getByLabel('Laptop 이름').fill('Travel');
+  await page.getByRole('button', { name: '이름 저장' }).first().click();
+  await expect(page.getByRole('button', { name: '다시 불러오기' })).toBeVisible();
+  await page.getByRole('button', { name: '다시 불러오기' }).click();
+  await expect(page.getByRole('alert')).toContainText('계정이 변경되어');
+  await expect(page.getByRole('link', { name: 'Passkey로 로그인' })).toBeVisible();
+  await expect(page.getByLabel('Laptop 이름')).toHaveCount(0);
+  await expect(page.getByText('Other account private key')).toHaveCount(0);
+  await expect(page.locator('.security-page')).not.toHaveAttribute('data-account-id', /user-/);
+});
+
 test('semantic viewer FORBIDDEN never serializes protected account records in SSR', async ({ page }) => {
   await page.context().addCookies([{ name: 'security-account', value: 'private-semantic', url: 'http://localhost:4175' }]);
   const response = await page.goto('/account/security');

@@ -79,7 +79,10 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
       }
       if (next.passkeys.error || next.sessions.error) throw new AccountActionError(mutationError(next.passkeys.error?.code ?? next.sessions.error?.code));
       const sameAccount = !current || accountId(current) === accountId(next);
-      if (!sameAccount) clearProtectedState();
+      if (!sameAccount) {
+        clearProtectedState();
+        throw new AccountActionError('계정이 변경되어 보안 정보를 확인하지 못했어요. Passkey로 다시 로그인해 주세요.');
+      }
       const loaded = kind && current && sameAccount ? { ...current, [kind]: { ...next[kind], edges: [...current[kind].edges, ...next[kind].edges] } } : next;
       setViewer(loaded);
       return loaded;
