@@ -113,7 +113,7 @@ class CommandAuditMigrationTest : PostgresIntegrationTest() {
         val migrator = PGSimpleDataSource().apply {
           setURL(postgres.jdbcUrl); user = "finds_migrator"; password = "test-migration-password"
         }
-        assertEquals(5, Flyway.configure().dataSource(migrator).load().migrate().migrationsExecuted)
+        assertEquals(6, Flyway.configure().dataSource(migrator).load().migrate().migrationsExecuted)
         // Rerunning after V3 must not broaden the audit grants.
         assertEquals(0, postgres.execInContainer("sh", "/tmp/bootstrap-roles.sh").exitCode)
         val runtime = PGSimpleDataSource().apply {

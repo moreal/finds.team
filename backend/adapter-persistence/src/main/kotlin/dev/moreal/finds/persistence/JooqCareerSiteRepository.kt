@@ -67,6 +67,7 @@ class JooqCareerSiteRepository(
     },
     provider = SourceProvider.valueOf(requireNotNull(provider)),
     displayName = requireNotNull(displayName),
+    slug = requireNotNull(slug),
     crawlSettings = CrawlSettings(
       successfulInterval = Duration.ofSeconds(requireNotNull(successfulIntervalSeconds)),
       enabled = requireNotNull(enabled),

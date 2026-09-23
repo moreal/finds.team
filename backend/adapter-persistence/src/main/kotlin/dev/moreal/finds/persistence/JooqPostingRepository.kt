@@ -8,13 +8,12 @@ import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.posting.JobPosting
 import dev.moreal.finds.domain.posting.JobPostingId
 import dev.moreal.finds.domain.posting.PostingStatus
-import dev.moreal.finds.domain.posting.PostingUrl
-import dev.moreal.finds.domain.posting.PostingUrlResult
-import dev.moreal.finds.domain.posting.RawPosting
+import dev.moreal.finds.domain.posting.PostingClassification
 import dev.moreal.finds.domain.search.Filter
 import dev.moreal.finds.domain.search.normalize
 import dev.moreal.finds.persistence.jooq.generated.tables.records.JobPostingsRecord
 import dev.moreal.finds.persistence.jooq.generated.tables.references.JOB_POSTINGS
+import dev.moreal.finds.persistence.jooq.generated.tables.references.POSTING_SKILLS
 import java.time.ZoneOffset
 import java.util.Locale
 import org.jooq.Condition
@@ -24,12 +23,14 @@ import org.jooq.impl.DSL
 class JooqPostingRepository(
   private val context: DSLContext,
 ) : PostingRepository {
-  override fun findByCareerSite(id: CareerSiteId): List<JobPosting> =
-    context.selectFrom(JOB_POSTINGS)
+  override fun findByCareerSite(id: CareerSiteId): List<JobPosting> {
+    val records = context.selectFrom(JOB_POSTINGS)
       .where(JOB_POSTINGS.CAREER_SITE_ID.eq(id.value))
       .orderBy(JOB_POSTINGS.ID.asc())
       .fetch()
-      .map { it.toDomain() }
+    val classifications = context.loadClassifications(records)
+    return records.map { it.toDomain(classifications[it.id]) }
+  }
 
   override fun search(filter: Filter, page: PageRequest): SearchPage {
     val condition = filter.normalize().toCondition()
@@ -43,7 +44,9 @@ class JooqPostingRepository(
       .orderBy(JOB_POSTINGS.UPDATED_AT.desc(), JOB_POSTINGS.ID.desc())
       .limit(page.size + 1)
       .fetch()
-    val selected = records.take(page.size).map { it.toDomain() }
+    val pageRecords = records.take(page.size)
+    val classifications = context.loadClassifications(pageRecords)
+    val selected = pageRecords.map { it.toDomain(classifications[it.id]) }
     val next = if (records.size > page.size) {
       selected.lastOrNull()?.let { SearchCursor(it.updatedAt, it.id) }
     } else {
@@ -59,24 +62,11 @@ class JooqPostingRepository(
     )
   }
 
-  private fun JobPostingsRecord.toDomain(): JobPosting {
-    val postingUrl = when (val parsed = PostingUrl.parse(requireNotNull(canonicalUrl))) {
-      is PostingUrlResult.Valid -> parsed.url
-      is PostingUrlResult.Invalid -> error("Stored posting URL is invalid: ${parsed.reason}")
-    }
+  private fun JobPostingsRecord.toDomain(classification: PostingClassification?): JobPosting {
     return JobPosting(
       id = JobPostingId(requireNotNull(id)),
       careerSiteId = CareerSiteId(requireNotNull(careerSiteId)),
-      raw = RawPosting(
-        externalKey = requireNotNull(externalKey),
-        title = requireNotNull(title),
-        descriptionText = requireNotNull(descriptionText),
-        canonicalUrl = postingUrl,
-        employmentHint = employmentHint,
-        locationHint = locationHint,
-        remoteHint = remoteHint,
-        sourceUpdatedAt = sourceUpdatedAt?.toInstant(),
-      ),
+      raw = toRawPosting(),
       contentHash = requireNotNull(contentHash).trim(),
       status = PostingStatus.valueOf(requireNotNull(status)),
       consecutiveMisses = requireNotNull(consecutiveMisses),
@@ -84,6 +74,7 @@ class JooqPostingRepository(
       lastSeenAt = requireNotNull(lastSeenAt).toInstant(),
       updatedAt = requireNotNull(updatedAt).toInstant(),
       closedAt = closedAt?.toInstant(),
+      classification = classification,
     )
   }
 }
@@ -97,10 +88,17 @@ internal fun Filter.toCondition(): Condition = when (this) {
   }
   is Filter.HasStatus -> JOB_POSTINGS.STATUS.eq(status.name)
   is Filter.UpdatedAfter -> JOB_POSTINGS.UPDATED_AT.gt(instant.atOffset(ZoneOffset.UTC))
-  is Filter.HasSkill, is Filter.HasRole, is Filter.HasEmployment,
-  is Filter.HasRemotePolicy, is Filter.AtLocation -> throw UnsupportedOperationException(
-    "Enrichment filters require persisted classification support",
-  )
+  is Filter.HasSkill -> JOB_POSTINGS.TAXONOMY_VERSION.isNotNull.and(DSL.exists(
+    DSL.selectOne().from(POSTING_SKILLS)
+      .where(POSTING_SKILLS.JOB_POSTING_ID.eq(JOB_POSTINGS.ID))
+      .and(POSTING_SKILLS.CANONICAL_SLUG.eq(slug))
+      .and(level?.let { POSTING_SKILLS.REQUIREMENT_LEVEL.eq(it.name) } ?: DSL.trueCondition()),
+  ))
+  // SQL NULL must be false at every leaf so NOT has the domain's two-valued semantics.
+  is Filter.HasRole -> JOB_POSTINGS.ROLE_CATEGORY.isNotNull.and(JOB_POSTINGS.ROLE_CATEGORY.eq(role.name))
+  is Filter.HasEmployment -> JOB_POSTINGS.EMPLOYMENT_TYPE.isNotNull.and(JOB_POSTINGS.EMPLOYMENT_TYPE.eq(employment.name))
+  is Filter.HasRemotePolicy -> JOB_POSTINGS.REMOTE_POLICY.isNotNull.and(JOB_POSTINGS.REMOTE_POLICY.eq(policy.name))
+  is Filter.AtLocation -> JOB_POSTINGS.LOCATION_SEARCH_VALUE.isNotNull.and(JOB_POSTINGS.LOCATION_SEARCH_VALUE.eq(searchValue))
   is Filter.Not -> inner.toCondition().not()
   is Filter.And -> all.fold(DSL.trueCondition() as Condition) { result, child ->
     result.and(child.toCondition())

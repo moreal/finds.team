@@ -39,6 +39,8 @@ data class CareerSite(
   val provider: SourceProvider,
   val displayName: String,
   val crawlSettings: CrawlSettings = CrawlSettings(),
+  /** Assigned by persistence once; null only for non-persisted fixtures/adapters. */
+  val slug: String? = null,
 ) {
   init {
     require(displayName.isNotBlank()) { "Career-site display name must not be blank" }

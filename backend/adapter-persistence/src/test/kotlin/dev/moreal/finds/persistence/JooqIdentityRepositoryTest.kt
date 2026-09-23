@@ -20,7 +20,7 @@ class JooqIdentityRepositoryTest : PostgresIntegrationTest() {
     Flyway.configure().dataSource(source).target("4").load().migrate()
     val db = org.jooq.impl.DSL.using(source, org.jooq.SQLDialect.POSTGRES)
     db.execute("INSERT INTO career_sites (canonical_base_url, host, provider, display_name) VALUES ('https://kept.test', 'kept.test', 'FLEX', 'Kept')")
-    assertEquals(3, Flyway.configure().dataSource(source).load().migrate().migrationsExecuted)
+    assertEquals(4, Flyway.configure().dataSource(source).load().migrate().migrationsExecuted)
     assertEquals("Kept", db.fetchValue("SELECT display_name FROM career_sites"))
     for (table in listOf("users", "user_roles", "passkey_credentials", "otp_challenges", "recovery_codes", "user_sessions", "restricted_sessions", "webauthn_challenges")) {
       assertEquals(table, db.fetchValue("SELECT to_regclass(?)::text", table))

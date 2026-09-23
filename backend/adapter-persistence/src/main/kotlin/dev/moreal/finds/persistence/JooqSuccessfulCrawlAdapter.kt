@@ -49,7 +49,7 @@ class JooqSuccessfulCrawlAdapter(
 
     plan.insert.forEach { insertion ->
       val raw = insertion.raw
-      transaction.insertInto(JOB_POSTINGS)
+      val id = transaction.insertInto(JOB_POSTINGS)
         .set(JOB_POSTINGS.CAREER_SITE_ID, siteId)
         .set(JOB_POSTINGS.EXTERNAL_KEY, raw.externalKey)
         .set(JOB_POSTINGS.TITLE, raw.title)
@@ -65,7 +65,9 @@ class JooqSuccessfulCrawlAdapter(
         .set(JOB_POSTINGS.FIRST_SEEN_AT, insertion.observedAt.utc())
         .set(JOB_POSTINGS.LAST_SEEN_AT, insertion.observedAt.utc())
         .set(JOB_POSTINGS.UPDATED_AT, insertion.observedAt.utc())
-        .execute()
+        .returning(JOB_POSTINGS.ID)
+        .fetchOne(JOB_POSTINGS.ID) ?: error("Inserted posting has no ID")
+      transaction.persistClassification(id, raw)
     }
     plan.update.forEach { update ->
       val changed = transaction.update(JOB_POSTINGS)
@@ -84,6 +86,7 @@ class JooqSuccessfulCrawlAdapter(
         .and(JOB_POSTINGS.STATUS.eq(PostingStatus.OPEN.name))
         .execute()
       requireOne(changed, "update", update.ref.externalKey)
+      transaction.persistClassification(update.ref.id.value, update.raw)
     }
     plan.touch.forEach { touch ->
       val changed = transaction.update(JOB_POSTINGS)
@@ -93,6 +96,9 @@ class JooqSuccessfulCrawlAdapter(
         .and(JOB_POSTINGS.STATUS.eq(PostingStatus.OPEN.name))
         .execute()
       requireOne(changed, "touch", touch.ref.externalKey)
+      // Unchanged raw content still upgrades legacy/taxonomy classifications on observation.
+      val stored = transaction.selectFrom(JOB_POSTINGS).where(JOB_POSTINGS.ID.eq(touch.ref.id.value)).fetchSingle()
+      transaction.persistClassification(touch.ref.id.value, stored.toRawPosting())
     }
     plan.markMissing.forEach { miss ->
       val changed = transaction.update(JOB_POSTINGS)
@@ -131,6 +137,7 @@ class JooqSuccessfulCrawlAdapter(
         .and(JOB_POSTINGS.STATUS.eq(PostingStatus.CLOSED.name))
         .execute()
       requireOne(changed, "reopen", reopen.ref.externalKey)
+      transaction.persistClassification(reopen.ref.id.value, reopen.raw)
     }
 
     val counts = CrawlChangeCounts(
