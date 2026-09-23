@@ -3,6 +3,7 @@ package dev.moreal.finds.graphql
 import dev.moreal.finds.application.model.PageRequest
 import dev.moreal.finds.application.model.SearchCursor
 import dev.moreal.finds.application.model.SearchPage
+import dev.moreal.finds.application.model.DiscoveryTimestamp
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.posting.JobPosting
 import dev.moreal.finds.domain.posting.PostingStatus
@@ -103,7 +104,10 @@ object PostingGraphqlMapping {
       "atSite" -> Filter.AtSite(CareerSiteId(GlobalIdCodec.decode(NodeType.CareerSite, requireNotNull(atSite)).toLong()))
       "textContains" -> Filter.TextContains(requireNotNull(textContains))
       "hasStatus" -> Filter.HasStatus(requireNotNull(hasStatus))
-      "updatedAfter" -> Filter.UpdatedAfter(Instant.parse(requireNotNull(updatedAfter)))
+      "updatedAfter" -> Filter.UpdatedAfter(Instant.parse(requireNotNull(updatedAfter)).also {
+        // Validate each recursive leaf before any DataLoader key can enter a shared SQL batch.
+        require(DiscoveryTimestamp.supports(it)) { "Unsupported discovery timestamp" }
+      })
       "hasSkill" -> Filter.HasSkill(requireNotNull(hasSkill).slug, hasSkill.level)
       "hasRole" -> Filter.HasRole(requireNotNull(hasRole))
       "hasEmployment" -> Filter.HasEmployment(requireNotNull(hasEmployment))

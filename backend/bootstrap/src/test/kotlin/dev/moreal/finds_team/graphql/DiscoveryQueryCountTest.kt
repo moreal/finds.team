@@ -10,6 +10,8 @@ import org.jooq.ExecuteListener
 import org.jooq.impl.DefaultExecuteListenerProvider
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -173,6 +175,70 @@ class DiscoveryQueryCountTest : OtpHttpSupport() {
     assertEquals(1, kotlin.obj("tail")["totalCount"])
     assertEquals(mapOf("hasPreviousPage" to true, "startCursor" to null, "endCursor" to null), kotlin.obj("tail")["pageInfo"])
     assertTrue(selects.get() <= 2, "Only valid companies/related keys may execute SQL: ${selects.get()}")
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = [
+    "+300000-01-01T00:00:00Z",
+    "+294277-01-01T00:00:00Z",
+    "-5000-01-01T00:00:00Z",
+    "-4713-11-23T23:59:59.999999Z",
+    "+294276-12-31T23:59:59.999999999Z",
+    "2026-09-22T00:00:00.123456001Z",
+  ])
+  fun `unsupported updatedAfter is local to its alias and never reaches SQL`(timestamp: String) {
+    assertEquals(12, execute("{ good: jobPostings(first: 1) { totalCount } }").obj("good")["totalCount"])
+    val leaf = """{updatedAfter: "$timestamp"}"""
+    org.junit.jupiter.api.Assertions.assertAll(listOf(leaf, "{all: [{hasStatus: OPEN}, {any: [{not: $leaf}]}]}").map { filter ->
+      org.junit.jupiter.api.function.Executable {
+        selects.set(0)
+        val data = execute("""{
+          bad: jobPostings(filter: $filter) { totalCount edges { cursor }
+            pageInfo { hasNextPage hasPreviousPage startCursor endCursor } error { code } }
+          good: jobPostings(first: 1) { totalCount edges { node { id } } error { code } }
+        }""")
+        assertEquals(mapOf("code" to "INVALID_FILTER"), data.obj("bad")["error"])
+        assertEquals(emptyList<Any>(), data.obj("bad")["edges"])
+        assertEquals(0, data.obj("bad")["totalCount"])
+        assertEquals(mapOf("hasNextPage" to false, "hasPreviousPage" to false, "startCursor" to null, "endCursor" to null),
+          data.obj("bad")["pageInfo"])
+        assertEquals(12, data.obj("good")["totalCount"])
+        assertEquals(null, data.obj("good")["error"])
+        assertEquals(GlobalIdCodec.encode(NodeType.JobPosting, postingIds[16]), data.obj("good").edges().single().obj("node")["id"])
+        assertEquals(1, selects.get(), "Only the valid key may execute SQL")
+
+        selects.set(0)
+        assertEquals("INVALID_FILTER", execute("{ jobPostings(filter: $filter) { error { code } } }").obj("jobPostings").obj("error")["code"])
+        assertEquals(0, selects.get(), "Invalid root and recursively nested filters must be rejected before batch enqueue")
+      }
+    })
+  }
+
+  @Test fun `finite updatedAfter boundaries and microsecond precision preserve exact filter semantics`() {
+    val data = execute("""{
+      minimum: jobPostings(filter: {updatedAfter: "-4713-11-24T00:00:00Z"}, first: 1) { totalCount error { code } }
+      maximum: jobPostings(filter: {updatedAfter: "+294276-12-31T23:59:59.999999Z"}, first: 1) { totalCount error { code } }
+      before: jobPostings(filter: {updatedAfter: "2026-09-21T23:59:59.999999Z"}, first: 1) { totalCount error { code } }
+      equal: jobPostings(filter: {updatedAfter: "2026-09-22T00:00:00Z"}, first: 1) { totalCount error { code } }
+      after: jobPostings(filter: {updatedAfter: "2026-09-22T00:00:00.000001Z"}, first: 1) { totalCount error { code } }
+    }""")
+    for ((alias, total) in mapOf("minimum" to 18, "maximum" to 0, "before" to 18, "equal" to 0, "after" to 0)) {
+      assertEquals(total, data.obj(alias)["totalCount"], alias)
+      assertEquals(null, data.obj(alias)["error"], alias)
+    }
+    assertEquals(1, selects.get(), "All valid boundary filters still execute in one batch")
+  }
+
+  @Test fun `real SQL failures remain sanitized infrastructure errors instead of invalid filters`() {
+    sql.execute("alter table job_postings rename to temporarily_unavailable_postings")
+    try {
+      val result = graph.execute("{ jobPostings(first: 1) { totalCount error { code } } }")
+      assertNull(result.getData<Any>())
+      assertEquals("INTERNAL", result.errors.single().extensions?.get("code"))
+      assertEquals("Request failed", result.errors.single().message)
+    } finally {
+      sql.execute("alter table temporarily_unavailable_postings rename to job_postings")
+    }
   }
 
   private fun execute(query: String): Map<String, Any?> {

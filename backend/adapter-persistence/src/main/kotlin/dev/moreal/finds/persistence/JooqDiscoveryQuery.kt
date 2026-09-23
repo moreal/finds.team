@@ -97,7 +97,7 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort, 
         require(time.toString() == values[0])
         // JDBC rounds fractional microseconds and accepts a wider year range than PostgreSQL.
         // Reject both before executing SQL; never shift an untrusted keyset boundary.
-        require(time >= MIN_POSTGRES_TIMESTAMP && time < END_POSTGRES_TIMESTAMP && time.nano % 1_000 == 0)
+        require(DiscoveryTimestamp.supports(time))
         time.atOffset(UTC) to positiveId(values[1])
       } catch (_: java.time.DateTimeException) { throw InvalidConnectionCursor() }
       catch (_: IllegalArgumentException) { throw InvalidConnectionCursor() }
@@ -224,11 +224,6 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort, 
       edges.firstOrNull()?.cursor, edges.lastOrNull()?.cursor), total)
   }
 }
-
-// PostgreSQL's exact finite timestamp bounds (ISO/proleptic Gregorian), at microsecond resolution.
-// https://github.com/postgres/postgres/blob/REL_17_STABLE/src/include/datatype/timestamp.h
-private val MIN_POSTGRES_TIMESTAMP = Instant.parse("-4713-11-24T00:00:00Z")
-private val END_POSTGRES_TIMESTAMP = Instant.parse("+294277-01-01T00:00:00Z")
 
 private val POSTGRES_CALENDAR_FORMAT = DateTimeFormatterBuilder()
   .appendValue(YEAR_OF_ERA, 4, 6, SignStyle.NOT_NEGATIVE)
