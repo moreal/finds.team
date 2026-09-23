@@ -5,6 +5,7 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import dev.moreal.finds.application.port.MailPayloadMetadata
+import dev.moreal.finds.application.testing.MailOutboxFake
 import dev.moreal.mail.MailDeliveryResult
 import dev.moreal.mail.MailFailure
 import dev.moreal.mail.MailMessageId
@@ -208,7 +209,8 @@ class JooqMailOutboxTest : PostgresIntegrationTest() {
     val attempts = context.fetch("SELECT * FROM mail_delivery_attempts ORDER BY attempt_number")
     assertEquals(listOf(1, 2, 3), attempts.map { it.get("attempt_number") })
     assertEquals(listOf("REJECTED", "REJECTED", "ACCEPTED"), attempts.map { it.get("outcome") })
-    assertEquals("receipt", attempts.last().get("provider_message_id"))
+    val fingerprint = attempts.last().get("provider_receipt_fingerprint", String::class.java)!!
+    assertTrue(fingerprint.matches(Regex("hmac-sha256:v7:[0-9a-f]{64}")))
     assertEquals("THROTTLED", attempts.first().get("failure"))
     assertNull(box.recordAttempt(next, ACCEPTED, NOW.plusSeconds(62)))
     assertFalse(box.complete(next, ACCEPTED, NOW.plusSeconds(62)))
@@ -216,7 +218,7 @@ class JooqMailOutboxTest : PostgresIntegrationTest() {
     assertNull(row(context).get("payload_ciphertext"))
     assertNull(row(context).get("payload_nonce"))
     assertNull(row(context).get("lease_token"))
-    assertEquals("receipt", row(context).get("provider_message_id"))
+    assertEquals(fingerprint, row(context).get("provider_receipt_fingerprint"))
     assertTrue(box.leaseBatch("three", NOW.plusSeconds(120), TTL, 1).isEmpty())
   }
 
@@ -253,6 +255,121 @@ class JooqMailOutboxTest : PostgresIntegrationTest() {
     assertEquals(0, box.redactExpired(NOW.plusSeconds(600)))
     assertEquals(setOf("ACCEPTED", "FAILED"), context.fetch("SELECT state FROM mail_outbox").map { it.get(0) }.toSet())
     assertEquals(0, context.fetchCount(DSL.table("mail_outbox"), DSL.field("payload_ciphertext").isNotNull))
+  }
+
+  @Test
+  fun `recordAttempt protects sensitive receipts from DEBUG SQL logging and database rows`() =
+    assertReceiptPrivacy(complete = false, traceBinding = false)
+
+  @Test
+  fun `complete protects sensitive receipts from DEBUG SQL logging and database rows`() =
+    assertReceiptPrivacy(complete = true, traceBinding = false)
+
+  @Test
+  fun `recordAttempt protects sensitive receipts from TRACE binding logs`() =
+    assertReceiptPrivacy(complete = false, traceBinding = true)
+
+  @Test
+  fun `complete protects sensitive receipts from TRACE binding logs`() =
+    assertReceiptPrivacy(complete = true, traceBinding = true)
+
+  @Test
+  fun `recordAttempt protects sensitive receipts from database exception diagnostics`() =
+    assertReceiptPrivacy(complete = false, traceBinding = true, failWrite = true)
+
+  @Test
+  fun `complete protects sensitive receipts from database exception diagnostics`() =
+    assertReceiptPrivacy(complete = true, traceBinding = true, failWrite = true)
+
+  @Test
+  fun `fake and PostgreSQL order enqueues within the same microsecond by message id`() {
+    val (_, context) = migratedContext()
+    val earlierId = MailMessageId.parse("00000000-0000-0000-0000-000000000001")
+    val laterId = MailMessageId.parse("00000000-0000-0000-0000-000000000002")
+    listOf(JooqMailOutbox(context, crypto()), MailOutboxFake(crypto())).forEach { box ->
+      box.enqueue(metadata().copy(id = laterId), PAYLOAD, NOW.plusNanos(100))
+      box.enqueue(metadata().copy(id = earlierId), PAYLOAD, NOW.plusNanos(900))
+      assertEquals(
+        listOf(earlierId, laterId),
+        box.leaseBatch("one", NOW.plusNanos(999), TTL, 2).map { it.metadata.id },
+        box.javaClass.simpleName,
+      )
+    }
+  }
+
+  private fun assertReceiptPrivacy(complete: Boolean, traceBinding: Boolean, failWrite: Boolean = false) {
+    val (dataSource, context) = migratedContext()
+    val settings = org.jooq.conf.Settings().withExecuteLogging(true)
+    val box = JooqMailOutbox(DSL.using(context.configuration().derive(settings)), crypto())
+    box.enqueue(metadata(), PAYLOAD, NOW)
+    val lease = box.leaseBatch("one", NOW, TTL, 1).single()
+    if (failWrite) {
+      val table = if (complete) "mail_outbox" else "mail_delivery_attempts"
+      val field = if (complete) "state" else "outcome"
+      context.execute("ALTER TABLE $table ADD CONSTRAINT test_reject_acceptance CHECK ($field <> 'ACCEPTED')")
+    }
+    val receipt = MailDeliveryResult.Accepted(PROVIDER, "private-local@example.com OTP=419573")
+    val root = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as Logger
+    val previous = root.level
+    val logs = ListAppender<ILoggingEvent>().apply { start() }
+    root.addAppender(logs)
+    root.level = if (traceBinding) Level.TRACE else Level.DEBUG
+    try {
+      val write = {
+        if (complete) assertTrue(box.complete(lease, receipt, NOW.plusSeconds(1)))
+        else assertEquals(1, box.recordAttempt(lease, receipt, NOW.plusSeconds(1)))
+      }
+      if (failWrite) {
+        val error = assertFailsWith<DataAccessException> { write() }
+        val diagnostics = generateSequence(error as Throwable) { it.cause }.joinToString("\n") { it.toString() }
+        assertFalse(diagnostics.contains("private-local"), "Receipt must not appear in database exception diagnostics")
+        assertFalse(diagnostics.contains("419573"), "OTP must not appear in database exception diagnostics")
+      } else {
+        write()
+      }
+      val expectedLogger = if (traceBinding) "org.jooq.impl.DefaultBinding" else "org.jooq.tools.LoggerListener"
+      assertTrue(
+        logs.list.any { it.loggerName == expectedLogger },
+        "Expected actual $expectedLogger output; observed ${logs.list.map { it.loggerName }.distinct()}",
+      )
+      val fingerprint = "hmac-sha256:v7:3be8a3a40b09223847efe7346bdef93748679a9dd63e51654b2b62147cc548d3"
+      assertTrue(
+        logs.list.any { it.loggerName == expectedLogger && it.formattedMessage.contains(fingerprint) },
+        "The receipt binding must be visible as a fingerprint through $expectedLogger",
+      )
+      val output = logs.list.joinToString("\n") { it.formattedMessage }
+      assertFalse(output.contains("private-local"), "Receipt must not appear in jOOQ logs")
+      assertFalse(output.contains("419573"), "OTP must not appear in jOOQ logs")
+      if (!failWrite) {
+        val table = if (complete) "mail_outbox" else "mail_delivery_attempts"
+        assertEquals(fingerprint, context.fetchOne("SELECT provider_receipt_fingerprint FROM $table")!!.get(0))
+      }
+      dataSource.connection.use { connection ->
+        val fields = connection.prepareStatement(
+          "SELECT table_name, column_name, data_type FROM information_schema.columns " +
+            "WHERE table_schema='public' AND data_type IN ('text','character varying','character','bytea')",
+        ).use { statement ->
+          statement.executeQuery().use { rows ->
+            buildList { while (rows.next()) add(Triple(rows.getString(1), rows.getString(2), rows.getString(3))) }
+          }
+        }
+        fields.forEach { (table, column, type) ->
+          connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT \"$column\" FROM \"$table\"").use { rows ->
+              while (rows.next()) {
+                val value = if (type == "bytea") rows.getBytes(1)?.decodeToString() else rows.getString(1)
+                assertFalse(value?.contains("private-local") == true, "$table.$column leaked receipt")
+                assertFalse(value?.contains("419573") == true, "$table.$column leaked OTP")
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      root.level = previous
+      root.detachAppender(logs)
+      logs.stop()
+    }
   }
 
   private fun row(context: DSLContext) = context.fetchOne("SELECT * FROM mail_outbox")!!

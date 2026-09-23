@@ -3,12 +3,15 @@ package dev.moreal.finds.persistence
 import dev.moreal.finds.application.port.EncryptedMailPayload
 import dev.moreal.finds.application.port.MailPayloadCrypto
 import dev.moreal.finds.application.port.MailPayloadMetadata
+import dev.moreal.mail.MailProvider
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.time.temporal.ChronoUnit
+import java.util.HexFormat
 import javax.crypto.Cipher
+import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
@@ -30,6 +33,28 @@ class AesGcmMailPayloadCrypto(private val activeKeyVersion: Int, keys: Map<Int, 
     cipher.init(Cipher.ENCRYPT_MODE, keys.getValue(activeKeyVersion), GCMParameterSpec(128, nonce))
     cipher.updateAAD(aad(metadata))
     return EncryptedMailPayload(cipher.doFinal(plaintext), nonce, activeKeyVersion)
+  }
+
+  override fun fingerprintReceipt(provider: MailProvider, receipt: String, keyVersion: Int): String {
+    val key = keys[keyVersion] ?: throw IllegalStateException("Unable to fingerprint mail receipt")
+    val derive = Mac.getInstance("HmacSHA256")
+    derive.init(SecretKeySpec(key.encoded, "HmacSHA256"))
+    val subkey = derive.doFinal("finds.mail.receipt-key.v1".encodeToByteArray())
+    val mac = Mac.getInstance("HmacSHA256")
+    mac.init(SecretKeySpec(subkey, "HmacSHA256"))
+    subkey.fill(0)
+    val encoded = ByteArrayOutputStream().use { bytes ->
+      DataOutputStream(bytes).use { output ->
+        // Length-prefix all fields, including the protocol domain, to avoid concatenation ambiguity.
+        listOf("finds.mail.receipt.v1", provider.value, receipt).forEach { value ->
+          val utf8 = value.encodeToByteArray()
+          output.writeInt(utf8.size)
+          output.write(utf8)
+        }
+      }
+      bytes.toByteArray()
+    }
+    return "hmac-sha256:v$keyVersion:${HexFormat.of().formatHex(mac.doFinal(encoded))}"
   }
 
   override fun decrypt(metadata: MailPayloadMetadata, payload: EncryptedMailPayload): ByteArray {

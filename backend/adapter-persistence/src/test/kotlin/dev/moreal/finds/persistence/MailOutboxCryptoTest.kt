@@ -3,12 +3,15 @@ package dev.moreal.finds.persistence
 import dev.moreal.finds.application.port.EncryptedMailPayload
 import dev.moreal.finds.application.port.MailPayloadMetadata
 import dev.moreal.mail.MailMessageId
+import dev.moreal.mail.MailProvider
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 class MailOutboxCryptoTest {
   @Test
@@ -61,6 +64,29 @@ class MailOutboxCryptoTest {
     assertFailsWith<IllegalArgumentException> { AesGcmMailPayloadCrypto(1, emptyMap()) }
     assertFailsWith<IllegalArgumentException> { AesGcmMailPayloadCrypto(1, mapOf(1 to ByteArray(16))) }
     assertFailsWith<IllegalArgumentException> { AesGcmMailPayloadCrypto(0, mapOf(0 to KEY)) }
+  }
+
+  @Test
+  fun `receipt fingerprints support private stable provider correlation across active key rotation`() {
+    val provider = MailProvider("test")
+    val receipt = "private-local@example.com OTP=419573"
+    val crypto = AesGcmMailPayloadCrypto(1, mapOf(1 to KEY))
+    val fingerprint = crypto.fingerprintReceipt(provider, receipt, 1)
+    assertTrue(fingerprint.matches(Regex("hmac-sha256:v1:[0-9a-f]{64}")))
+    // Independent Node/OpenSSL HMAC vector using the documented length-prefixed UTF-8 envelope.
+    assertEquals("hmac-sha256:v1:3be8a3a40b09223847efe7346bdef93748679a9dd63e51654b2b62147cc548d3", fingerprint)
+    assertEquals(fingerprint, AesGcmMailPayloadCrypto(1, mapOf(1 to KEY)).fingerprintReceipt(provider, receipt, 1))
+    assertNotEquals(fingerprint, crypto.fingerprintReceipt(MailProvider("other"), receipt, 1))
+    assertNotEquals(fingerprint, crypto.fingerprintReceipt(provider, "$receipt-changed", 1))
+    assertNotEquals(fingerprint, AesGcmMailPayloadCrypto(1, mapOf(1 to ByteArray(32) { 99 })).fingerprintReceipt(provider, receipt, 1))
+    assertNotEquals(
+      crypto.fingerprintReceipt(MailProvider("ab"), "c", 1),
+      crypto.fingerprintReceipt(MailProvider("a"), "bc", 1),
+    )
+    val rotated = AesGcmMailPayloadCrypto(2, mapOf(1 to KEY, 2 to ByteArray(32) { 99 }))
+    assertEquals(fingerprint, rotated.fingerprintReceipt(provider, receipt, 1))
+    assertTrue(rotated.fingerprintReceipt(provider, receipt, 2).startsWith("hmac-sha256:v2:"))
+    assertFailsWith<IllegalStateException> { rotated.fingerprintReceipt(provider, receipt, 3) }
   }
 
   private companion object {

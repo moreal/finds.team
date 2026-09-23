@@ -13,7 +13,9 @@ CREATE TABLE mail_outbox (
   next_attempt_at TIMESTAMPTZ NOT NULL,
   attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
   provider TEXT,
-  provider_message_id TEXT,
+  provider_receipt_fingerprint TEXT CHECK (
+    provider_receipt_fingerprint ~ '^hmac-sha256:v[1-9][0-9]*:[0-9a-f]{64}$'
+  ),
   completed_at TIMESTAMPTZ,
   CONSTRAINT ck_mail_outbox_purpose CHECK (purpose ~ '^[A-Z][A-Z0-9_]{0,63}$'),
   CONSTRAINT ck_mail_outbox_expiry CHECK (expires_at > created_at),
@@ -36,8 +38,8 @@ CREATE TABLE mail_outbox (
     (state IN ('ACCEPTED', 'FAILED', 'INDETERMINATE', 'EXPIRED') AND completed_at IS NOT NULL)
   ),
   CONSTRAINT ck_mail_outbox_receipt CHECK (
-    (state = 'ACCEPTED' AND provider IS NOT NULL AND provider_message_id IS NOT NULL) OR
-    (state <> 'ACCEPTED' AND provider_message_id IS NULL)
+    (state = 'ACCEPTED' AND provider IS NOT NULL AND provider_receipt_fingerprint IS NOT NULL) OR
+    (state <> 'ACCEPTED' AND provider_receipt_fingerprint IS NULL)
   ),
   CONSTRAINT uq_mail_outbox_nonce UNIQUE (key_version, payload_nonce)
 );
@@ -50,12 +52,14 @@ CREATE TABLE mail_delivery_attempts (
   outcome TEXT NOT NULL CHECK (outcome IN ('ACCEPTED', 'REJECTED', 'INDETERMINATE')),
   failure TEXT,
   retryable BOOLEAN,
-  provider_message_id TEXT,
+  provider_receipt_fingerprint TEXT CHECK (
+    provider_receipt_fingerprint ~ '^hmac-sha256:v[1-9][0-9]*:[0-9a-f]{64}$'
+  ),
   PRIMARY KEY (message_id, attempt_number),
   CONSTRAINT ck_mail_attempt_result CHECK (
-    (outcome = 'ACCEPTED' AND failure IS NULL AND retryable IS NULL AND provider_message_id IS NOT NULL) OR
-    (outcome = 'REJECTED' AND failure IS NOT NULL AND retryable IS NOT NULL AND provider_message_id IS NULL) OR
-    (outcome = 'INDETERMINATE' AND failure IS NOT NULL AND retryable IS NULL AND provider_message_id IS NULL)
+    (outcome = 'ACCEPTED' AND failure IS NULL AND retryable IS NULL AND provider_receipt_fingerprint IS NOT NULL) OR
+    (outcome = 'REJECTED' AND failure IS NOT NULL AND retryable IS NOT NULL AND provider_receipt_fingerprint IS NULL) OR
+    (outcome = 'INDETERMINATE' AND failure IS NOT NULL AND retryable IS NULL AND provider_receipt_fingerprint IS NULL)
   )
 );
 

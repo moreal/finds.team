@@ -22,7 +22,8 @@ class MailOutboxFake(private val crypto: MailPayloadCrypto) : MailOutbox {
     val canonical = metadata.copy(expiresAt = metadata.expiresAt.truncatedTo(ChronoUnit.MICROS))
     require(canonical.expiresAt > now) { "Mail payload must expire in the future" }
     require(metadata.id !in rows) { "Duplicate mail message id" }
-    rows[metadata.id] = Row(canonical, now, crypto.encrypt(canonical, plaintext), nextAttemptAt = now)
+    val createdAt = now.truncatedTo(ChronoUnit.MICROS)
+    rows[metadata.id] = Row(canonical, createdAt, crypto.encrypt(canonical, plaintext), nextAttemptAt = createdAt)
   }
 
   @Synchronized

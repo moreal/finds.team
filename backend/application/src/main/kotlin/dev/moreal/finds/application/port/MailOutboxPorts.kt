@@ -2,6 +2,7 @@ package dev.moreal.finds.application.port
 
 import dev.moreal.mail.MailDeliveryResult
 import dev.moreal.mail.MailMessageId
+import dev.moreal.mail.MailProvider
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -30,6 +31,9 @@ class EncryptedMailPayload(ciphertext: ByteArray, nonce: ByteArray, val keyVersi
 interface MailPayloadCrypto {
   fun encrypt(metadata: MailPayloadMetadata, plaintext: ByteArray): EncryptedMailPayload
   fun decrypt(metadata: MailPayloadMetadata, payload: EncryptedMailPayload): ByteArray
+
+  /** Irreversible keyed correlation token. Use the payload's key version across attempts/completion. */
+  fun fingerprintReceipt(provider: MailProvider, receipt: String, keyVersion: Int): String
 }
 
 data class MailOutboxLease(

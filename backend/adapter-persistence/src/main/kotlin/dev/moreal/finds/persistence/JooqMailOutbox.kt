@@ -74,8 +74,9 @@ class JooqMailOutbox(private val context: DSLContext, private val crypto: MailPa
     }
   }
 
-  override fun recordAttempt(lease: MailOutboxLease, result: MailDeliveryResult, now: Instant): Int? =
-    context.transactionResult { configuration ->
+  override fun recordAttempt(lease: MailOutboxLease, result: MailDeliveryResult, now: Instant): Int? {
+    val fingerprint = receiptFingerprint(lease, result)
+    return context.transactionResult { configuration ->
       val tx = DSL.using(configuration)
       val number = tx.update(MAIL_OUTBOX)
         .set(MAIL_OUTBOX.ATTEMPT_COUNT, MAIL_OUTBOX.ATTEMPT_COUNT.plus(1))
@@ -98,13 +99,15 @@ class JooqMailOutbox(private val context: DSLContext, private val crypto: MailPa
           is MailDeliveryResult.Indeterminate -> result.failure.name
         })
         .set(MAIL_DELIVERY_ATTEMPTS.RETRYABLE, (result as? MailDeliveryResult.Rejected)?.retryable)
-        .set(MAIL_DELIVERY_ATTEMPTS.PROVIDER_MESSAGE_ID, (result as? MailDeliveryResult.Accepted)?.providerMessageId)
+        .set(MAIL_DELIVERY_ATTEMPTS.PROVIDER_RECEIPT_FINGERPRINT, fingerprint)
         .execute()
       number
     }
+  }
 
   override fun complete(lease: MailOutboxLease, result: MailDeliveryResult, now: Instant): Boolean {
     require(result !is MailDeliveryResult.Rejected || !result.retryable) { "Retryable mail must be rescheduled" }
+    val fingerprint = receiptFingerprint(lease, result)
     val state = when (result) {
       is MailDeliveryResult.Accepted -> "ACCEPTED"
       is MailDeliveryResult.Rejected -> "FAILED"
@@ -114,7 +117,7 @@ class JooqMailOutbox(private val context: DSLContext, private val crypto: MailPa
       .set(MAIL_OUTBOX.STATE, state)
       .set(MAIL_OUTBOX.COMPLETED_AT, now.sql())
       .set(MAIL_OUTBOX.PROVIDER, result.provider.value)
-      .set(MAIL_OUTBOX.PROVIDER_MESSAGE_ID, (result as? MailDeliveryResult.Accepted)?.providerMessageId)
+      .set(MAIL_OUTBOX.PROVIDER_RECEIPT_FINGERPRINT, fingerprint)
       .set(
         MAIL_OUTBOX.PAYLOAD_CIPHERTEXT,
         if (state == "INDETERMINATE") MAIL_OUTBOX.PAYLOAD_CIPHERTEXT else DSL.inline(null as ByteArray?),
@@ -161,6 +164,11 @@ class JooqMailOutbox(private val context: DSLContext, private val crypto: MailPa
       .and(MAIL_OUTBOX.LEASE_OWNER.eq(lease.owner))
       .and(MAIL_OUTBOX.LEASE_EXPIRES_AT.gt(now.sql()))
       .and(MAIL_OUTBOX.EXPIRES_AT.gt(now.sql()))
+
+  private fun receiptFingerprint(lease: MailOutboxLease, result: MailDeliveryResult): String? =
+    (result as? MailDeliveryResult.Accepted)?.let {
+      crypto.fingerprintReceipt(it.provider, it.providerMessageId, lease.payload.keyVersion)
+    }
 
   private fun Instant.sql() = truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC)
 }
