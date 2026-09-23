@@ -7,6 +7,13 @@ import dev.moreal.finds.domain.posting.PostingStatus
 import dev.moreal.finds.domain.posting.PostingUrl
 import dev.moreal.finds.domain.posting.PostingUrlResult
 import dev.moreal.finds.domain.posting.RawPosting
+import dev.moreal.finds.domain.posting.EmploymentType
+import dev.moreal.finds.domain.posting.RemotePolicy
+import dev.moreal.finds.domain.posting.RoleCategory
+import dev.moreal.finds.domain.posting.SkillRequirementLevel
+import dev.moreal.finds.domain.posting.SkillTaxonomy
+import dev.moreal.finds.domain.posting.UnknownSkillException
+import dev.moreal.finds.domain.posting.classifyPosting
 import java.time.Instant
 import kotlin.random.Random
 import kotlin.test.Test
@@ -82,13 +89,43 @@ class FilterTest {
     assertFailsWith<IllegalArgumentException> { Filter.TextContains(" ") }
   }
 
+  @Test
+  fun `enrichment leaves match canonical values with exact requirement level`() {
+    val base = posting(title = "Backend Engineer", description = "Required:\nKotlin\nPreferred:\nJava")
+    val raw = base.raw.copy(employmentHint = "정규직", remoteHint = "hybrid", locationHint = "서울")
+    val enriched = base.copy(raw = raw, classification = classifyPosting(raw))
+    val kotlin = SkillTaxonomy.V1.requireSkill("kotlin")
+    assertTrue(Filter.HasSkill(kotlin.slug, SkillRequirementLevel.REQUIRED).matches(enriched))
+    assertTrue(Filter.HasSkill(kotlin.slug).matches(enriched))
+    assertFalse(Filter.HasSkill(kotlin.slug, SkillRequirementLevel.PREFERRED).matches(enriched))
+    assertTrue(Filter.HasRole(RoleCategory.BACKEND).matches(enriched))
+    assertTrue(Filter.HasEmployment(EmploymentType.FULL_TIME).matches(enriched))
+    assertTrue(Filter.HasRemotePolicy(RemotePolicy.HYBRID).matches(enriched))
+    assertTrue(Filter.AtLocation("seoul").matches(enriched))
+    assertFalse(Filter.AtLocation("busan").matches(enriched))
+    assertFalse(Filter.HasSkill(kotlin.slug).matches(base))
+    assertFalse(Filter.HasRole(RoleCategory.BACKEND).matches(base))
+  }
+
+  @Test
+  fun `enrichment filters reject unknown canonical skills and blank location keys`() {
+    assertFailsWith<UnknownSkillException> { Filter.HasSkill("futuredb") }
+    assertFailsWith<UnknownSkillException> { Filter.HasSkill("코틀린") }
+    assertFailsWith<IllegalArgumentException> { Filter.AtLocation(" ") }
+  }
+
   private fun generatedFilter(random: Random, depth: Int): Filter {
     if (depth == 0) {
-      return when (random.nextInt(4)) {
+      return when (random.nextInt(9)) {
         0 -> Filter.AtSite(CareerSiteId(random.nextLong(1, 4)))
         1 -> Filter.TextContains(listOf("kotlin", "java", "remote")[random.nextInt(3)])
         2 -> Filter.HasStatus(PostingStatus.entries[random.nextInt(PostingStatus.entries.size)])
-        else -> Filter.UpdatedAfter(Instant.ofEpochSecond(random.nextLong(0, 2_000_000_000)))
+        3 -> Filter.UpdatedAfter(Instant.ofEpochSecond(random.nextLong(0, 2_000_000_000)))
+        4 -> Filter.HasSkill(listOf("kotlin", "java", "python")[random.nextInt(3)], SkillRequirementLevel.entries.random(random))
+        5 -> Filter.HasRole(RoleCategory.entries.random(random))
+        6 -> Filter.HasEmployment(EmploymentType.entries.random(random))
+        7 -> Filter.HasRemotePolicy(RemotePolicy.entries.random(random))
+        else -> Filter.AtLocation(listOf("seoul", "busan", "unknown place").random(random))
       }
     }
     return when (random.nextInt(3)) {
@@ -102,7 +139,7 @@ class FilterTest {
     val id = random.nextLong(1, 1_000_000)
     val status = PostingStatus.entries[random.nextInt(PostingStatus.entries.size)]
     val seen = Instant.ofEpochSecond(random.nextLong(0, 2_000_000_000))
-    return posting(
+    val posting = posting(
       id = id,
       siteId = CareerSiteId(random.nextLong(1, 4)),
       title = listOf("Kotlin backend", "Java platform", "Remote data")[random.nextInt(3)],
@@ -111,6 +148,13 @@ class FilterTest {
       updatedAt = seen,
       closedAt = seen.takeIf { status == PostingStatus.CLOSED },
     )
+    val raw = posting.raw.copy(
+      descriptionText = listOf("Required:\nKotlin", "Preferred:\nJava", "Python").random(random),
+      employmentHint = listOf("정규직", "CONTRACT", null).random(random),
+      remoteHint = listOf("remote", "hybrid", "onsite", null).random(random),
+      locationHint = listOf("서울", "Busan", "Unknown place", null).random(random),
+    )
+    return posting.copy(raw = raw, classification = classifyPosting(raw))
   }
 
   private fun posting(

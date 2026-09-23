@@ -3,6 +3,11 @@ package dev.moreal.finds.domain.search
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.posting.JobPosting
 import dev.moreal.finds.domain.posting.PostingStatus
+import dev.moreal.finds.domain.posting.EmploymentType
+import dev.moreal.finds.domain.posting.RemotePolicy
+import dev.moreal.finds.domain.posting.RoleCategory
+import dev.moreal.finds.domain.posting.SkillRequirementLevel
+import dev.moreal.finds.domain.posting.SkillTaxonomy
 import java.time.Instant
 import java.util.Locale
 
@@ -18,6 +23,16 @@ sealed interface Filter {
   data class HasStatus(val status: PostingStatus) : Filter
 
   data class UpdatedAfter(val instant: Instant) : Filter
+
+  data class HasSkill(val slug: String, val level: SkillRequirementLevel? = null) : Filter {
+    init { SkillTaxonomy.V1.requireSkill(slug) }
+  }
+  data class HasRole(val role: RoleCategory) : Filter
+  data class HasEmployment(val employment: EmploymentType) : Filter
+  data class HasRemotePolicy(val policy: RemotePolicy) : Filter
+  data class AtLocation(val searchValue: String) : Filter {
+    init { require(searchValue.isNotBlank()) { "Location search value must not be blank" } }
+  }
 
   data class Not(val inner: Filter) : Filter
 
@@ -51,6 +66,11 @@ fun Filter.matches(posting: JobPosting): Boolean = when (this) {
   }
   is Filter.HasStatus -> posting.status == status
   is Filter.UpdatedAfter -> posting.updatedAt.isAfter(instant)
+  is Filter.HasSkill -> posting.classification?.skills?.any { it.slug == slug && (level == null || it.level == level) } == true
+  is Filter.HasRole -> posting.classification?.role?.value == role
+  is Filter.HasEmployment -> posting.classification?.employment?.value == employment
+  is Filter.HasRemotePolicy -> posting.classification?.remote?.value == policy
+  is Filter.AtLocation -> posting.classification?.location?.searchValue == searchValue
   is Filter.Not -> !inner.matches(posting)
   is Filter.And -> all.all { it.matches(posting) }
   is Filter.Or -> any.any { it.matches(posting) }
@@ -61,6 +81,11 @@ fun Filter.normalize(): Filter = when (this) {
   is Filter.TextContains,
   is Filter.HasStatus,
   is Filter.UpdatedAfter,
+  is Filter.HasSkill,
+  is Filter.HasRole,
+  is Filter.HasEmployment,
+  is Filter.HasRemotePolicy,
+  is Filter.AtLocation,
   -> this
   is Filter.Not -> {
     when (val normalizedInner = inner.normalize()) {

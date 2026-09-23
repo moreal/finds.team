@@ -123,6 +123,7 @@ data class JobPosting(
   val lastSeenAt: Instant,
   val updatedAt: Instant,
   val closedAt: Instant?,
+  val classification: PostingClassification? = null,
 ) {
   init {
     require(CONTENT_HASH_PATTERN.matches(contentHash)) {

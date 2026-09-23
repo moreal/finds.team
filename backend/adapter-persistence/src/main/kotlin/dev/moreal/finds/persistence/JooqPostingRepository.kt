@@ -97,6 +97,10 @@ internal fun Filter.toCondition(): Condition = when (this) {
   }
   is Filter.HasStatus -> JOB_POSTINGS.STATUS.eq(status.name)
   is Filter.UpdatedAfter -> JOB_POSTINGS.UPDATED_AT.gt(instant.atOffset(ZoneOffset.UTC))
+  is Filter.HasSkill, is Filter.HasRole, is Filter.HasEmployment,
+  is Filter.HasRemotePolicy, is Filter.AtLocation -> throw UnsupportedOperationException(
+    "Enrichment filters require persisted classification support",
+  )
   is Filter.Not -> inner.toCondition().not()
   is Filter.And -> all.fold(DSL.trueCondition() as Condition) { result, child ->
     result.and(child.toCondition())
