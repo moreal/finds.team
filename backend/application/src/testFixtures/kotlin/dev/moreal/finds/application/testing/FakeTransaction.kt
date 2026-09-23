@@ -31,6 +31,7 @@ class FakeTransaction(
   val credentials: List<PasskeyCredential> get() = synchronized(this) { state.identity.credentials.values.toList() }
   val restrictedSessions: List<RestrictedSession> get() = synchronized(this) { state.identity.sessions.values.toList() }
   val recoveryCodes: List<RecoveryCodeHash> get() = synchronized(this) { state.identity.recoveryCodes.values.toList() }
+  val userSessions: List<UserSession> get() = synchronized(this) { state.identity.userSessions.values.toList() }
 
   @Synchronized
   override fun <T> execute(block: (TransactionContext) -> T): T {
@@ -79,6 +80,7 @@ class FakeTransaction(
     override val credentials = identityStores.credentialRepository
     override val restrictedSessions = identityStores.sessionRepository
     override val recoveryCodes = identityStores.recoveryRepository
+    override val userSessions = identityStores.userSessionRepository
 
     override val careerSites = object : CareerSiteRepository {
       override fun findById(id: CareerSiteId): CareerSite? { checkActive(); return snapshot.sites.findById(id) }

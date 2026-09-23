@@ -16,6 +16,7 @@ enum class AuditAction(val wireName: String, internal val allowedDetailKeys: Set
   MANUAL_CRAWL_TRIGGERED("crawl.manually_triggered"),
   PASSKEY_REGISTERED("passkey.registered"),
   PASSKEY_REMOVED("passkey.removed"),
+  PASSKEY_RENAMED("passkey.renamed"),
   RECOVERY_CODE_ROTATED("recovery_code.rotated"),
   ACCOUNT_RECOVERY_COMPLETED("recovery.completed"),
   SESSION_REVOKED("session.revoked"),

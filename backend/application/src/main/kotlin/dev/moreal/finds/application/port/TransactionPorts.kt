@@ -26,4 +26,5 @@ interface TransactionContext {
   val credentials: PasskeyCredentialRepository get() = error("Identity persistence is not configured")
   val restrictedSessions: RestrictedSessionRepository get() = error("Identity persistence is not configured")
   val recoveryCodes: RecoveryCodeRepository get() = error("Identity persistence is not configured")
+  val userSessions: UserSessionRepository get() = error("Identity persistence is not configured")
 }

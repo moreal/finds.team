@@ -57,6 +57,9 @@ data class OtpAccountState(
   val purpose: VerificationPurpose,
   val consecutiveFailures: Int = 0,
   val challenge: OtpChallenge? = null,
+  /** Recovery cooldown; expiry permits another attempt without resetting consecutiveFailures. */
+  val lockedUntil: Instant? = null,
+  val lastIssuedAt: Instant? = null,
 ) {
   init { require(consecutiveFailures >= 0) { "Invalid OTP failure count" } }
 }
@@ -72,7 +75,7 @@ value class RestrictedSessionId(val value: UUID) {
   override fun toString(): String = "RestrictedSessionId(<redacted>)"
 }
 
-enum class RestrictedSessionScope { ENROLLMENT, RECOVERY }
+enum class RestrictedSessionScope { ENROLLMENT, RECOVERY, ADDITIONAL_PASSKEY }
 
 /** This is never an ordinary authenticated session or an application Actor. */
 data class RestrictedSession(
@@ -138,6 +141,38 @@ interface PasskeyCredentialRepository {
   fun findById(id: CredentialId): PasskeyCredential?
   /** Global credential uniqueness is enforced by the database; false leaves existing data intact. */
   fun insert(credential: PasskeyCredential): Boolean
+  fun findByUserId(userId: UserId): List<PasskeyCredential>
+  /** Remove usable material under the owning account lock. */
+  fun remove(id: CredentialId)
+  fun rename(id: CredentialId, label: String)
+}
+
+/** Stable management reference, never an HTTP session cookie or bearer secret. */
+@JvmInline
+value class UserSessionId(val value: UUID) {
+  override fun toString(): String = "UserSessionId(<redacted>)"
+}
+
+/** Only normal Passkey-authenticated sessions belong here; restricted sessions use a separate store. */
+data class UserSession(
+  val id: UserSessionId,
+  val userId: UserId,
+  val createdAt: Instant,
+  val expiresAt: Instant,
+  val authenticatedAt: Instant,
+  val revokedAt: Instant? = null,
+) {
+  init { require(expiresAt > createdAt && authenticatedAt >= createdAt) { "Invalid user session lifetime" } }
+  fun isUsable(now: Instant): Boolean = revokedAt == null && now >= createdAt && now < expiresAt
+}
+
+/** All mutations use the owning account lock; authentication adapters must honor revocation immediately. */
+interface UserSessionRepository {
+  fun findById(id: UserSessionId): UserSession?
+  fun findByUserId(userId: UserId): List<UserSession>
+  fun save(session: UserSession)
+  fun revoke(id: UserSessionId, now: Instant)
+  fun revokeForUser(userId: UserId, now: Instant, except: UserSessionId? = null)
 }
 
 data class RecoveryCodeHash(val userId: UserId, val hash: KeyedIdentityHash, val createdAt: Instant)

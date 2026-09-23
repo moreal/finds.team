@@ -67,6 +67,7 @@ class AuditEventTest {
       "crawl.manually_triggered",
       "passkey.registered",
       "passkey.removed",
+      "passkey.renamed",
       "recovery_code.rotated",
       "recovery.completed",
       "session.revoked",

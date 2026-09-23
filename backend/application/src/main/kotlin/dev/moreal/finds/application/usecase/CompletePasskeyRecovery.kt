@@ -1,0 +1,67 @@
+package dev.moreal.finds.application.usecase
+
+import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.command.CanonicalCommandEncoder
+import dev.moreal.finds.application.audit.AuditAction
+import dev.moreal.finds.application.port.*
+import dev.moreal.finds.application.security.Actor
+import dev.moreal.finds.application.security.AuthenticationStrength
+import dev.moreal.finds.domain.identity.*
+import java.util.Base64
+
+data class CompletePasskeyRecoveryCommand(val sessionId: RestrictedSessionId,
+  val registration: VerifiedPasskeyRegistration, val metadata: CommandMetadata) {
+  init { require(metadata.idempotencyKey != null) { "Recovery completion requires an idempotency key" } }
+}
+sealed interface CompletePasskeyRecoveryResult {
+  data class Completed(val userId: UserId, val recoveryCode: RecoveryCode) : CompletePasskeyRecoveryResult
+  data object Rejected : CompletePasskeyRecoveryResult
+  data object IdempotencyConflict : CompletePasskeyRecoveryResult
+}
+class CompletePasskeyRecovery(private val transactions: TransactionPort, private val clock: ClockPort,
+  private val random: SecureRandomPort, private val hashes: KeyedIdentityHashPort) {
+  fun execute(command: CompletePasskeyRecoveryCommand): CompletePasskeyRecoveryResult = transactions.execute { tx ->
+    val proof = command.registration
+    if (proof.sessionId != command.sessionId) return@execute CompletePasskeyRecoveryResult.Rejected
+    val initial = tx.restrictedSessions.findById(command.sessionId) ?: return@execute CompletePasskeyRecoveryResult.Rejected
+    if (initial.userId != proof.userId) return@execute CompletePasskeyRecoveryResult.Rejected
+    val user = tx.lockUsers(setOf(initial.userId))[initial.userId] ?: return@execute CompletePasskeyRecoveryResult.Rejected
+    val session = tx.restrictedSessions.findById(command.sessionId) ?: return@execute CompletePasskeyRecoveryResult.Rejected
+    val now = clock.now()
+    if (session.userId != user.id || session.scope != RestrictedSessionScope.RECOVERY || !session.isUsable(now) ||
+      user.status != UserStatus.ACTIVE || tx.recoveryCodes.findByUserId(user.id) == null) return@execute CompletePasskeyRecoveryResult.Rejected
+    val material = proof.credential
+    val updated = (user.completeRecovery(material.id) as? UserChange.Updated)?.user
+      ?: return@execute CompletePasskeyRecoveryResult.Rejected
+    val operation = "recovery.complete"
+    val key = CommandRequestKey(user.id.value.toString(), operation, checkNotNull(command.metadata.idempotencyKey))
+    val semantics = mapOf("user" to user.id.value.toString(), "credential" to mapOf(
+      "id" to material.id.value, "publicKeyCose" to Base64.getEncoder().encodeToString(material.publicKeyCose),
+      "signatureCount" to material.signatureCount, "transports" to material.transports.sorted(),
+      "backupEligible" to material.backupEligible, "backedUp" to material.backedUp))
+    when (val reserved = tx.commandRequests.reserve(CommandRequest(key, CanonicalCommandEncoder.hash(semantics), now, CommandRetention.AUDIT))) {
+      CommandReservation.Conflict -> return@execute CompletePasskeyRecoveryResult.IdempotencyConflict
+      is CommandReservation.Replay -> {
+        reserved.result.requireSupported(operation, 1)
+        check(reserved.result.outcome in setOf("COMPLETED", "REJECTED") && reserved.result.resourceIds.isEmpty()) { "Invalid recovery result" }
+        return@execute CompletePasskeyRecoveryResult.Rejected
+      }
+      CommandReservation.Reserved -> Unit
+    }
+    // Insert first to enforce global uniqueness without removing anything on a collision.
+    if (!tx.credentials.insert(PasskeyCredential(user.id, material, now))) {
+      tx.commandRequests.complete(key, StoredCommandResult(1, operation, "REJECTED"))
+      return@execute CompletePasskeyRecoveryResult.Rejected
+    }
+    user.credentials.forEach(tx.credentials::remove)
+    tx.users.save(updated)
+    tx.userSessions.revokeForUser(user.id, now)
+    RestrictedSessionScope.entries.forEach { tx.restrictedSessions.invalidateForUser(user.id, it, now) }
+    val recovery = freshRecoveryCode(random)
+    tx.recoveryCodes.save(RecoveryCodeHash(user.id, hashes.hash(IdentityHashPurpose.RECOVERY_CODE, user.id.value.toString(), recovery.format()), now))
+    tx.auditSecurity(random, now, Actor.User(user.id.value, user.roles, now, AuthenticationStrength.PASSKEY),
+      AuditAction.ACCOUNT_RECOVERY_COMPLETED, user.id, command.metadata)
+    tx.commandRequests.complete(key, StoredCommandResult(1, operation, "COMPLETED"))
+    CompletePasskeyRecoveryResult.Completed(user.id, recovery)
+  }
+}

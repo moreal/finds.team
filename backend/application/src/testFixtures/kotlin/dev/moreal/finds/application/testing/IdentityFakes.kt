@@ -20,12 +20,14 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
   val credentials = linkedMapOf<CredentialId, PasskeyCredential>()
   val sessions = linkedMapOf<RestrictedSessionId, RestrictedSession>()
   val recoveryCodes = linkedMapOf<UserId, RecoveryCodeHash>()
+  val userSessions = linkedMapOf<UserSessionId, UserSession>()
 
   fun snapshot() = FakeIdentityState(users.values.toList()).also {
     it.otps.putAll(otps)
     it.credentials.putAll(credentials)
     it.sessions.putAll(sessions)
     it.recoveryCodes.putAll(recoveryCodes)
+    it.userSessions.putAll(userSessions)
   }
 
   fun stores(checkActive: () -> Unit) = Stores(checkActive)
@@ -69,6 +71,19 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
         credentials[credential.material.id] = credential
         return true
       }
+      override fun findByUserId(userId: UserId): List<PasskeyCredential> {
+        checkActive(); return credentials.values.filter { it.userId == userId }
+      }
+      override fun remove(id: CredentialId) {
+        checkActive()
+        credentials[id]?.let { requireUserLock(it.userId); credentials.remove(id) }
+      }
+      override fun rename(id: CredentialId, label: String) {
+        checkActive()
+        val credential = checkNotNull(credentials[id])
+        requireUserLock(credential.userId)
+        credentials[id] = credential.copy(label = label)
+      }
     }
     val sessionRepository = object : RestrictedSessionRepository {
       override fun findById(id: RestrictedSessionId): RestrictedSession? { checkActive(); return sessions[id] }
@@ -88,6 +103,30 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
     val recoveryRepository = object : RecoveryCodeRepository {
       override fun findByUserId(userId: UserId): RecoveryCodeHash? { checkActive(); return recoveryCodes[userId] }
       override fun save(code: RecoveryCodeHash) { requireUserLock(code.userId); recoveryCodes[code.userId] = code }
+    }
+    val userSessionRepository = object : UserSessionRepository {
+      override fun findById(id: UserSessionId): UserSession? { checkActive(); return userSessions[id] }
+      override fun findByUserId(userId: UserId): List<UserSession> {
+        checkActive(); return userSessions.values.filter { it.userId == userId }
+      }
+      override fun save(session: UserSession) {
+        requireUserLock(session.userId)
+        check(userSessions[session.id]?.userId?.let { it == session.userId } != false) { "Session owner cannot change" }
+        userSessions[session.id] = session
+      }
+      override fun revoke(id: UserSessionId, now: Instant) {
+        checkActive()
+        userSessions[id]?.let { session ->
+          requireUserLock(session.userId)
+          if (session.revokedAt == null) userSessions[id] = session.copy(revokedAt = now)
+        }
+      }
+      override fun revokeForUser(userId: UserId, now: Instant, except: UserSessionId?) {
+        requireUserLock(userId)
+        userSessions.replaceAll { id, session ->
+          if (session.userId == userId && id != except && session.revokedAt == null) session.copy(revokedAt = now) else session
+        }
+      }
     }
   }
 }
