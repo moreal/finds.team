@@ -21,7 +21,7 @@ class JooqOtpChallengeStoreTest : PostgresIntegrationTest() {
   private val hashes = TestIdentityHashes()
   private val crypto = AesGcmMailPayloadCrypto(1, mapOf(1 to ByteArray(32) { 9 }))
 
-  @Test fun `challenge command and encrypted mail commit together without logging plaintext`() {
+  @Test fun `challenge command and encrypted mail commit together without plaintext persistence`() {
     val (_, db) = migratedContext()
     val tx = JooqTransactionAdapter(db) { crypto }
     val random = DeterministicIdentityRandom()
@@ -36,21 +36,68 @@ class JooqOtpChallengeStoreTest : PostgresIntegrationTest() {
     val command = RequestEnrollmentOtpCommand(email, metadata())
     assertFailsWith<IllegalStateException> { RequestEnrollmentOtp(tx, ClockPort { now }, random, hashes, failing).execute(command) }
     for (table in listOf("otp_challenges", "command_requests", "mail_outbox")) assertEquals(0L, db.fetchValue("SELECT count(*) FROM $table"))
-    val logger = org.slf4j.LoggerFactory.getLogger("org.jooq") as ch.qos.logback.classic.Logger
-    val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
-    val previous = logger.level
-    logger.level = ch.qos.logback.classic.Level.DEBUG
-    logger.addAppender(appender)
-    try { RequestEnrollmentOtp(tx, ClockPort { now }, random, hashes, notifier).execute(command) }
-    finally { logger.detachAppender(appender); logger.level = previous }
+    RequestEnrollmentOtp(tx, ClockPort { now }, random, hashes, notifier).execute(command)
     for (table in listOf("otp_challenges", "command_requests", "mail_outbox")) {
       assertEquals(1L, db.fetchValue("SELECT count(*) FROM $table"))
       assertFalse(db.fetchValue("SELECT row_to_json(t)::text FROM $table t").toString().contains("00000042"))
     }
-    assertFalse(appender.list.joinToString { it.formattedMessage }.contains("00000042"))
-    assertFalse(appender.list.joinToString { it.formattedMessage }.contains(email.value))
     assertEquals(32, db.fetchValue("SELECT octet_length(otp_hash) FROM otp_challenges"))
     assertEquals(command.metadata.correlationId, db.fetchValue("SELECT correlation_id FROM mail_outbox"))
+  }
+
+  @Test fun `DEBUG and TRACE diagnostics redact OTP email and digest on successful and failed persistence`() {
+    val (_, db) = migratedContext()
+    val tx = JooqTransactionAdapter(db) { crypto }
+    val recipient = EmailAddress("Private@Example.test")
+    val otp = "00000042"
+    val digest = hashes.hash(IdentityHashPurpose.ENROLLMENT_OTP, recipient.normalized, otp).bytes
+    val forbidden = mapOf(
+      "digest hex" to digest.joinToString("") { "%02x".format(it) },
+      "digest uppercase hex" to digest.joinToString("") { "%02X".format(it) },
+      "truncated digest hex" to digest.take(16).joinToString("") { "%02x".format(it) },
+      "digest base64" to java.util.Base64.getEncoder().encodeToString(digest),
+      "digest base64url" to java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest),
+      "digest byte array" to digest.contentToString(),
+      "OTP plaintext" to otp, "delivery email" to recipient.value, "normalized email" to recipient.normalized,
+    )
+    val request = RequestEnrollmentOtp(tx, ClockPort { now }, DeterministicIdentityRandom(), hashes, MailVerificationCodeNotifier(ClockPort { now }))
+    val root = org.slf4j.LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as ch.qos.logback.classic.Logger
+    val loggers = listOf("org.jooq", "dev.moreal.finds.persistence").map {
+      org.slf4j.LoggerFactory.getLogger(it) as ch.qos.logback.classic.Logger
+    }
+    for (level in listOf(ch.qos.logback.classic.Level.DEBUG, ch.qos.logback.classic.Level.TRACE)) {
+      // NOT VALID preserves the previous challenge, but the next save must hit a real SQLSTATE 23514.
+      fun attempt(fail: Boolean): String {
+        if (fail) db.execute("ALTER TABLE otp_challenges ADD CONSTRAINT reject_diagnostic_fixture CHECK (false) NOT VALID")
+        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        val previous = loggers.map { it.level }
+        loggers.forEach { it.level = level }
+        root.addAppender(appender)
+        val diagnostic = try {
+          loggers.first().debug("identity diagnostic capture enabled")
+          val thrown = if (fail) assertFails { request.execute(RequestEnrollmentOtpCommand(recipient, metadata())) }
+            else { request.execute(RequestEnrollmentOtpCommand(recipient, metadata())); null }
+          appender.list.joinToString("\n") { event ->
+            event.formattedMessage + (event.throwableProxy?.let(ch.qos.logback.classic.spi.ThrowableProxyUtil::asString) ?: "")
+          } + (thrown?.stackTraceToString() ?: "")
+        } finally {
+          root.detachAppender(appender)
+          loggers.zip(previous).forEach { (logger, old) -> logger.level = old }
+          appender.stop()
+          if (fail) db.execute("ALTER TABLE otp_challenges DROP CONSTRAINT reject_diagnostic_fixture")
+        }
+        assertContains(diagnostic, "identity diagnostic capture enabled")
+        for ((kind, value) in forbidden) assertFalse(diagnostic.contains(value), "$level diagnostics leaked $kind")
+        if (fail) assertContains(diagnostic, "Identity persistence failed (23514)")
+        return diagnostic
+      }
+      attempt(fail = false)
+      val previousHash = tx.execute { assertNotNull(it.otpChallenges.find(recipient, VerificationPurpose.ENROLLMENT)).challenge!!.hash.bytes }
+      attempt(fail = true)
+      assertContentEquals(previousHash, tx.execute { it.otpChallenges.find(recipient, VerificationPurpose.ENROLLMENT)!!.challenge!!.hash.bytes })
+    }
+    assertEquals(2L, db.fetchValue("SELECT count(*) FROM mail_outbox"))
+    assertEquals(2L, db.fetchValue("SELECT count(*) FROM command_requests"))
   }
 
   @Test fun `concurrent failures stop at five survive reissue and unlock at fifteen minutes`() {

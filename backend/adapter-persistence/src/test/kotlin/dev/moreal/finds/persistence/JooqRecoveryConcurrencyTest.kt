@@ -57,20 +57,46 @@ class JooqRecoveryConcurrencyTest : PostgresIntegrationTest() {
     val (_, db) = migratedContext()
     val tx = JooqTransactionAdapter(db) { null }
     val sessions = seed(tx)
+    val commands = sessions.mapIndexed { index, session -> command(session, "replacement-$index") }
     val next = java.util.concurrent.atomic.AtomicInteger()
     val complete = CompletePasskeyRecovery(tx, ClockPort { now }, DeterministicIdentityRandom(), hashes)
-    val results = race(2) { complete.execute(command(sessions[next.getAndIncrement()])) }
-    assertEquals(1, results.count { it is CompletePasskeyRecoveryResult.Completed })
-    assertEquals(1, results.count { it == CompletePasskeyRecoveryResult.Rejected })
-    assertEquals(1L, db.fetchValue("SELECT count(*) FROM passkey_credentials"))
+    // Distinct sessions, idempotency keys AND replacement IDs: uniqueness cannot select a winner.
+    val results = race(2) {
+      val command = commands[next.getAndIncrement()]
+      command to complete.execute(command)
+    }
+    val (winningCommand, winningResult) = results.single { it.second is CompletePasskeyRecoveryResult.Completed }
+    val (losingCommand, _) = results.single { it.second == CompletePasskeyRecoveryResult.Rejected }
+    val recoveryCode = (winningResult as CompletePasskeyRecoveryResult.Completed).recoveryCode
+    tx.execute {
+      val expected = setOf(winningCommand.registration.credential.id)
+      assertEquals(expected, it.users.lockByEmail(email)?.credentials)
+      assertEquals(expected, it.credentials.findByUserId(id).map { key -> key.material.id }.toSet())
+      assertNull(it.credentials.findById(losingCommand.registration.credential.id))
+      assertNull(it.credentials.findById(CredentialId("old-a")))
+      assertNull(it.credentials.findById(CredentialId("old-b")))
+      val oldSessions = it.userSessions.findByUserId(id)
+      assertEquals(2, oldSessions.size)
+      assertTrue(oldSessions.all { session -> session.revokedAt == now })
+      sessions.forEach { session -> assertEquals(now, it.restrictedSessions.findById(session.id)?.invalidatedAt) }
+      val code = assertNotNull(it.recoveryCodes.findByUserId(id))
+      assertTrue(hashes.matches(code.hash, IdentityHashPurpose.RECOVERY_CODE, id.value.toString(), recoveryCode.format()))
+      assertFalse(hashes.matches(code.hash, IdentityHashPurpose.RECOVERY_CODE, id.value.toString(), "old-code"))
+    }
     assertEquals(1L, db.fetchValue("SELECT count(*) FROM recovery_codes"))
     assertEquals(1L, db.fetchValue("SELECT revision FROM recovery_codes"))
     assertEquals(1L, db.fetchValue("SELECT count(*) FROM audit_events"))
-    assertEquals(0L, db.fetchValue("SELECT count(*) FROM user_sessions WHERE revoked_at IS NULL"))
+    assertEquals(winningCommand.metadata.requestId, db.fetchValue("SELECT request_id FROM audit_events"))
+    assertEquals(winningCommand.metadata.correlationId, db.fetchValue("SELECT correlation_id FROM audit_events"))
+    assertEquals(0L, db.fetchValue("SELECT count(*) FROM audit_events WHERE request_id = ?", losingCommand.metadata.requestId))
+    assertEquals(0L, db.fetchValue("SELECT count(*) FROM mail_outbox"))
+    assertEquals(2L, db.fetchValue("SELECT count(*) FROM command_requests"))
+    assertEquals("COMPLETED", db.fetchValue("SELECT result->>'outcome' FROM command_requests WHERE idempotency_key = ?", winningCommand.metadata.idempotencyKey))
+    assertEquals("REJECTED", db.fetchValue("SELECT result->>'outcome' FROM command_requests WHERE idempotency_key = ?", losingCommand.metadata.idempotencyKey))
   }
 
-  private fun command(session: RestrictedSession) = CompletePasskeyRecoveryCommand(session.id,
-    VerifiedPasskeyRegistration(id, session.id, credential(id, "new", now).material), metadata())
+  private fun command(session: RestrictedSession, credentialId: String = "new") = CompletePasskeyRecoveryCommand(session.id,
+    VerifiedPasskeyRegistration(id, session.id, credential(id, credentialId, now).material), metadata())
 
   private fun seed(tx: TransactionPort): List<RestrictedSession> = tx.execute {
     it.users.lockByEmail(email)
