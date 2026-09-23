@@ -22,8 +22,8 @@ test("Start root renders and loads a production script", async ({ page }) => {
   const response = await page.goto(`${publicOrigin}/`);
   expect(response?.status()).toBe(200);
   expect(response?.headers()["x-finds-upstream"]).toBe("frontend");
-  await expect(page.getByRole("main")).toContainText("finds.team");
-  await expect(page.getByRole("link", { name: "공고 보기" })).toHaveAttribute("href", "/jobs");
+  await expect(page).toHaveURL(`${publicOrigin}/jobs`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText('다음 기회를 발견하세요.');
 
   const html = await response!.text();
   const scriptPath = html.match(/<script\b[^>]*\bsrc="([^"]+\.js)"[^>]*>/)?.[1];
@@ -39,7 +39,7 @@ test("Start root renders and loads a production script", async ({ page }) => {
 test("page routes reach the Start production server", async ({ request }) => {
   const response = await request.get(`${publicOrigin}/jobs`);
 
-  expect(response.status()).toBe(404);
+  expect(response.status()).toBe(200);
   expect(response.headers()["content-type"]).toMatch(/^text\/html(?:;|$)/);
   expect(response.headers()["x-finds-upstream"]).toBe("frontend");
 });

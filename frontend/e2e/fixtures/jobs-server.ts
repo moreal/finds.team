@@ -6,6 +6,16 @@ const requests: { variables: any }[] = [];
 const pendingRegistrations = new Map<string, string>();
 const acceptedRegistrations = new Map<string, Set<string>>();
 const canceledRegistrations = new Map<string, Set<string>>();
+// Hold the first identity query until its peer arrives, so isolation tests
+// exercise overlapping SSR lifetimes rather than two accidentally serial GETs.
+let isolationPeer: (() => void) | undefined;
+async function overlapIsolationRequests() {
+  if (isolationPeer) { const release = isolationPeer; isolationPeer = undefined; release(); return; }
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => { isolationPeer = undefined; reject(new Error('SSR isolation peer did not arrive')); }, 5000);
+    isolationPeer = () => { clearTimeout(timeout); resolve(); };
+  });
+}
 createServer(async (req, res) => {
   if (req.url === '/__admin-requests') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(adminRequests)); return; }
   const account = /(?:^|;\s*)security-account=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
@@ -43,6 +53,9 @@ createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const { variables, operationName } = JSON.parse(body);
+    if (operationName === 'AdminOperationsViewerQuery' && /(?:^|;\s*)isolation-session=/.test(req.headers.cookie ?? '')) {
+      try { await overlapIsolationRequests(); } catch { res.writeHead(503); res.end(); return; }
+    }
     if (operationName === 'AdminOperationsStatusesQuery') {
       const fault = /admin-fault=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
       if (fault === 'http-forbidden') { res.writeHead(403); res.end(); return; }
@@ -110,7 +123,7 @@ createServer(async (req, res) => {
         startCursor: edges[0]?.cursor ?? null, endCursor: edges.at(-1)?.cursor ?? null } } } }));
     return;
   }
-  const upstream = await fetch(`http://127.0.0.1:4175${req.url}`, { headers: { host: "127.0.0.1:4176", cookie: req.headers.cookie ?? "" }, redirect: "manual" });
+  const upstream = await fetch(`http://127.0.0.1:4175${req.url}`, { headers: { host: "127.0.0.1:4176", cookie: req.headers.cookie ?? "", accept: req.headers.accept ?? '*/*', 'sec-fetch-dest': req.headers['sec-fetch-dest'] as string ?? '' }, redirect: "manual" });
   res.writeHead(upstream.status, Object.fromEntries(upstream.headers));
   res.end(Buffer.from(await upstream.arrayBuffer()));
 }).listen(4176, "127.0.0.1");

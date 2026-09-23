@@ -9,7 +9,7 @@
 .detail-metadata dt { color: var(--color-text-muted); font-size: var(--text-sm); }
 .detail-metadata dd { margin: 0; font-variant-numeric: tabular-nums; }
 .detail-description { white-space: pre-wrap; text-wrap: pretty; }
-.detail-apply { display: inline-flex; align-items: center; min-height: var(--target-regular); padding: var(--space-3) var(--space-6); background: var(--color-action); color: var(--color-on-action); border-radius: var(--radius-control); }
+.detail-page .detail-apply { display: inline-flex; align-items: center; min-height: var(--target-regular); padding: var(--space-3) var(--space-6); background: var(--color-action); color: var(--color-on-action); border-radius: var(--radius-control); }
 .detail-page .detail-apply:visited { color: var(--color-on-action); }
 .detail-count { font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
 .detail-postings { display: grid; gap: var(--space-4); }

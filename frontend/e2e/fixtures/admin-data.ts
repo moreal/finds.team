@@ -10,8 +10,9 @@ function connection(nodes: any[]) { return { edges: nodes.map(node => ({ cursor:
 export function adminData(operation: string, variables: any, cookie: string) {
   if (!operation.startsWith('AdminOperations')) return undefined;
   const role = /(?:^|;\s*)admin-role=([^;]+)/.exec(cookie)?.[1] ?? '';
+  const identity = /(?:^|;\s*)isolation-session=([^;]+)/.exec(cookie)?.[1];
   adminRequests.push({ operation, role, variables });
-  if (operation === 'AdminOperationsViewerQuery') return { viewer: role ? { user: { __typename: 'User', id: 'admin-user', roles: [role] } } : null };
+  if (operation === 'AdminOperationsViewerQuery') return { viewer: role ? { user: { __typename: 'User', id: identity ? `${identity}-viewer` : 'admin-user', roles: [role] } } : null };
   if (operation === 'AdminOperationsSitesQuery') {
     const paginated = cookie.includes('admin-fault=pagination');
     const large = cookie.includes('admin-fault=large');
@@ -19,6 +20,7 @@ export function adminData(operation: string, variables: any, cookie: string) {
     const data = connection(selected.map(s => ({ __typename: 'CareerSite', ...s, canonicalBaseUrl: 'https://example.com/jobs', provider: 'FLEX', crawlSummary: { outcome: s.id === 'running' ? 'SUCCESS' : s.outcome, finishedAt: s.id === 'running' ? '2020-01-01T00:00:00Z' : s.finishedAt } })));
     if (large) { data.totalCount = 51; Object.assign(data.pageInfo, { hasNextPage: !variables.after, endCursor: variables.after ? 'site-page-51' : 'site-page-50' }); }
     if (paginated && !variables.after) Object.assign(data.pageInfo, { hasNextPage: true, endCursor: 'healthy' });
+    if (identity) for (const edge of data.edges) edge.node.displayName = `${identity}-site-${edge.node.id}`;
     return { careerSites: data };
   }
   if (operation === 'AdminOperationsStatusesQuery') {

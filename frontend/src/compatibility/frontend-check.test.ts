@@ -9,7 +9,7 @@ const expectedSteps = [
   "--dir frontend relay:validate",
   "--dir frontend typecheck",
   "--dir frontend test --run",
-  "--dir frontend exec playwright test e2e/kobalte-hydration.spec.ts e2e/virtual-list.spec.ts",
+  "--dir frontend test:e2e",
   "--dir frontend build",
   "--dir frontend test:built",
 ];

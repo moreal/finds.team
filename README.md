@@ -36,13 +36,28 @@ pnpm frontend:check
 ```
 
 `pnpm frontend:check` is the canonical compatibility gate. It fails at the
-first error and runs Relay artifact validation, TypeScript, Vitest, the Kobalte
-and virtual-list Playwright specifications, the production build, and the
+first error and runs Relay artifact validation, TypeScript, Vitest, all fixture
+Playwright acceptance specifications, the production build, and the
 built-handler security/artifact tests in that order. On macOS, use the Linux
 Chromium server documented in
 [`frontend/COMPATIBILITY.md`](frontend/COMPATIBILITY.md) for the native-select
 keyboard case, then run the same root command with
 `PW_TEST_CONNECT_WS_ENDPOINT` and `PW_TEST_CONNECT_EXPOSE_NETWORK` set.
+
+The browser suite includes discovery, authentication, administration, component
+catalogs, keyboard and axe checks for 11 primary routes at desktop/mobile widths
+in light/dark themes, and concurrent two-user SSR isolation. Browser fixture
+servers stop before the production build starts. Run it alone with
+`pnpm --dir frontend test:e2e`.
+
+Each route/theme/viewport check attaches a full-page PNG to Playwright results
+for visual review and checks horizontal overflow and visible keyboard focus.
+These main-route captures are review artifacts rather than host-dependent pixel
+goldens; catalog pixel baselines remain in `frontend/e2e/ui-catalog.spec.ts-snapshots`.
+Review the route captures when changing layout and retain them as CI artifacts.
+Update catalog baselines only after reviewing differences on the pinned browser
+and matching OS. Fixture coverage does not prove real Spring/browser integration:
+the same-origin production smoke below remains a separate final program gate.
 
 Flyway applies the schema at startup. The service listens on port 8080 by
 default. Its operational endpoints are:
@@ -89,7 +104,7 @@ production mail settings described below.
 
 ```sh
 docker compose --profile app up -d --build
-pnpm --dir frontend exec playwright test e2e/same-origin-routing.spec.ts
+FINDS_PUBLIC_ORIGIN=http://127.0.0.1:8080 pnpm --dir frontend test:production
 ```
 
 Caddy sends `/graphql`, `/auth/*`, `/webauthn/*`, and `/login/webauthn` directly to Spring and
@@ -102,7 +117,7 @@ running the routing test on a custom port, for example:
 
 ```sh
 FINDS_APP_PORT=8081 docker compose --profile app up -d --build
-FINDS_PUBLIC_ORIGIN=http://127.0.0.1:8081 pnpm --dir frontend exec playwright test e2e/same-origin-routing.spec.ts
+FINDS_PUBLIC_ORIGIN=http://127.0.0.1:8081 pnpm --dir frontend test:production
 ```
 
 The existing PostgreSQL development binding and named volume are unchanged.
