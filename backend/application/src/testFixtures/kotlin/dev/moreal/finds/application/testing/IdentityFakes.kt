@@ -21,6 +21,13 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
   val sessions = linkedMapOf<RestrictedSessionId, RestrictedSession>()
   val recoveryCodes = linkedMapOf<UserId, RecoveryCodeHash>()
   val userSessions = linkedMapOf<UserSessionId, UserSession>()
+  val handles = initialUsers.associateTo(linkedMapOf()) { it.id to randomHandle() }
+  val challenges = linkedMapOf<UUID, WebAuthnChallenge>()
+
+  private fun randomHandle(): ByteArray = java.nio.ByteBuffer.allocate(16).let {
+    val uuid = UUID.randomUUID()
+    it.putLong(uuid.mostSignificantBits).putLong(uuid.leastSignificantBits).array()
+  }
 
   fun snapshot() = FakeIdentityState(users.values.toList()).also {
     it.otps.putAll(otps)
@@ -28,6 +35,8 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
     it.sessions.putAll(sessions)
     it.recoveryCodes.putAll(recoveryCodes)
     it.userSessions.putAll(userSessions)
+    it.handles.putAll(handles)
+    it.challenges.putAll(challenges)
   }
 
   fun stores(checkActive: () -> Unit) = Stores(checkActive)
@@ -47,11 +56,13 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
         return users.values.singleOrNull { it.email == email }
       }
       override fun findById(id: UserId): User? { checkActive(); return users[id] }
+      override fun findUserHandle(id: UserId): ByteArray? { checkActive(); return handles[id]?.copyOf() }
       override fun save(user: User) {
         requireLock(user.email)
         check(users.values.none { it.email == user.email && it.id != user.id }) { "Duplicate email" }
         check(users[user.id]?.email?.let { it == user.email } != false) { "Email cannot be changed" }
         users[user.id] = user
+        handles.getOrPut(user.id, ::randomHandle)
       }
     }
     val otpRepository = object : OtpChallengeRepository {
@@ -84,6 +95,18 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
         requireUserLock(credential.userId)
         credentials[id] = credential.copy(label = label)
       }
+      override fun updateUsage(id: CredentialId, expectedSignatureCount: Long, signatureCount: Long, backedUp: Boolean, usedAt: Instant): Boolean {
+        checkActive()
+        val credential = credentials[id] ?: return false
+        requireUserLock(credential.userId)
+        val old = credential.material
+        if (old.signatureCount != expectedSignatureCount || signatureCount < 0 ||
+          (signatureCount <= expectedSignatureCount && (signatureCount != 0L || expectedSignatureCount != 0L)) ||
+          usedAt < (credential.lastUsedAt ?: credential.createdAt) || (backedUp && !old.backupEligible)) return false
+        credentials[id] = credential.copy(material = PasskeyCredentialMaterial(id, old.publicKeyCose, signatureCount,
+          old.transports, old.backupEligible, backedUp), lastUsedAt = usedAt)
+        return true
+      }
     }
     val sessionRepository = object : RestrictedSessionRepository {
       override fun findById(id: RestrictedSessionId): RestrictedSession? { checkActive(); return sessions[id] }
@@ -98,6 +121,15 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
           if (session.userId == userId && session.scope == scope && session.invalidatedAt == null)
             session.copy(invalidatedAt = now) else session
         }
+      }
+      override fun purgeExpired(now: Instant, limit: Int): Int {
+        checkActive()
+        require(limit in 1..1000) { "Invalid identity cleanup limit" }
+        val expired = sessions.values.filter { now >= it.replayExpiresAt }.sortedWith(compareBy({ it.expiresAt }, { it.id.value }))
+          .take(limit).map { it.id }.toSet()
+        expired.forEach(sessions::remove)
+        challenges.entries.removeIf { it.value.restrictedSessionId in expired }
+        return expired.size
       }
     }
     val recoveryRepository = object : RecoveryCodeRepository {
@@ -126,6 +158,31 @@ internal class FakeIdentityState(initialUsers: List<User> = emptyList()) {
         userSessions.replaceAll { id, session ->
           if (session.userId == userId && id != except && session.revokedAt == null) session.copy(revokedAt = now) else session
         }
+      }
+    }
+    val challengeRepository = object : WebAuthnChallengeRepository {
+      override fun findById(id: UUID): WebAuthnChallenge? { checkActive(); return challenges[id] }
+      override fun save(challenge: WebAuthnChallenge) {
+        checkActive()
+        challenge.userId?.let(::requireUserLock)
+        check(challenge.id !in challenges && challenge.consumedAt == null) { "Ceremony already exists" }
+        check(if (challenge.purpose == WebAuthnChallengePurpose.REGISTRATION)
+          challenge.userId != null && sessions[challenge.restrictedSessionId]?.let { it.userId == challenge.userId && it.isUsable(challenge.createdAt) } == true
+          else challenge.restrictedSessionId == null) { "Invalid ceremony binding" }
+        challenges[challenge.id] = challenge
+      }
+      override fun consume(expected: WebAuthnChallenge, now: Instant): Boolean {
+        checkActive()
+        val actual = challenges[expected.id] ?: return false
+        actual.userId?.let(::requireUserLock)
+        fun same(a: KeyedIdentityHash, b: KeyedIdentityHash) = a.pepperVersion == b.pepperVersion && MessageDigest.isEqual(a.bytes, b.bytes)
+        if (actual.consumedAt != null || now < actual.createdAt || now >= actual.expiresAt ||
+          actual.purpose != expected.purpose || actual.rpId != expected.rpId || actual.userId != expected.userId ||
+          actual.restrictedSessionId != expected.restrictedSessionId || !same(actual.hash, expected.hash) ||
+          !same(actual.sessionBinding, expected.sessionBinding) || actual.createdAt != expected.createdAt || actual.expiresAt != expected.expiresAt ||
+          actual.restrictedSessionId?.let { sessions[it]?.isUsable(now) != true } == true) return false
+        challenges[expected.id] = actual.copy(consumedAt = now)
+        return true
       }
     }
   }

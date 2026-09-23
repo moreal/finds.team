@@ -44,11 +44,11 @@ class RequestEnrollmentOtp(
       if (user == null || user.status == UserStatus.PENDING_PASSKEY) {
         val state = tx.otpChallenges.find(command.email, VerificationPurpose.ENROLLMENT)
           ?: OtpAccountState(command.email, VerificationPurpose.ENROLLMENT)
-        if (state.consecutiveFailures < 5) {
+        if (state.lockedUntil?.let { now < it } != true) {
           val code = VerificationCode(random.nextInt(100_000_000).toString().padStart(8, '0'))
           val challenge = OtpChallenge(DeliveryRequestId(random.uuid()),
             hashes.hash(IdentityHashPurpose.ENROLLMENT_OTP, command.email.normalized, code.value), now.plusSeconds(600))
-          tx.otpChallenges.save(state.copy(challenge = challenge))
+          tx.otpChallenges.save(state.copy(challenge = challenge, lastIssuedAt = now))
           notifier.deliver(tx, command.email, VerificationPurpose.ENROLLMENT, code, challenge.expiresAt,
             challenge.deliveryId, command.metadata.correlationId)
         }

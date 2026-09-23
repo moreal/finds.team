@@ -61,7 +61,23 @@ internal object CommandResultCodec {
     val supported = when (operation) {
       "career_site.register" -> result.outcome in setOf("CREATED", "ALREADY_REGISTERED") &&
         result.resourceIds.keys == setOf("career_site") && result.resourceIds["career_site"] is CommandResourceId.Number
-      else -> false
+      "enrollment.complete" -> when (result.outcome) {
+        "COMPLETED" -> result.resourceIds.keys == setOf("user") && result.resourceIds["user"] is CommandResourceId.Uuid
+        "REJECTED" -> result.resourceIds.isEmpty()
+        else -> false
+      }
+      else -> result.resourceIds.isEmpty() && result.outcome in when (operation) {
+        "enrollment.otp.request", "recovery.otp.request" -> setOf("ACCEPTED")
+        "recovery.complete" -> setOf("COMPLETED", "REJECTED")
+        "recovery_code.rotate" -> setOf("ROTATED")
+        "role.grant", "role.revoke" -> setOf("CHANGED", "UNCHANGED", "FORBIDDEN", "NOT_FOUND", "REQUIRED_USER_ROLE")
+        "passkey.remove" -> setOf("CHANGED", "NOT_FOUND", "LAST_CREDENTIAL")
+        "passkey.rename" -> setOf("CHANGED", "UNCHANGED", "NOT_FOUND")
+        "passkey.register" -> setOf("CHANGED", "FORBIDDEN", "CREDENTIAL_ALREADY_EXISTS")
+        "session.revoke" -> setOf("CHANGED", "UNCHANGED", "NOT_FOUND", "SIGNED_OUT")
+        "session.revoke_others" -> setOf("CHANGED", "UNCHANGED")
+        else -> emptySet()
+      }
     }
     if (!supported) throw UnsupportedCommandResultException()
   }

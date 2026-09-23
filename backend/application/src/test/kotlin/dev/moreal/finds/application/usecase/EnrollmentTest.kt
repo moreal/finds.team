@@ -98,6 +98,22 @@ class EnrollmentTest {
   }
 
   @Test
+  fun `five failures unlock after fifteen minutes without resetting on reissue`() {
+    val f = Fixture()
+    f.request()
+    repeat(5) { f.verify("99999999") }
+    f.now = start.plusSeconds(899)
+    f.request()
+    assertEquals(1, f.tx.outboxMessages.size)
+    f.now = start.plusSeconds(900)
+    f.request()
+    assertEquals(2, f.tx.outboxMessages.size)
+    assertEquals(5, f.tx.otpStates.single().consecutiveFailures)
+    assertIs<VerifyEnrollmentOtpResult.Verified>(f.verify(f.code()))
+    assertEquals(0, f.tx.otpStates.single().consecutiveFailures)
+  }
+
+  @Test
   fun `four failures still permit the correct code and reset consecutive failures on verified ownership`() {
     val f = Fixture()
     f.request()
@@ -178,6 +194,19 @@ class EnrollmentTest {
     assertEquals(1, f.tx.auditEvents.size)
     assertFalse(result.toString().contains(result.recoveryCode.format()))
     assertTrue(f.tx.completedRequests.values.all { it.resourceIds.keys.all { key -> key == "user" } })
+  }
+
+  @Test
+  fun `enrollment completion replay ends twenty four hours after ceremony expiry`() {
+    val f = Fixture()
+    val session = f.enroll()
+    val metadata = metadata()
+    val proof = registration(session)
+    assertIs<CompletePasskeyEnrollmentResult.Completed>(f.complete(session, proof, metadata))
+    f.now = session.expiresAt.plusSeconds(86399)
+    assertIs<CompletePasskeyEnrollmentResult.AlreadyCompleted>(f.complete(session, proof, metadata))
+    f.now = session.expiresAt.plusSeconds(86400)
+    assertEquals(CompletePasskeyEnrollmentResult.Rejected, f.complete(session, proof, metadata))
   }
 
   @Test

@@ -25,7 +25,9 @@ class JooqTransactionAdapter(
       val loadedCrypto = crypto()
       return context.transactionResult { configuration ->
         val scope = TransactionScope()
-        val transaction = Context(DSL.using(configuration), scope, loadedCrypto)
+        // SQL diagnostic bind logging must not expose identity values, even at DEBUG level.
+        val settings = (configuration.settings().clone() as org.jooq.conf.Settings).withExecuteLogging(false)
+        val transaction = Context(DSL.using(configuration.derive(settings)), scope, loadedCrypto)
         try {
           val result = block(transaction)
           transaction.commandRequests.checkCompleted()
@@ -41,6 +43,14 @@ class JooqTransactionAdapter(
   }
 
   private class Context(db: DSLContext, scope: TransactionScope, crypto: MailPayloadCrypto?) : TransactionContext {
+    private val identityAccess = IdentityAccess(db, scope)
+    override val users = JooqIdentityRepository(db, identityAccess)
+    override val otpChallenges = JooqOtpChallengeStore(db, identityAccess)
+    override val credentials = JooqCredentialRepository(db, identityAccess)
+    override val restrictedSessions = JooqRestrictedSessionRepository(db, identityAccess)
+    override val recoveryCodes = JooqRecoveryCodeRepository(db, identityAccess)
+    override val userSessions = JooqSessionRepository(db, identityAccess)
+    override val webauthnChallenges = JooqWebAuthnChallengeStore(db, identityAccess)
     private val sites = JooqCareerSiteRepository(db)
     override val careerSites = object : CareerSiteRepository {
       override fun findById(id: CareerSiteId) = scope.access { sites.findById(id) }

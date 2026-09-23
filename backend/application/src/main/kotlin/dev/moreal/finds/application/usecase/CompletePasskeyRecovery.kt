@@ -29,7 +29,8 @@ class CompletePasskeyRecovery(private val transactions: TransactionPort, private
     val user = tx.lockUsers(setOf(initial.userId))[initial.userId] ?: return@execute CompletePasskeyRecoveryResult.Rejected
     val session = tx.restrictedSessions.findById(command.sessionId) ?: return@execute CompletePasskeyRecoveryResult.Rejected
     val now = clock.now()
-    if (session.userId != user.id || session.scope != RestrictedSessionScope.RECOVERY)
+    if (session.userId != user.id || session.scope != RestrictedSessionScope.RECOVERY ||
+      now >= session.replayExpiresAt)
       return@execute CompletePasskeyRecoveryResult.Rejected
     val material = proof.credential
     val operation = "recovery.complete"

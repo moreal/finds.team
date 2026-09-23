@@ -81,6 +81,7 @@ class FakeTransaction(
     override val restrictedSessions = identityStores.sessionRepository
     override val recoveryCodes = identityStores.recoveryRepository
     override val userSessions = identityStores.userSessionRepository
+    override val webauthnChallenges = identityStores.challengeRepository
 
     override val careerSites = object : CareerSiteRepository {
       override fun findById(id: CareerSiteId): CareerSite? { checkActive(); return snapshot.sites.findById(id) }

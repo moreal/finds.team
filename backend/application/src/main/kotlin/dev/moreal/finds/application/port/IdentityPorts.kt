@@ -13,6 +13,8 @@ import java.util.UUID
 interface UserRepository {
   fun lockByEmail(email: EmailAddress): User?
   fun findById(id: UserId): User?
+  /** Stable random public WebAuthn handle, unrelated to email/account ID; returned bytes are owned by the caller. */
+  fun findUserHandle(id: UserId): ByteArray?
   fun save(user: User)
 }
 
@@ -24,7 +26,7 @@ class KeyedIdentityHash(val pepperVersion: Int, bytes: ByteArray) {
   override fun toString(): String = "KeyedIdentityHash(pepperVersion=$pepperVersion, <redacted>)"
 }
 
-enum class IdentityHashPurpose { ENROLLMENT_OTP, RECOVERY_OTP, RECOVERY_CODE, COMMAND_SCOPE }
+enum class IdentityHashPurpose { ENROLLMENT_OTP, RECOVERY_OTP, RECOVERY_CODE, COMMAND_SCOPE, WEBAUTHN_CHALLENGE, WEBAUTHN_SESSION_BINDING }
 
 /**
  * HMAC-SHA-256 over unambiguously framed purpose, binding and value. Use distinct loaded, versioned
@@ -57,7 +59,7 @@ data class OtpAccountState(
   val purpose: VerificationPurpose,
   val consecutiveFailures: Int = 0,
   val challenge: OtpChallenge? = null,
-  /** Recovery cooldown; expiry permits another attempt without resetting consecutiveFailures. */
+  /** Account cooldown; expiry permits another attempt without resetting consecutiveFailures. */
   val lockedUntil: Instant? = null,
   val lastIssuedAt: Instant? = null,
 ) {
@@ -71,6 +73,7 @@ interface OtpChallengeRepository {
 }
 
 @JvmInline
+/** Server-side binding reference, never the HTTP session cookie or a bearer credential. */
 value class RestrictedSessionId(val value: UUID) {
   override fun toString(): String = "RestrictedSessionId(<redacted>)"
 }
@@ -88,6 +91,8 @@ data class RestrictedSession(
 ) {
   init { require(expiresAt > createdAt) { "Invalid restricted session lifetime" } }
   fun isUsable(now: Instant): Boolean = invalidatedAt == null && now >= createdAt && now < expiresAt
+  val replayExpiresAt: Instant get() = expiresAt.plusSeconds(REPLAY_RETENTION_SECONDS)
+  companion object { const val REPLAY_RETENTION_SECONDS = 86400L }
 }
 
 /** Writes and single consumption serialize under the owning user's account lock. */
@@ -95,6 +100,8 @@ interface RestrictedSessionRepository {
   fun findById(id: RestrictedSessionId): RestrictedSession?
   fun save(session: RestrictedSession)
   fun invalidateForUser(userId: UserId, scope: RestrictedSessionScope, now: Instant)
+  /** Maintenance only, within a transaction: bounded deletion after the 24h replay window, skipping locked rows. */
+  fun purgeExpired(now: Instant, limit: Int): Int
 }
 
 /** Public cryptographic data, owned by adapters; the application does not parse COSE or transports. */
@@ -145,6 +152,8 @@ interface PasskeyCredentialRepository {
   /** Remove usable material under the owning account lock. */
   fun remove(id: CredentialId)
   fun rename(id: CredentialId, label: String)
+  /** Compare-and-update after cryptographic verification, under the account lock. Zero-only counters are permitted. */
+  fun updateUsage(id: CredentialId, expectedSignatureCount: Long, signatureCount: Long, backedUp: Boolean, usedAt: Instant): Boolean
 }
 
 /** Stable management reference, never an HTTP session cookie or bearer secret. */
@@ -191,4 +200,31 @@ class BootstrapInitialRolePolicy(allowlist: Set<EmailAddress> = emptySet()) : In
   private val normalizedAllowlist = allowlist.map { it.normalized }.toSet()
   override fun rolesForVerifiedEmail(email: EmailAddress): Set<UserRole> =
     if (email.normalized in normalizedAllowlist) setOf(UserRole.USER, UserRole.ADMIN) else setOf(UserRole.USER)
+}
+
+enum class WebAuthnChallengePurpose { REGISTRATION, AUTHENTICATION }
+
+/** No raw challenge or HTTP session token enters persistence. IDs below are server-only references. */
+data class WebAuthnChallenge(
+  val id: UUID,
+  val purpose: WebAuthnChallengePurpose,
+  val rpId: String,
+  val hash: KeyedIdentityHash,
+  val sessionBinding: KeyedIdentityHash,
+  val userId: UserId?,
+  val restrictedSessionId: RestrictedSessionId?,
+  val createdAt: Instant,
+  val expiresAt: Instant,
+  val consumedAt: Instant? = null,
+) {
+  init { require(expiresAt > createdAt && rpId.isNotBlank()) { "Invalid ceremony lifetime or RP" } }
+  override fun toString(): String = "WebAuthnChallenge(<redacted>)"
+}
+
+interface WebAuthnChallengeRepository {
+  fun findById(id: UUID): WebAuthnChallenge?
+  /** Insert immutable binding. For named users, hold their account lock. */
+  fun save(challenge: WebAuthnChallenge)
+  /** Atomically consume once, matching every trusted binding and expiry; no network/verification inside. */
+  fun consume(expected: WebAuthnChallenge, now: Instant): Boolean
 }

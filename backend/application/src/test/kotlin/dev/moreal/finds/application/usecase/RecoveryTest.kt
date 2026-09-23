@@ -204,6 +204,15 @@ class RecoveryTest {
     assertEquals(1, f.tx.auditEvents.size)
   }
 
+  @Test fun `recovery replay expires twenty four hours after ceremony expiry`() {
+    val f = SecurityFixture()
+    val session = f.beginRecovery()
+    val metadata = f.metadata()
+    assertIs<CompletePasskeyRecoveryResult.Completed>(f.completeRecovery(session, metadata = metadata))
+    f.now = session.expiresAt.plusSeconds(86400)
+    assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(session, metadata = metadata))
+  }
+
   @Test fun `concurrent identical recovery retries produce one plaintext result and one secret free replay`() {
     val f = SecurityFixture()
     val session = f.beginRecovery()

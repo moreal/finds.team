@@ -113,7 +113,7 @@ class CommandAuditMigrationTest : PostgresIntegrationTest() {
         val migrator = PGSimpleDataSource().apply {
           setURL(postgres.jdbcUrl); user = "finds_migrator"; password = "test-migration-password"
         }
-        assertEquals(2, Flyway.configure().dataSource(migrator).load().migrate().migrationsExecuted)
+        assertEquals(3, Flyway.configure().dataSource(migrator).load().migrate().migrationsExecuted)
         // Rerunning after V3 must not broaden the audit grants.
         assertEquals(0, postgres.execInContainer("sh", "/tmp/bootstrap-roles.sh").exitCode)
         val runtime = PGSimpleDataSource().apply {
@@ -131,7 +131,23 @@ class CommandAuditMigrationTest : PostgresIntegrationTest() {
             "CREATE OR REPLACE FUNCTION reject_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'")
             .forEach { sql -> assertState("42501") { db.exec(sql) } }
           assertEquals("false", db.value("SELECT (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)::text FROM pg_roles WHERE rolname = current_user"))
+          for (table in listOf("users", "user_roles", "passkey_credentials", "otp_challenges", "recovery_codes", "user_sessions", "restricted_sessions", "webauthn_challenges")) {
+            for (permission in listOf("SELECT", "INSERT", "UPDATE", "DELETE"))
+              assertEquals("true", db.value("SELECT has_table_privilege(current_user, '$table', '$permission')::text"))
+            assertEquals("false", db.value("SELECT has_table_privilege(current_user, '$table', 'TRUNCATE')::text"))
+          }
         }
+        val runtimeTx = JooqTransactionAdapter(org.jooq.impl.DSL.using(runtime, org.jooq.SQLDialect.POSTGRES)) { null }
+        val identityEmail = dev.moreal.finds.domain.identity.EmailAddress("runtime@example.test")
+        val identityId = dev.moreal.finds.domain.identity.UserId(java.util.UUID.randomUUID())
+        runtimeTx.execute {
+          it.users.lockByEmail(identityEmail)
+          it.users.save(dev.moreal.finds.domain.identity.User(identityId, identityEmail))
+          assertTrue(it.credentials.insert(credential(identityId, "runtime-key", java.time.Instant.now())))
+          it.users.save(dev.moreal.finds.domain.identity.User(identityId, identityEmail,
+            dev.moreal.finds.domain.identity.UserStatus.ACTIVE, credentials = setOf(dev.moreal.finds.domain.identity.CredentialId("runtime-key"))))
+        }
+        assertEquals(identityId, runtimeTx.execute { it.users.lockByEmail(identityEmail)?.id })
       }
   }
 

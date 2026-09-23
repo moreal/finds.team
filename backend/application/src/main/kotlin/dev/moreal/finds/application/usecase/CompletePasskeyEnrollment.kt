@@ -48,6 +48,7 @@ class CompletePasskeyEnrollment(
       if (session.userId != user.id || session.scope != RestrictedSessionScope.ENROLLMENT)
         return@execute CompletePasskeyEnrollmentResult.Rejected
       val now = clock.now()
+      if (now >= session.replayExpiresAt) return@execute CompletePasskeyEnrollmentResult.Rejected
       val key = CommandRequestKey(user.id.value.toString(), "enrollment.complete", checkNotNull(command.metadata.idempotencyKey))
       // Fingerprint every persisted input; only the digest is stored. Ceremony proofs, session IDs,
       // generated timestamps and recovery plaintext are not semantic credential inputs.
