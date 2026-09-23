@@ -9,6 +9,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Properties
+import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -153,6 +154,61 @@ class SmtpMailTransportTest {
   }
 
   @Test
+  fun `legacy challenge mechanisms cannot leak credentials through helper JUL loggers`() = runBlocking<Unit> {
+    captureVerboseJul { records ->
+      for (mechanism in listOf("DIGEST-MD5", "NTLM")) {
+        LocalSmtpServer(authMechanisms = mechanism).use { server ->
+          val result = SmtpMailTransport(server.settings(username = "unique-auth-user", password = "unique-auth-password")).send(message)
+          val captured = records.loggedText()
+          for (marker in listOf("unique-auth-user", "unique-auth-password", "Response =>", "private-auth-nonce")) {
+            assertFalse(captured.contains(marker), "Authentication marker escaped to JUL: $marker")
+          }
+          assertEquals(MailDeliveryResult.Rejected(MailProvider("smtp"), MailFailure.AUTHENTICATION, false), result)
+          assertTrue(server.authAttempts.isEmpty(), "Unsupported mechanisms must not receive credential responses")
+          assertEquals(1L, server.dataStarted.count)
+        }
+      }
+    }
+  }
+
+  @Test
+  fun `PLAIN and LOGIN authenticate and refuse safely under verbose JUL`() = runBlocking<Unit> {
+    captureVerboseJul { records ->
+      for (mechanism in listOf("PLAIN", "LOGIN")) {
+        for (refused in listOf(false, true)) {
+          val username = "unique-$mechanism-user"
+          val password = "unique-$mechanism-password"
+          LocalSmtpServer(
+            authMechanisms = mechanism, authFailure = refused,
+            expectedUsername = username, expectedPassword = password,
+          ).use { server ->
+            val sensitive = MailMessage(
+              MailMessageId.new(), Mailbox("auth-sender@example.test"),
+              Recipients(to = listOf(Mailbox("auth-recipient@example.test"))),
+              "auth-subject-marker", MailContent(text = "auth-body-marker OTP-246810"),
+            )
+            val result = SmtpMailTransport(server.settings(username = username, password = password)).send(sensitive)
+            if (refused) {
+              assertEquals(MailDeliveryResult.Rejected(MailProvider("smtp"), MailFailure.AUTHENTICATION, false), result)
+              assertEquals(1L, server.dataStarted.count)
+            } else {
+              assertIs<MailDeliveryResult.Accepted>(result)
+              assertEquals(sensitive.content.text, server.delivery.get(3, TimeUnit.SECONDS).mime().content.toString().trimEnd())
+            }
+            assertEquals(listOf(mechanism), server.authAttempts)
+            val captured = records.loggedText()
+            val encodedCredentials = listOf(username, password, "\u0000$username\u0000$password", "$username\u0000$username\u0000$password")
+              .map { Base64.getEncoder().encodeToString(it.toByteArray(Charsets.UTF_8)) }
+            for (marker in encodedCredentials + listOf(username, password, "auth-sender@", "auth-recipient@", "auth-subject-marker", "auth-body-marker", "OTP-246810")) {
+              assertFalse(captured.contains(marker), "Authenticated SMTP marker escaped to JUL: $marker")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @Test
   fun `lost response after DATA is indeterminate even when whole message reached server`() = runBlocking<Unit> {
     LocalSmtpServer(finalResponse = null).use { server ->
       val result = SmtpMailTransport(server.settings(readTimeout = 150.milliseconds)).send(message)
@@ -243,6 +299,33 @@ private data class CapturedDelivery(val sender: String, val recipients: List<Str
   fun mime() = MimeMessage(Session.getInstance(Properties()), wire.byteInputStream(Charsets.US_ASCII))
 }
 
+private fun List<LogRecord>.loggedText(): String = joinToString("\n") {
+  it.message + it.parameters.orEmpty().joinToString() + it.thrown?.stackTraceToString().orEmpty()
+}
+
+private suspend fun captureVerboseJul(block: suspend (List<LogRecord>) -> Unit) {
+  val root = Logger.getLogger("")
+  val originalLevel = root.level
+  val records = CopyOnWriteArrayList<LogRecord>()
+  val handler = object : Handler() {
+    override fun publish(record: LogRecord) { records += record }
+    override fun flush() = Unit
+    override fun close() = Unit
+  }.apply { level = Level.ALL }
+  val upstream = listOf(Logger.getLogger("org.eclipse.angus.mail.smtp"), Logger.getLogger("org.eclipse.angus.mail.auth"))
+  val originalUpstreamLevels = upstream.map { it.level }
+  root.addHandler(handler)
+  root.level = Level.FINEST
+  try {
+    block(records)
+    assertEquals(Level.FINEST, root.level)
+    assertEquals(originalUpstreamLevels, upstream.map { it.level })
+  } finally {
+    root.removeHandler(handler)
+    root.level = originalLevel
+  }
+}
+
 /** Real wire peer; controls acknowledgment boundaries without substituting the transport under test. */
 private class LocalSmtpServer(
   private val authFailure: Boolean = false,
@@ -251,12 +334,16 @@ private class LocalSmtpServer(
   private val greet: Boolean = true,
   private val greeting: String = "220 localhost test SMTP",
   private val connected: CountDownLatch? = null,
+  private val authMechanisms: String? = if (authFailure) "PLAIN" else null,
+  private val expectedUsername: String = "user",
+  private val expectedPassword: String = "secret",
 ) : AutoCloseable {
   private val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
   private val stop = CountDownLatch(1)
   @Volatile private var socket: Socket? = null
   val delivery = CompletableFuture<CapturedDelivery>()
   val dataStarted = CountDownLatch(1)
+  val authAttempts = CopyOnWriteArrayList<String>()
   private val worker = thread(isDaemon = true, name = "smtp-test-peer") {
     try {
       server.accept().use { client ->
@@ -276,9 +363,33 @@ private class LocalSmtpServer(
           when {
             line.startsWith("EHLO") -> {
               reply("250-localhost")
-              reply(if (authFailure) "250 AUTH PLAIN" else "250 OK")
+              reply(authMechanisms?.let { "250 AUTH $it" } ?: "250 OK")
             }
-            line.startsWith("AUTH") -> reply("535 Authentication failed")
+            line.startsWith("AUTH ") -> {
+              val mechanism = line.split(' ')[1]
+              authAttempts += mechanism
+              val valid = when (mechanism) {
+                "PLAIN" -> {
+                  val credentials = String(Base64.getDecoder().decode(line.substringAfter("AUTH PLAIN ")), Charsets.UTF_8).split('\u0000')
+                  credentials.takeLast(2) == listOf(expectedUsername, expectedPassword)
+                }
+                "LOGIN" -> {
+                  reply("334 VXNlcm5hbWU6")
+                  val username = String(Base64.getDecoder().decode(input.readLine()), Charsets.UTF_8)
+                  reply("334 UGFzc3dvcmQ6")
+                  val password = String(Base64.getDecoder().decode(input.readLine()), Charsets.UTF_8)
+                  username == expectedUsername && password == expectedPassword
+                }
+                "DIGEST-MD5" -> {
+                  val challenge = "realm=\"example.test\",nonce=\"private-auth-nonce\",qop=\"auth\",charset=utf-8,algorithm=md5-sess"
+                  reply("334 " + Base64.getEncoder().encodeToString(challenge.toByteArray(Charsets.UTF_8)))
+                  input.readLine()
+                  false
+                }
+                else -> false
+              }
+              reply(if (valid && !authFailure) "235 Authenticated" else "535 Authentication failed")
+            }
             line.startsWith("MAIL FROM:") -> { sender = line; reply("250 sender ok") }
             line.startsWith("RCPT TO:") -> {
               recipients += line

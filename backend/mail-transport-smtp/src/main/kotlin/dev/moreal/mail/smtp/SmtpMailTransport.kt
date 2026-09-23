@@ -33,6 +33,10 @@ import kotlin.time.Duration.Companion.milliseconds
 /** NONE is an explicit opt-in for a trusted local relay. STARTTLS requires an upgrade. */
 enum class SmtpTlsMode { NONE, STARTTLS, IMPLICIT }
 
+/**
+ * Username/password authentication supports SMTP AUTH LOGIN and PLAIN. Use TLS for remote relays.
+ * DIGEST-MD5, NTLM, OAuth and external SASL mechanisms are not enabled by this adapter.
+ */
 class SmtpSettings(
   val host: String,
   val port: Int,
@@ -92,6 +96,10 @@ class SmtpMailTransport(private val settings: SmtpSettings) : MailTransport {
     setProperty("mail.smtp.timeout", settings.readTimeout.inWholeMilliseconds.toString())
     setProperty("mail.smtp.writetimeout", settings.readTimeout.inWholeMilliseconds.toString())
     setProperty("mail.smtp.auth", (settings.username != null).toString())
+    // Pinned Angus legacy challenge helpers log credentials outside the isolated transport namespace.
+    // Constrain negotiation instead of mutating those shared upstream loggers.
+    setProperty("mail.smtp.auth.mechanisms", "LOGIN PLAIN")
+    setProperty("mail.smtp.sasl.enable", "false")
     setProperty("mail.smtp.starttls.enable", (settings.tlsMode == SmtpTlsMode.STARTTLS).toString())
     setProperty("mail.smtp.starttls.required", (settings.tlsMode == SmtpTlsMode.STARTTLS).toString())
     setProperty("mail.smtp.ssl.enable", (settings.tlsMode == SmtpTlsMode.IMPLICIT).toString())
