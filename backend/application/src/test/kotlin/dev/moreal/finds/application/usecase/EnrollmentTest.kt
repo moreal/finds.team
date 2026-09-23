@@ -15,6 +15,29 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class EnrollmentTest {
+  @Test fun `enrollment persists normalized device label and fingerprints it without audit PII`() {
+    val f = Fixture(); val session = f.enroll(); val metadata = metadata()
+    val proof = registration(session)
+    assertIs<CompletePasskeyEnrollmentResult.Completed>(f.complete(session, proof, metadata, "  Private laptop  "))
+    assertEquals("Private laptop", f.tx.credentials.single().label)
+    assertIs<CompletePasskeyEnrollmentResult.AlreadyCompleted>(f.complete(session, proof, metadata, "Private laptop"))
+    assertEquals(CompletePasskeyEnrollmentResult.IdempotencyConflict, f.complete(session, proof, metadata, "Other laptop"))
+    assertTrue(f.tx.auditEvents.single().details.fields.isEmpty())
+    assertFalse(f.tx.completedRequests.toString().contains("Private laptop"))
+  }
+
+  @Test fun `invalid enrollment labels cannot activate account or consume scope`() {
+    listOf("", "   ", "a".repeat(81), "private\nlabel").forEach { label ->
+      val f = Fixture(); val session = f.enroll()
+      assertEquals(CompletePasskeyEnrollmentResult.Rejected, f.complete(session, label = label))
+      assertTrue(f.tx.credentials.isEmpty())
+      assertEquals(UserStatus.PENDING_PASSKEY, f.tx.users.single().status)
+      assertNull(f.tx.restrictedSessions.single().invalidatedAt)
+      assertTrue(f.tx.auditEvents.isEmpty())
+      assertIs<CompletePasskeyEnrollmentResult.Completed>(f.complete(session, label = "a".repeat(80)))
+    }
+  }
+
   private val start = Instant.parse("2026-09-22T12:00:00Z")
   private val email = EmailAddress("Person@Example.com")
   private val existingId = UserId(UUID.fromString("00000000-0000-0000-0000-000000000001"))
@@ -431,7 +454,7 @@ class EnrollmentTest {
       request()
       return assertIs<VerifyEnrollmentOtpResult.Verified>(verify(code())).session
     }
-    fun complete(session: RestrictedSession, proof: VerifiedPasskeyRegistration = registration(session), metadata: CommandMetadata = metadata()) =
-      completeUseCase.execute(CompletePasskeyEnrollmentCommand(session.id, proof, metadata))
+    fun complete(session: RestrictedSession, proof: VerifiedPasskeyRegistration = registration(session), metadata: CommandMetadata = metadata(),
+      label: String = "Passkey") = completeUseCase.execute(CompletePasskeyEnrollmentCommand(session.id, proof, metadata, label))
   }
 }

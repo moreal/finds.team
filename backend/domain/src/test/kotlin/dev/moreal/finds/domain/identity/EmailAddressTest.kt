@@ -5,6 +5,30 @@ import kotlin.test.*
 
 class EmailAddressTest {
   @Test
+  fun `dot and plus mailbox variants remain separate account lookup keys`() {
+    val addresses = listOf("alice@example.test", "a.lice@example.test", "alice+tag@example.test", "alice+other@example.test")
+    val accounts = addresses.mapIndexed { index, address -> EmailAddress(address) to index }.toMap()
+    assertEquals(4, accounts.size)
+    addresses.forEachIndexed { index, address ->
+      assertEquals(address, EmailAddress(address).normalized)
+      assertEquals(index, accounts[EmailAddress(address.uppercase(Locale.ROOT))])
+    }
+  }
+
+  @Test
+  fun `visually similar Unicode domains do not alias an ASCII account`() {
+    // The second domain contains Cyrillic а (U+0430), not Latin a.
+    val ascii = EmailAddress("User@paypal.test")
+    val confusable = EmailAddress("User@p\u0430ypal.test")
+    assertEquals("user@xn--pypal-4ve.test", confusable.normalized)
+    assertNotEquals(ascii.normalized, confusable.normalized)
+    assertNotEquals(ascii, confusable)
+    val accounts = mapOf(ascii to "ascii-account", confusable to "idn-account")
+    assertEquals("ascii-account", accounts[EmailAddress("user@PAYPAL.test")])
+    assertEquals("idn-account", accounts[EmailAddress("user@xn--pypal-4ve.test")])
+  }
+
+  @Test
   fun `normalizes IDNA domains and folds only the lookup local part`() {
     listOf(
       Triple("Alice@EXAMPLE.TEST", "Alice@example.test", "alice@example.test"),

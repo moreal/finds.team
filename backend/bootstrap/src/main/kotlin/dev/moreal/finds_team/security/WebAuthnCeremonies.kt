@@ -147,20 +147,23 @@ class WebAuthnCeremonies(
     val result = complete(completionTransactions, scope, proof, metadata, publicKey.label, authentication)
     request.session.setAttribute(COMPLETION, Completion(scope, proof, checkNotNull(metadata.idempotencyKey), registrationFingerprint(publicKey), ceremony.challenge))
     request.session.removeAttribute(REGISTRATION)
+    // Additional registration extends a live Passkey session; it must not leave that
+    // session restricted. Enrollment/recovery still require a separate Passkey login.
+    if (scope.scope == RestrictedSessionScope.ADDITIONAL_PASSKEY) request.session.removeAttribute(RESTRICTED_SESSION)
     return result
   }
 
   private fun complete(tx: TransactionPort, scope: RestrictedSession, proof: VerifiedPasskeyRegistration,
     metadata: CommandMetadata, label: String, authentication: Authentication?): Map<String, Any> = when (scope.scope) {
     RestrictedSessionScope.ENROLLMENT -> when (val result = CompletePasskeyEnrollment(tx, clock, random, hashes, roles)
-      .execute(CompletePasskeyEnrollmentCommand(scope.id, proof, metadata))) {
+      .execute(CompletePasskeyEnrollmentCommand(scope.id, proof, metadata, label))) {
       is CompletePasskeyEnrollmentResult.Completed -> mapOf("success" to true, "recoveryCode" to result.recoveryCode.format())
       is CompletePasskeyEnrollmentResult.AlreadyCompleted -> mapOf("success" to true)
       CompletePasskeyEnrollmentResult.IdempotencyConflict -> throw CeremonyConflict()
       else -> throw CeremonyRejected()
     }
     RestrictedSessionScope.RECOVERY -> when (val result = CompletePasskeyRecovery(tx, clock, random, hashes)
-      .execute(CompletePasskeyRecoveryCommand(scope.id, proof, metadata))) {
+      .execute(CompletePasskeyRecoveryCommand(scope.id, proof, metadata, label))) {
       is CompletePasskeyRecoveryResult.Completed -> mapOf("success" to true, "recoveryCode" to result.recoveryCode.format())
       is CompletePasskeyRecoveryResult.AlreadyCompleted -> mapOf("success" to true)
       CompletePasskeyRecoveryResult.IdempotencyConflict -> throw CeremonyConflict()

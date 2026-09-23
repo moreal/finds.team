@@ -15,8 +15,10 @@ data class CompletePasskeyEnrollmentCommand(
   val sessionId: RestrictedSessionId,
   val registration: VerifiedPasskeyRegistration,
   val metadata: CommandMetadata,
+  val label: String = "Passkey",
 ) {
   init { require(metadata.idempotencyKey != null) { "Enrollment completion requires an idempotency key" } }
+  override fun toString(): String = "CompletePasskeyEnrollmentCommand(<redacted>)"
 }
 
 sealed interface CompletePasskeyEnrollmentResult {
@@ -34,6 +36,7 @@ class CompletePasskeyEnrollment(
   private val initialRoles: InitialRolePolicyPort,
 ) {
   fun execute(command: CompletePasskeyEnrollmentCommand): CompletePasskeyEnrollmentResult {
+    val label = validPasskeyLabel(command.label) ?: return CompletePasskeyEnrollmentResult.Rejected
     val proof = command.registration
     if (proof.sessionId != command.sessionId) return CompletePasskeyEnrollmentResult.Rejected
     return transactions.execute { tx ->
@@ -55,6 +58,7 @@ class CompletePasskeyEnrollment(
       val credential = proof.credential
       val requestHash = CanonicalCommandEncoder.hash(mapOf(
         "user" to user.id.value.toString(),
+        "label" to label,
         "credential" to mapOf(
           "id" to credential.id.value,
           "publicKeyCose" to Base64.getEncoder().encodeToString(credential.publicKeyCose),
@@ -95,7 +99,7 @@ class CompletePasskeyEnrollment(
         is UserChange.Updated -> change.user
         else -> return@execute reject()
       }
-      if (!tx.credentials.insert(PasskeyCredential(user.id, proof.credential, now))) return@execute reject()
+      if (!tx.credentials.insert(PasskeyCredential(user.id, proof.credential, now, label))) return@execute reject()
       tx.users.save(activated)
       tx.restrictedSessions.invalidateForUser(user.id, RestrictedSessionScope.ENROLLMENT, now)
       val entropy = random.bytes(16)

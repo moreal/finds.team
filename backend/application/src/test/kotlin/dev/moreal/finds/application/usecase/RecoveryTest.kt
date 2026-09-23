@@ -15,6 +15,29 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class RecoveryTest {
+  @Test fun `recovery persists normalized device label and fingerprints it without audit PII`() {
+    val f = SecurityFixture(); val session = f.beginRecovery(); val metadata = f.metadata()
+    assertIs<CompletePasskeyRecoveryResult.Completed>(f.completeRecovery(session, metadata = metadata, label = "  Private phone  "))
+    assertEquals("Private phone", f.tx.credentials.single().label)
+    assertIs<CompletePasskeyRecoveryResult.AlreadyCompleted>(f.completeRecovery(session, metadata = metadata, label = "Private phone"))
+    assertEquals(CompletePasskeyRecoveryResult.IdempotencyConflict,
+      f.completeRecovery(session, metadata = metadata, label = "Other phone"))
+    assertTrue(f.tx.auditEvents.single().details.fields.isEmpty())
+    assertFalse(f.tx.completedRequests.toString().contains("Private phone"))
+  }
+
+  @Test fun `invalid recovery labels cannot replace credentials revoke sessions or consume scope`() {
+    listOf("", "   ", "a".repeat(81), "private\nlabel").forEach { label ->
+      val f = SecurityFixture(); val session = f.beginRecovery()
+      assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(session, label = label))
+      assertEquals(setOf("old-passkey-1", "old-passkey-2"), f.tx.credentials.map { it.material.id.value }.toSet())
+      assertTrue(f.tx.userSessions.all { it.revokedAt == null })
+      assertNull(f.tx.restrictedSessions.single().invalidatedAt)
+      assertTrue(f.tx.auditEvents.isEmpty())
+      assertIs<CompletePasskeyRecoveryResult.Completed>(f.completeRecovery(session, label = "a".repeat(80)))
+    }
+  }
+
   @Test fun `requests hide unknown and suspended accounts and enqueue recovery purpose atomically`() {
     val f = SecurityFixture()
     assertEquals(RequestRecoveryOtpResult.Accepted, f.requestRecovery())
@@ -299,8 +322,8 @@ internal class SecurityFixture {
     VerifyRecoveryProofs(tx, clock, random, hashes).execute(VerifyRecoveryProofsCommand(email, otp?.let(::VerificationCode), code))
   fun beginRecovery(): RestrictedSession { requestRecovery(); return assertIs<VerifyRecoveryProofsResult.Verified>(verifyRecovery()).session }
   fun completeRecovery(session: RestrictedSession, id: String = "new-passkey", metadata: CommandMetadata = metadata(),
-    proof: VerifiedPasskeyRegistration = VerifiedPasskeyRegistration(userId, session.id, material(id))) =
-    CompletePasskeyRecovery(tx, clock, random, hashes).execute(CompletePasskeyRecoveryCommand(session.id, proof, metadata))
+    proof: VerifiedPasskeyRegistration = VerifiedPasskeyRegistration(userId, session.id, material(id)), label: String = "Passkey") =
+    CompletePasskeyRecovery(tx, clock, random, hashes).execute(CompletePasskeyRecoveryCommand(session.id, proof, metadata, label))
   fun suspend() = tx.execute {
     val user = it.users.lockByEmail(email)!!
     it.users.save(User(user.id, user.email, UserStatus.SUSPENDED, user.roles, user.credentials))

@@ -22,6 +22,45 @@ import tools.jackson.databind.JsonNode
 class AuthenticationVerticalSliceTest : OtpHttpSupport() {
   private val sql get() = context.getBean(DSLContext::class.java)
 
+  @Test fun `additional registration preserves ordinary access principal and CSRF after completion and replay`() {
+    val (userId, session) = enroll(email())
+    val before = principal(session)
+    val authentication = (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContext).authentication
+    val sessionId = session.id
+    val scope = assertIs<AdditionalPasskeySessionResult.Ready>(BeginAdditionalPasskeyRegistration(tx,
+      context.getBean(ClockPort::class.java), context.getBean(SecureRandomPort::class.java)).execute(before)).session
+    session.setAttribute(WebAuthnCeremonies.RESTRICTED_SESSION, scope.id)
+    val second = Fixture()
+    val body = registration(session, second)
+    val csrf = json.readTree(mvc.perform(get("/auth/csrf").secure(true).session(session))
+      .andExpect(status().isOk).andReturn().response.contentAsString)["token"].asText()
+    val command = UUID.randomUUID()
+    fun submit(encoded: String, key: UUID = command) = mvc.perform(post("/webauthn/register").secure(true).session(session)
+      .header("X-CSRF-TOKEN", csrf).header("Idempotency-Key", key).contentType("application/json").content(encoded))
+    // A cryptographically invalid ceremony cannot consume the scope or add a credential.
+    submit(json.writeValueAsString(second.registration("wrong-challenge"))).andExpect(status().isUnauthorized)
+    assertEquals(scope.id, session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    assertEquals(1, tx.execute { it.credentials.findByUserId(userId).size })
+    assertEquals(before.sessionId, principal(session).sessionId)
+    assertSame(authentication, (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContext).authentication)
+    val encoded = json.writeValueAsString(body)
+    submit(encoded).andExpect(status().isOk)
+    assertGraphqlAllowed(session)
+    assertEquals(sessionId, session.id)
+    assertEquals(before.sessionId, principal(session).sessionId)
+    assertSame(authentication, (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContext).authentication)
+    mvc.perform(post("/webauthn/authenticate/options").secure(true).session(session)
+      .header("X-CSRF-TOKEN", csrf).contentType("application/json").content("{}"))
+      .andExpect(status().isOk)
+    mvc.perform(post("/webauthn/authenticate/options").secure(true).session(session)
+      .contentType("application/json").content("{}"))
+      .andExpect(status().isForbidden)
+    submit(encoded).andExpect(status().isOk).andExpect(jsonPath("$.recoveryCode").doesNotExist())
+    submit(encoded, UUID.randomUUID()).andExpect(status().isUnauthorized)
+    assertGraphqlAllowed(session)
+    assertEquals(2, tx.execute { it.credentials.findByUserId(userId).size })
+  }
+
   @Test fun `delivered enrollment then discoverable login and two proof recovery replace every old credential and session`() {
     val email = email()
     val otp = deliver("enrollment", email)
@@ -42,6 +81,8 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
     val first = Fixture()
     val registration = registration(restricted, first)
     val code = complete(restricted, registration)
+    assertGraphqlDenied(restricted)
+    assertEquals("Laptop", tx.execute { it.credentials.findById(first.id)!!.label })
     assertIs<RecoveryCodeResult.Valid>(RecoveryCode.parse(code))
     assertEquals(26, code.replace("-", "").length)
     assertEquals(setOf(UserRole.USER), tx.execute { it.users.findById(user.id)!!.roles })
@@ -69,6 +110,8 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
     assertRestricted(recovered, RestrictedSessionScope.RECOVERY)
     val replacement = Fixture()
     val newCode = complete(recovered, registration(recovered, replacement))
+    assertGraphqlDenied(recovered)
+    assertEquals("Laptop", tx.execute { it.credentials.findById(replacement.id)!!.label })
     assertTrue(code != newCode, "recovery must rotate the saved code")
     listOf(oldSession, otherSession, secondSession).forEach {
       mvc.perform(get("/auth/session").secure(true).session(it)).andExpect(status().isUnauthorized)
@@ -97,7 +140,7 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
     assertEquals(listOf("passkey.registered", "passkey.registered", "recovery.completed", "recovery.completed").sorted(),
       sql.fetch("select action from audit_events where target_id = ?", user.id.value.toString()).map { it.get("action", String::class.java) }.sorted())
     val durable = sql.fetch("select result from command_requests").toString() + sql.fetch("select details from audit_events").toString()
-    listOf(otp, code, newCode, finalCode).forEach { assertFalse(durable.contains(it)) }
+    listOf(otp, code, newCode, finalCode, "Laptop").forEach { assertFalse(durable.contains(it)) }
   }
 
   @Test fun `outbox insertion failure rolls back OTP and command reservation then same key retries`() {
@@ -189,10 +232,17 @@ class AuthenticationVerticalSliceTest : OtpHttpSupport() {
     postJson("/login/webauthn", body, browser).andExpect(status().isOk)
     assertNotEquals(oldId, browser.id)
     mvc.perform(get("/auth/session").secure(true).session(browser)).andExpect(status().isOk)
-    val query = mvc.perform(post("/graphql").secure(true).session(browser).contentType("application/json")
-      .content("""{"query":"{ jobPostings { totalCount } }"}""")).andExpect(request().asyncStarted()).andReturn()
-    mvc.perform(asyncDispatch(query)).andExpect(status().isOk)
+    assertGraphqlAllowed(browser)
     return browser
+  }
+  private fun assertGraphqlAllowed(session: MockHttpSession) {
+    val query = mvc.perform(post("/graphql").secure(true).session(session).contentType("application/json")
+      .content("""{"query":"{ jobPostings { totalCount } }"}""")).andExpect(status().isOk).andExpect(request().asyncStarted()).andReturn()
+    mvc.perform(asyncDispatch(query)).andExpect(status().isOk)
+  }
+  private fun assertGraphqlDenied(session: MockHttpSession) {
+    mvc.perform(post("/graphql").secure(true).session(session).contentType("application/json")
+      .content("""{"query":"{ jobPostings { totalCount } }"}""")).andExpect(status().isForbidden)
   }
   private fun registration(session: MockHttpSession, key: Fixture): Map<String, Any> {
     val options = json.readTree(postJson("/webauthn/register/options", "{}", session).andExpect(status().isOk).andReturn().response.contentAsString)

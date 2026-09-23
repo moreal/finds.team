@@ -83,12 +83,36 @@ try {
   const saved = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials;
   assert.equal(saved.length, 1); assert.equal(saved[0].isResidentCredential, true); assert.equal(saved[0].rpId, "localhost");
   const oldContext = await browser.newContext({ ignoreHTTPSErrors: true });
-  await oldContext.addCookies(await context.cookies());
+  const oldPage = await oldContext.newPage();
+  await oldPage.goto(`${config.origin}/auth/csrf`);
+  const oldCdp = await oldContext.newCDPSession(oldPage);
+  await oldCdp.send("WebAuthn.enable");
+  const { authenticatorId: oldAuthenticatorId } = await oldCdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+    protocol: "ctap2", transport: "internal", hasResidentKey: true,
+    hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
+  } });
+  await oldCdp.send("WebAuthn.addCredential", { authenticatorId: oldAuthenticatorId, credential: saved[0] });
+  const oldCsrf = await (await oldContext.request.get(`${config.origin}/auth/csrf`)).json();
+  const oldOptions = await oldContext.request.post(`${config.origin}/webauthn/authenticate/options`, {
+    headers: { "X-CSRF-TOKEN": oldCsrf.token }, data: {},
+  });
+  assert.equal(oldOptions.status(), 200);
+  const oldAssertion = await oldPage.evaluate(async options => {
+    const credential = await navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options) });
+    return credential.toJSON();
+  }, await oldOptions.json());
+  assert.equal((await oldContext.request.post(`${config.origin}/login/webauthn`, {
+    headers: { "X-CSRF-TOKEN": oldCsrf.token }, data: oldAssertion,
+  })).status(), 200);
+  assert.notEqual((await oldContext.cookies()).find(c => c.name === "JSESSIONID").value, await cookie());
+  assert.equal((await oldContext.request.get(`${config.origin}/auth/session`)).status(), 200);
   const recoveryOtp = await delivered("recovery");
   assert.equal((await call("/auth/recovery/otp/verify", { email: config.email, otp: recoveryOtp })).status, 401);
   assert.equal((await call("/auth/session")).status, 200);
   assert.equal((await call("/auth/recovery/otp/verify", { email: config.email, otp: recoveryOtp, recoveryCode: first.recoveryCode })).status, 200);
   await refresh(); assert.equal((await call("/auth/session")).status, 401);
+  assert.equal((await oldContext.request.get(`${config.origin}/auth/session`)).status(), 200,
+    "independent Passkey session stays live after recovery proof verification");
   await cdp.send("WebAuthn.clearCredentials", { authenticatorId });
   const replacement = await register(); assert.ok(replacement.recoveryCode !== first.recoveryCode, "recovery rotates the saved code");
   const fresh = (await cdp.send("WebAuthn.getCredentials", { authenticatorId })).credentials[0];

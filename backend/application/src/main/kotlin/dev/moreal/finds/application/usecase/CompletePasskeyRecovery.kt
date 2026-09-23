@@ -10,8 +10,9 @@ import dev.moreal.finds.domain.identity.*
 import java.util.Base64
 
 data class CompletePasskeyRecoveryCommand(val sessionId: RestrictedSessionId,
-  val registration: VerifiedPasskeyRegistration, val metadata: CommandMetadata) {
+  val registration: VerifiedPasskeyRegistration, val metadata: CommandMetadata, val label: String = "Passkey") {
   init { require(metadata.idempotencyKey != null) { "Recovery completion requires an idempotency key" } }
+  override fun toString(): String = "CompletePasskeyRecoveryCommand(<redacted>)"
 }
 sealed interface CompletePasskeyRecoveryResult {
   data class Completed(val userId: UserId, val recoveryCode: RecoveryCode) : CompletePasskeyRecoveryResult
@@ -22,6 +23,7 @@ sealed interface CompletePasskeyRecoveryResult {
 class CompletePasskeyRecovery(private val transactions: TransactionPort, private val clock: ClockPort,
   private val random: SecureRandomPort, private val hashes: KeyedIdentityHashPort) {
   fun execute(command: CompletePasskeyRecoveryCommand): CompletePasskeyRecoveryResult = transactions.execute { tx ->
+    val label = validPasskeyLabel(command.label) ?: return@execute CompletePasskeyRecoveryResult.Rejected
     val proof = command.registration
     if (proof.sessionId != command.sessionId) return@execute CompletePasskeyRecoveryResult.Rejected
     val initial = tx.restrictedSessions.findById(command.sessionId) ?: return@execute CompletePasskeyRecoveryResult.Rejected
@@ -36,7 +38,7 @@ class CompletePasskeyRecovery(private val transactions: TransactionPort, private
     val operation = "recovery.complete"
     val key = CommandRequestKey(user.id.value.toString(), operation, checkNotNull(command.metadata.idempotencyKey))
     // Only the fingerprint retains the original session binding, never a raw bearer/session value.
-    val semantics = mapOf("user" to user.id.value.toString(), "session" to session.id.value.toString(), "credential" to mapOf(
+    val semantics = mapOf("user" to user.id.value.toString(), "session" to session.id.value.toString(), "label" to label, "credential" to mapOf(
       "id" to material.id.value, "publicKeyCose" to Base64.getEncoder().encodeToString(material.publicKeyCose),
       "signatureCount" to material.signatureCount, "transports" to material.transports.sorted(),
       "backupEligible" to material.backupEligible, "backedUp" to material.backedUp))
@@ -62,7 +64,7 @@ class CompletePasskeyRecovery(private val transactions: TransactionPort, private
     val updated = (user.completeRecovery(material.id) as? UserChange.Updated)?.user
       ?: return@execute reject()
     // Insert first to enforce global uniqueness without removing anything on a collision.
-    if (!tx.credentials.insert(PasskeyCredential(user.id, material, now))) return@execute reject()
+    if (!tx.credentials.insert(PasskeyCredential(user.id, material, now, label))) return@execute reject()
     user.credentials.forEach(tx.credentials::remove)
     tx.users.save(updated)
     tx.userSessions.revokeForUser(user.id, now)
