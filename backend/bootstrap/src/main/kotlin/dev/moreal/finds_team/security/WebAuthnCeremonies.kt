@@ -21,6 +21,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication
 import org.springframework.security.web.webauthn.api.*
 import org.springframework.security.web.webauthn.management.*
+import org.springframework.web.util.WebUtils
 import java.security.MessageDigest
 import java.time.Duration
 import java.util.UUID
@@ -86,7 +87,8 @@ class WebAuthnCeremonies(
     return PasskeyAuthentication(PasskeyPrincipal(user.id, normal.id))
   }
 
-  fun registrationOptions(request: HttpServletRequest, authentication: Authentication?): PublicKeyCredentialCreationOptions {
+  fun registrationOptions(request: HttpServletRequest,
+    authentication: Authentication?): PublicKeyCredentialCreationOptions = synchronized(WebUtils.getSessionMutex(request.session)) {
     val scope = restricted(request)
     if (scope.scope == RestrictedSessionScope.ADDITIONAL_PASSKEY && actors.resolve(authentication)?.hasRecentPasskeyAuthentication(clock.now()) != true)
       throw CeremonyRejected()
@@ -99,11 +101,11 @@ class WebAuthnCeremonies(
     }
     request.session.setAttribute(REGISTRATION, Ceremony(issue(request, WebAuthnChallengePurpose.REGISTRATION, options.challenge, scope), options))
     request.session.removeAttribute(COMPLETION)
-    return options
+    options
   }
 
   fun register(request: HttpServletRequest, authentication: Authentication?, publicKey: RelyingPartyPublicKey,
-    metadata: CommandMetadata): Map<String, Any> {
+    metadata: CommandMetadata): Map<String, Any> = synchronized(WebUtils.getSessionMutex(request.session)) {
     val previous = request.getSession(false)?.getAttribute(COMPLETION) as? Completion
     if (previous != null && previous.key == metadata.idempotencyKey) {
       if (clock.now() >= previous.scope.replayExpiresAt || !hashes.matches(previous.challenge.sessionBinding,
@@ -111,7 +113,7 @@ class WebAuthnCeremonies(
       if (previous.fingerprint != registrationFingerprint(publicKey)) throw CeremonyConflict()
       // Only a server-retained verified proof may reach application same-command replay. It never
       // restores a usable restricted session and the application never returns recovery plaintext.
-      return complete(transactions, previous.scope, previous.proof, metadata, publicKey.label, authentication)
+      return@synchronized complete(transactions, previous.scope, previous.proof, metadata, publicKey.label, authentication)
     }
     val ceremony = request.getSession(false)?.getAttribute(REGISTRATION) as? Ceremony<*> ?: throw CeremonyRejected(replayed = previous != null)
     val options = ceremony.options as? PublicKeyCredentialCreationOptions ?: throw CeremonyRejected()
@@ -153,7 +155,7 @@ class WebAuthnCeremonies(
     // Additional registration extends a live Passkey session; it must not leave that
     // session restricted. Enrollment/recovery still require a separate Passkey login.
     if (scope.scope == RestrictedSessionScope.ADDITIONAL_PASSKEY) request.session.removeAttribute(RESTRICTED_SESSION)
-    return result
+    result
   }
 
   private fun complete(tx: TransactionPort, scope: RestrictedSession, proof: VerifiedPasskeyRegistration,

@@ -3,6 +3,10 @@ package dev.moreal.finds_team.security
 import dev.moreal.finds.application.port.*
 import dev.moreal.finds.domain.identity.*
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.*
 import org.jooq.DSLContext
 import org.junit.jupiter.api.Test
@@ -15,6 +19,106 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 
 class AdditionalPasskeyHttpTest : OtpHttpSupport() {
   private val sql get() = context.getBean(DSLContext::class.java)
+
+  @Test fun `real servlet sessions retain an explicit mutex across requests and facade wrappers`() {
+    val server = (context as org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext).webServer
+      as org.springframework.boot.tomcat.TomcatWebServer
+    val client = java.net.http.HttpClient.newHttpClient()
+    val uri = java.net.URI("http://localhost:${server.port}/auth/csrf")
+    val first = client.send(java.net.http.HttpRequest.newBuilder(uri).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString())
+    assertEquals(200, first.statusCode())
+    val cookie = first.headers().firstValue("set-cookie").orElseThrow().substringBefore(';')
+    val servlet = server.tomcat.host.findChildren().filterIsInstance<org.apache.catalina.Context>().single()
+    val session = servlet.manager.findSession(cookie.substringAfter('='))!!.session
+    val mutex = assertNotNull(session.getAttribute(org.springframework.web.util.WebUtils.SESSION_MUTEX_ATTRIBUTE))
+    val second = client.send(java.net.http.HttpRequest.newBuilder(uri).header("Cookie", cookie).GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString())
+    assertEquals(200, second.statusCode())
+    val wrapper = java.lang.reflect.Proxy.newProxyInstance(javaClass.classLoader, arrayOf(jakarta.servlet.http.HttpSession::class.java)) {
+      _, method, arguments -> method.invoke(session, *(arguments ?: emptyArray()))
+    } as jakarta.servlet.http.HttpSession
+    assertNotSame(session, wrapper)
+    assertSame(mutex, org.springframework.web.util.WebUtils.getSessionMutex(wrapper))
+    assertSame(mutex, org.springframework.web.util.WebUtils.getSessionMutex(session))
+  }
+
+  @Test fun `new begin and options survive an older completion paused after its database commit`() {
+    val (user, original) = enroll()
+    val session = gated(original)
+    begin(session).andExpect(status().isOk)
+    val oldBody = registration(session, Fixture())
+    val audit = audits(user)
+    val oldKey = UUID.randomUUID()
+    session.pauseOn = "finds.webauthn.completion"
+    val old = concurrently { postJson("/webauthn/register", oldBody, session, oldKey).andExpect(status().isOk) }
+    try {
+      assertTrue(session.entered.await(10, TimeUnit.SECONDS), "completion must reach post-commit publication")
+      assertEquals(2, tx.execute { it.credentials.findByUserId(user).size })
+      val newKey = UUID.randomUUID()
+      val fresh = concurrently {
+        begin(session, newKey).andExpect(status().isOk)
+        scope(session) to registration(session, Fixture())
+      }
+      awaitFinishedOrSessionLock(fresh, session)
+      session.release.countDown()
+      old.result.get(10, TimeUnit.SECONDS)
+      val (newScope, newBody) = fresh.result.get(10, TimeUnit.SECONDS)
+      assertEquals(newScope, session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+      begin(session, newKey).andExpect(status().isOk)
+      val completionKey = UUID.randomUUID()
+      repeat(2) { postJson("/webauthn/register", newBody, session, completionKey).andExpect(status().isOk) }
+      assertEquals(3, tx.execute { it.credentials.findByUserId(user).size })
+      assertEquals(audit + 2, audits(user))
+    } finally { session.release.countDown(); old.thread.join(10000) }
+  }
+
+  @Test fun `replacement options published before old completion preserve the new challenge`() {
+    val (user, original) = enroll()
+    val session = gated(original)
+    begin(session).andExpect(status().isOk)
+    val oldBody = registration(session, Fixture())
+    val audit = audits(user)
+    session.pauseOn = "finds.webauthn.registration"
+    val fresh = concurrently { registration(session, Fixture()) }
+    try {
+      assertTrue(session.entered.await(10, TimeUnit.SECONDS), "options must pause before publishing their challenge")
+      val old = concurrently { postJson("/webauthn/register", oldBody, session).andExpect(status().isUnauthorized) }
+      awaitFinishedOrSessionLock(old, session)
+      session.release.countDown()
+      val body = fresh.result.get(10, TimeUnit.SECONDS)
+      old.result.get(10, TimeUnit.SECONDS)
+      val completionKey = UUID.randomUUID()
+      repeat(2) { postJson("/webauthn/register", body, session, completionKey).andExpect(status().isOk) }
+      assertEquals(2, tx.execute { it.credentials.findByUserId(user).size })
+      assertEquals(audit + 1, audits(user))
+    } finally { session.release.countDown(); fresh.thread.join(10000) }
+  }
+
+  @Test fun `begin winning before old completion preserves the replacement scope and its ceremony`() {
+    val (user, original) = enroll()
+    val session = gated(original)
+    begin(session).andExpect(status().isOk)
+    val oldBody = registration(session, Fixture())
+    val audit = audits(user)
+    val key = UUID.randomUUID()
+    session.pauseOn = WebAuthnCeremonies.RESTRICTED_SESSION
+    val fresh = concurrently { begin(session, key).andExpect(status().isOk) }
+    try {
+      assertTrue(session.entered.await(10, TimeUnit.SECONDS), "begin must commit before publishing its new scope")
+      val old = concurrently { postJson("/webauthn/register", oldBody, session).andExpect(status().isUnauthorized) }
+      awaitFinishedOrSessionLock(old, session)
+      session.release.countDown()
+      fresh.result.get(10, TimeUnit.SECONDS)
+      old.result.get(10, TimeUnit.SECONDS)
+      val newScope = scope(session)
+      begin(session, key).andExpect(status().isOk)
+      assertEquals(newScope, scope(session))
+      val body = registration(session, Fixture())
+      val completionKey = UUID.randomUUID()
+      repeat(2) { postJson("/webauthn/register", body, session, completionKey).andExpect(status().isOk) }
+      assertEquals(2, tx.execute { it.credentials.findByUserId(user).size })
+      assertEquals(audit + 1, audits(user))
+    } finally { session.release.countDown(); fresh.thread.join(10000) }
+  }
 
   @Test fun `begin retries preserve usable scope while a new command replaces it without account mutation`() {
     val (user, session) = enroll()
@@ -200,5 +304,43 @@ class AdditionalPasskeyHttpTest : OtpHttpSupport() {
     postJson("/login/webauthn", json.writeValueAsString(fixture.assertion(options["challenge"].asText(),
       tx.execute { it.users.findUserHandle(user)!! }, count = count)), session).andExpect(status().isOk)
     return session
+  }
+
+  private fun gated(original: MockHttpSession) = GatedSession().apply {
+    original.attributeNames.toList().forEach { setAttribute(it, original.getAttribute(it)) }
+    org.springframework.web.util.HttpSessionMutexListener().sessionCreated(jakarta.servlet.http.HttpSessionEvent(this))
+  }
+  private class GatedSession : MockHttpSession() {
+    @Volatile var pauseOn: String? = null
+    val entered = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    private val paused = AtomicBoolean()
+    override fun setAttribute(name: String, value: Any?) {
+      if (name == pauseOn && paused.compareAndSet(false, true)) {
+        entered.countDown()
+        check(release.await(10, TimeUnit.SECONDS)) { "Test publication barrier timed out" }
+      }
+      super.setAttribute(name, value)
+    }
+  }
+  private class Pending<T>(val result: CompletableFuture<T>, val thread: Thread)
+  private fun <T> concurrently(block: () -> T): Pending<T> {
+    val result = CompletableFuture<T>()
+    val thread = Thread.ofPlatform().start {
+      try { result.complete(block()) } catch (failure: Throwable) { result.completeExceptionally(failure) }
+    }
+    return Pending(result, thread)
+  }
+  /** Reach either the unprotected interleaving or the shared mutex, never rely on a sleep. */
+  private fun awaitFinishedOrSessionLock(pending: Pending<*>, session: MockHttpSession) {
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    val locks = setOf(System.identityHashCode(session), System.identityHashCode(org.springframework.web.util.WebUtils.getSessionMutex(session)))
+    val threads = java.lang.management.ManagementFactory.getThreadMXBean()
+    while (!pending.result.isDone) {
+      val info = threads.getThreadInfo(pending.thread.threadId())
+      if (info?.threadState == Thread.State.BLOCKED && info.lockInfo?.identityHashCode in locks) return
+      check(System.nanoTime() < deadline) { "Concurrent request did not reach the session transition" }
+      Thread.yield()
+    }
   }
 }

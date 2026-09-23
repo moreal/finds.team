@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.util.WebUtils
 import java.util.UUID
 
 /** HTTP retries retain one usable scope in the same authenticated browser session. */
@@ -26,8 +27,8 @@ class AdditionalPasskeyController(
   @PostMapping("/webauthn/register/begin", produces = ["application/json"])
   fun begin(request: HttpServletRequest, authentication: Authentication?): ResponseEntity<*> {
     val session = request.getSession(false) ?: return denied(request, HttpStatus.UNAUTHORIZED)
-    // Serialize simultaneous retries so they cannot each replace the other's scope.
-    return synchronized(session) {
+    // Share the registration mutex with options/completion, including their post-commit cleanup.
+    return synchronized(WebUtils.getSessionMutex(session)) {
       val principal = actors.sessionPrincipal(authentication) ?: return@synchronized denied(request, HttpStatus.UNAUTHORIZED)
       if (!principal.actor.hasRecentPasskeyAuthentication(clock.now())) return@synchronized denied(request, HttpStatus.FORBIDDEN)
       val header = request.getHeader("Idempotency-Key")

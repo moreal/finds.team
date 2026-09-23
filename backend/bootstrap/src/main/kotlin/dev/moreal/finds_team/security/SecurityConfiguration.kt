@@ -22,6 +22,8 @@ import java.util.UUID
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(SecurityProperties::class)
 class SecurityConfiguration {
+  // An attribute-backed mutex remains identical even when requests expose different session facades.
+  @Bean fun webAuthnSessionMutexListener() = org.springframework.web.util.HttpSessionMutexListener()
   @Bean fun httpSecurityEvents(events: SecurityEventPort, clock: ClockPort, metrics: io.micrometer.core.instrument.MeterRegistry) =
     HttpSecurityEvents(events, clock, metrics)
   // Suppress Boot's generated password/user fallback; normal authentication is ceremony-only.
