@@ -61,7 +61,7 @@ class SecurityConfiguration {
             AuthorizationDecision(context.request.getSession(false)?.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) == null)
           }
           .requestMatchers(HttpMethod.POST, "/webauthn/authenticate/options", "/login/webauthn",
-            "/webauthn/register/begin", "/webauthn/register/options", "/webauthn/register", "/auth/enrollment/otp/request", "/auth/enrollment/otp/verify",
+            "/webauthn/register/begin", "/webauthn/register/cancel", "/webauthn/register/options", "/webauthn/register", "/auth/enrollment/otp/request", "/auth/enrollment/otp/verify",
             "/auth/recovery/otp/request", "/auth/recovery/otp/verify").permitAll()
           .anyRequest().denyAll()
       }

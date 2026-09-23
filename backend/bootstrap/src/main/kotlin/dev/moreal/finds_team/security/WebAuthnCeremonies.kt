@@ -87,6 +87,16 @@ class WebAuthnCeremonies(
     return PasskeyAuthentication(PasskeyPrincipal(user.id, normal.id))
   }
 
+  /** Caller has invalidated this scope while holding the same ceremony mutex. */
+  internal fun clearPendingRegistration(request: HttpServletRequest, scopeId: RestrictedSessionId) {
+    val session = request.getSession(false) ?: return
+    synchronized(WebUtils.getSessionMutex(session)) {
+      check(session.getAttribute(RESTRICTED_SESSION) == scopeId)
+      session.removeAttribute(REGISTRATION)
+      session.removeAttribute(RESTRICTED_SESSION)
+    }
+  }
+
   fun registrationOptions(request: HttpServletRequest,
     authentication: Authentication?): PublicKeyCredentialCreationOptions = synchronized(WebUtils.getSessionMutex(request.session)) {
     val scope = restricted(request)

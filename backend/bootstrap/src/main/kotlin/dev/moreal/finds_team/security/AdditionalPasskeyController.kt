@@ -3,6 +3,8 @@ package dev.moreal.finds_team.security
 import dev.moreal.finds.application.port.*
 import dev.moreal.finds.application.usecase.AdditionalPasskeySessionResult
 import dev.moreal.finds.application.usecase.BeginAdditionalPasskeyRegistration
+import dev.moreal.finds.domain.identity.UserId
+import dev.moreal.finds.domain.identity.UserStatus
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
@@ -21,6 +23,7 @@ class AdditionalPasskeyController(
   private val clock: ClockPort,
   random: SecureRandomPort,
   private val securityEvents: HttpSecurityEvents,
+  private val ceremonies: WebAuthnCeremonies,
 ) {
   private val begin = BeginAdditionalPasskeyRegistration(transactions, clock, random)
 
@@ -35,6 +38,7 @@ class AdditionalPasskeyController(
       if (header == null || !UUID_PATTERN.matches(header)) return@synchronized ResponseEntity.badRequest()
         .header("Cache-Control", "no-store").body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed Passkey request"))
       val key = UUID.fromString(header)
+      if ((session.getAttribute(CANCELED) as? Canceled)?.key == key) return@synchronized denied(request, HttpStatus.FORBIDDEN)
       val previous = session.getAttribute(BEGIN) as? Begin
       if (previous?.key == key) {
         val usable = previous.scopeId == session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) && transactions.execute { tx ->
@@ -49,10 +53,52 @@ class AdditionalPasskeyController(
           is AdditionalPasskeySessionResult.Ready -> {
             session.setAttribute(WebAuthnCeremonies.RESTRICTED_SESSION, result.session.id)
             session.setAttribute(BEGIN, Begin(key, result.session.id))
+            session.removeAttribute(CANCELED)
           }
         }
       }
       ResponseEntity.ok().header("Cache-Control", "no-store").body(mapOf("ready" to true))
+    }
+  }
+
+  @PostMapping("/webauthn/register/cancel", produces = ["application/json"])
+  fun cancel(request: HttpServletRequest, authentication: Authentication?): ResponseEntity<*> {
+    val session = request.getSession(false) ?: return denied(request, HttpStatus.UNAUTHORIZED)
+    return synchronized(WebUtils.getSessionMutex(session)) {
+      val principal = actors.sessionPrincipal(authentication) ?: return@synchronized denied(request, HttpStatus.UNAUTHORIZED)
+      if (!principal.actor.hasRecentPasskeyAuthentication(clock.now())) return@synchronized denied(request, HttpStatus.FORBIDDEN)
+      val header = request.getHeader("Idempotency-Key")
+      if (header == null || !UUID_PATTERN.matches(header)) return@synchronized ResponseEntity.badRequest()
+        .header("Cache-Control", "no-store").body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed Passkey request"))
+      val key = UUID.fromString(header)
+      val pending = session.getAttribute(BEGIN) as? Begin
+      val canceled = session.getAttribute(CANCELED) as? Canceled
+      val replay = pending == null && session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) == null &&
+        canceled?.key == key && canceled.sessionId == principal.sessionId
+      if (!replay && (pending?.key != key || pending.scopeId != session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION)))
+        return@synchronized denied(request, HttpStatus.FORBIDDEN)
+      val allowed = transactions.execute { tx ->
+        val id = UserId(principal.actor.userId)
+        val snapshot = tx.users.findById(id) ?: return@execute false
+        val user = tx.users.lockByEmail(snapshot.email) ?: return@execute false
+        val now = clock.now()
+        val live = tx.userSessions.findById(principal.sessionId) ?: return@execute false
+        if (user.status != UserStatus.ACTIVE || live.userId != id || !live.isUsable(now) ||
+          live.authenticatedAt != principal.actor.authenticatedAt || !principal.actor.hasRecentPasskeyAuthentication(now)) return@execute false
+        if (replay) return@execute true
+        val scope = tx.restrictedSessions.findById(checkNotNull(pending).scopeId) ?: return@execute false
+        if (scope.userId != id || scope.scope != RestrictedSessionScope.ADDITIONAL_PASSKEY || !scope.isUsable(now)) return@execute false
+        // Begin maintains at most one usable additional scope under this same account lock.
+        tx.restrictedSessions.invalidateForUser(id, RestrictedSessionScope.ADDITIONAL_PASSKEY, now)
+        true
+      }
+      if (!allowed) return@synchronized denied(request, HttpStatus.FORBIDDEN)
+      if (!replay) {
+        ceremonies.clearPendingRegistration(request, checkNotNull(pending).scopeId)
+        session.removeAttribute(BEGIN)
+        session.setAttribute(CANCELED, Canceled(key, principal.sessionId))
+      }
+      ResponseEntity.ok().header("Cache-Control", "no-store").body(mapOf("success" to true))
     }
   }
 
@@ -63,8 +109,10 @@ class AdditionalPasskeyController(
   }
 
   private class Begin(val key: UUID, val scopeId: RestrictedSessionId)
+  private class Canceled(val key: UUID, val sessionId: UserSessionId)
   private companion object {
     const val BEGIN = "finds.webauthn.additional-begin"
+    const val CANCELED = "finds.webauthn.additional-canceled"
     val UUID_PATTERN = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
   }
 }

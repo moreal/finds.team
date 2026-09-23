@@ -20,6 +20,127 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 class AdditionalPasskeyHttpTest : OtpHttpSupport() {
   private val sql get() = context.getBean(DSLContext::class.java)
 
+  @Test fun `cancel releases registration without changing credentials principal or CSRF and retries are harmless`() {
+    val (user, session) = enroll()
+    val auth = authentication(session)
+    val browser = session.id
+    val audit = audits(user)
+    val key = UUID.randomUUID()
+    begin(session, key).andExpect(status().isOk)
+    val restricted = scope(session)
+    val body = registration(session, Fixture())
+    val token = json.readTree(mvc.perform(get("/auth/csrf").secure(true).session(session)).andReturn().response.contentAsString)["token"].asText()
+    postJson("/graphql", """{"query":"{ __typename }"}""", session).andExpect(status().isForbidden)
+    repeat(2) {
+      mvc.perform(post("/webauthn/register/cancel").secure(true).session(session).header("Idempotency-Key", key).header("X-CSRF-TOKEN", token))
+        .andExpect(status().isOk).andExpect(content().string("""{"success":true}"""))
+        .andExpect(header().string("Cache-Control", "no-store"))
+    }
+    assertFalse(tx.execute { it.restrictedSessions.findById(restricted)!!.isUsable(now) })
+    assertNull(session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    assertNull(session.getAttribute("finds.webauthn.registration"))
+    assertNull(session.getAttribute("finds.webauthn.additional-begin"))
+    assertSame(auth, authentication(session))
+    assertEquals(browser, session.id)
+    mvc.perform(get("/auth/session").secure(true).session(session)).andExpect(status().isOk)
+    val query = mvc.perform(post("/graphql").secure(true).session(session).header("X-CSRF-TOKEN", token)
+      .contentType("application/json").content("""{"query":"{ __typename }"}"""))
+      .andExpect(request().asyncStarted()).andReturn()
+    mvc.perform(asyncDispatch(query)).andExpect(status().isOk).andExpect(jsonPath("$.data.__typename").value("Query"))
+    postJson("/webauthn/register", body, session).andExpect(status().isUnauthorized)
+    assertEquals(1, tx.execute { it.credentials.findByUserId(user).size })
+    assertEquals(audit, audits(user))
+    begin(session, key).andExpect(status().isForbidden)
+    assertNull(session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    begin(session).andExpect(status().isOk)
+    val fresh = scope(session)
+    postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isForbidden)
+    assertEquals(fresh, scope(session))
+  }
+
+  @Test fun `cancel rejects wrong browser key owner stale principal and absent CSRF without clearing ceremony`() {
+    val fixture = Fixture()
+    val (user, session) = enroll(fixture)
+    val other = login(user, fixture, MockHttpSession(), 2)
+    val key = UUID.randomUUID()
+    begin(session, key).andExpect(status().isOk)
+    val restricted = scope(session)
+    registration(session, Fixture())
+    val ceremony = session.getAttribute("finds.webauthn.registration")
+    val requestId = UUID.randomUUID()
+    postJson("/webauthn/register/cancel", "{}", session, requestId = requestId).andExpect(status().isForbidden)
+      .andExpect(header().string("Cache-Control", "no-store"))
+    assertEquals(1, sql.fetchCount(sql.selectFrom("security_events").where("request_id = ? and action = 'identity.authorization_denied'", requestId)))
+    postJson("/webauthn/register/cancel", "{}", other, key).andExpect(status().isForbidden)
+    postJson("/webauthn/register/cancel", "{}", MockHttpSession(), key).andExpect(status().isUnauthorized)
+    mvc.perform(post("/webauthn/register/cancel").secure(true).session(session).header("Idempotency-Key", key)).andExpect(status().isForbidden)
+    for (invalid in listOf(null, "invalid", "1-1-1-1-1")) {
+      val request = post("/webauthn/register/cancel").secure(true).session(session).with(csrf())
+      if (invalid != null) request.header("Idempotency-Key", invalid)
+      mvc.perform(request).andExpect(status().isBadRequest)
+    }
+    val (_, foreign) = enroll()
+    session.attributeNames.toList().filter { it.startsWith("finds.") }.forEach { foreign.setAttribute(it, session.getAttribute(it)) }
+    postJson("/webauthn/register/cancel", "{}", foreign, key).andExpect(status().isForbidden)
+    now = now.plusSeconds(301)
+    postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isForbidden)
+    assertEquals(restricted, scope(session))
+    assertSame(ceremony, session.getAttribute("finds.webauthn.registration"))
+    assertNull(tx.execute { it.restrictedSessions.findById(restricted)!!.invalidatedAt })
+    val principal = principal(session)
+    tx.execute { it.users.lockByEmail(it.users.findById(user)!!.email); it.userSessions.revoke(principal.sessionId, now) }
+    postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isUnauthorized)
+    assertSame(ceremony, session.getAttribute("finds.webauthn.registration"))
+  }
+
+  @Test fun `cancel waits for options publication then removes the whole pending ceremony`() {
+    val (user, original) = enroll()
+    val session = gated(original)
+    val key = UUID.randomUUID()
+    begin(session, key).andExpect(status().isOk)
+    val audit = audits(user)
+    session.pauseOn = "finds.webauthn.registration"
+    val options = concurrently { registration(session, Fixture()) }
+    try {
+      assertTrue(session.entered.await(10, TimeUnit.SECONDS))
+      val cancel = concurrently { postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isOk) }
+      awaitFinishedOrSessionLock(cancel, session)
+      session.release.countDown()
+      val body = options.result.get(10, TimeUnit.SECONDS)
+      cancel.result.get(10, TimeUnit.SECONDS)
+      assertNull(session.getAttribute("finds.webauthn.registration"))
+      assertNull(session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+      postJson("/webauthn/register", body, session).andExpect(status().isUnauthorized)
+      assertEquals(1, tx.execute { it.credentials.findByUserId(user).size })
+      assertEquals(audit, audits(user))
+    } finally { session.release.countDown(); options.thread.join(10000) }
+  }
+
+  @Test fun `completion winning cancellation preserves its committed credential and replay`() {
+    val (user, original) = enroll()
+    val session = gated(original)
+    val key = UUID.randomUUID()
+    begin(session, key).andExpect(status().isOk)
+    val body = registration(session, Fixture())
+    val command = UUID.randomUUID()
+    val audit = audits(user)
+    session.pauseOn = "finds.webauthn.completion"
+    val completion = concurrently { postJson("/webauthn/register", body, session, command).andExpect(status().isOk) }
+    try {
+      assertTrue(session.entered.await(10, TimeUnit.SECONDS))
+      val cancel = concurrently { postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isForbidden) }
+      awaitFinishedOrSessionLock(cancel, session)
+      session.release.countDown()
+      completion.result.get(10, TimeUnit.SECONDS)
+      cancel.result.get(10, TimeUnit.SECONDS)
+      postJson("/webauthn/register", body, session, command).andExpect(status().isOk)
+      assertEquals(2, tx.execute { it.credentials.findByUserId(user).size })
+      assertEquals(audit + 1, audits(user))
+      assertNull(session.getAttribute("finds.webauthn.registration"))
+      assertNull(session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    } finally { session.release.countDown(); completion.thread.join(10000) }
+  }
+
   @Test fun `real servlet sessions retain an explicit mutex across requests and facade wrappers`() {
     val server = (context as org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext).webServer
       as org.springframework.boot.tomcat.TomcatWebServer
