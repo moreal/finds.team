@@ -30,23 +30,29 @@ abstract class OtpHttpSupport {
   private lateinit var db: PostgreSQLContainer
   protected val json = JsonMapper.builder().build()
   protected val hashes get() = context.getBean(KeyedIdentityHashPort::class.java)
+  protected open fun extraArguments(): List<String> = emptyList()
   protected var now: Instant
     get() = TestTime.now
     set(value) { TestTime.now = value }
   @BeforeAll fun startOtpServer() {
     db = PostgreSQLContainer("postgres:17-alpine").apply { start() }
-    context = SpringApplicationBuilder(Application::class.java, TestTime::class.java).run(
-      "--spring.profiles.active=test", "--server.port=0", "--finds.mail.recording=true",
+    context = SpringApplicationBuilder(Application::class.java, TestTime::class.java).properties(mapOf("server.port" to "0")).run(
+      "--spring.profiles.active=test", "--finds.mail.recording=true",
       "--spring.datasource.url=${db.jdbcUrl}", "--spring.datasource.username=${db.username}",
       "--spring.datasource.password=${db.password}", "--spring.flyway.user=${db.username}",
       "--spring.flyway.password=${db.password}", "--finds.crawl.scan-interval=1h", "--finds.mail.scan-interval=1h",
       "--finds.security.cleanup-interval=1h",
+      "--finds.security.admin-emails=admin@example.test",
+      *extraArguments().toTypedArray(),
     )
     tx = context.getBean(TransactionPort::class.java)
     mvc = MockMvcBuilders.webAppContextSetup(context as WebApplicationContext)
       .apply<org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder>(springSecurity()).build()
   }
-  @AfterAll fun stopOtpServer() { context.close(); db.close() }
+  @AfterAll fun stopOtpServer() {
+    if (::context.isInitialized) context.close()
+    if (::db.isInitialized) db.close()
+  }
   @BeforeEach fun nextWindow() { now = now.plusSeconds(3600) }
   protected fun email() = EmailAddress("${UUID.randomUUID()}@example.test")
   protected fun postJson(path: String, body: String, session: MockHttpSession = MockHttpSession(), key: UUID = UUID.randomUUID(),
@@ -90,6 +96,8 @@ abstract class OtpHttpSupport {
   @TestConfiguration(proxyBeanMethods = false)
   class TestTime {
     @Bean @Primary fun otpTestClock() = ClockPort { now }
+    // Replace only the delivery edge; challenge, crypto, outbox, dispatcher and transactions are real.
+    @Bean @Primary fun recordedMail() = dev.moreal.mail.testing.RecordingMailTransport(dev.moreal.mail.MailProvider("recording"))
     companion object { var now: Instant = Instant.parse("2026-09-23T00:00:00Z") }
   }
 }

@@ -24,7 +24,9 @@ import java.util.concurrent.TimeUnit
 
 /** Transport parsing, privacy, and abuse policy only; account decisions remain application results. */
 class OtpHttpBoundary(private val rates: AuthRateLimitPort, private val hashes: KeyedIdentityHashPort,
-  private val random: SecureRandomPort, private val clock: ClockPort, properties: SecurityProperties) {
+  private val random: SecureRandomPort, private val clock: ClockPort, properties: SecurityProperties,
+  private val nanoTime: () -> Long = System::nanoTime,
+  private val sleepNanos: (Long) -> Unit = { TimeUnit.NANOSECONDS.sleep(it) }) {
   private val mapper = JsonMapper.builder().build()
   private val addresses = TrustedClientAddress(properties.trustedProxyCidrs)
 
@@ -32,12 +34,12 @@ class OtpHttpBoundary(private val rates: AuthRateLimitPort, private val hashes: 
   fun cleanup(): Int = rates.purgeExpired(clock.now(), 1000)
 
   fun <T> timed(block: () -> T): T {
-    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(200L + random.nextInt(21))
+    val deadline = nanoTime() + TimeUnit.MILLISECONDS.toNanos(200L + random.nextInt(21))
     try { return block() } finally {
       // The same response-time floor/jitter applies to both account states and every public outcome.
       // No network delivery occurs on this path. This is a timing class, not a constant-time DB claim.
-      val remaining = deadline - System.nanoTime()
-      if (remaining > 0) TimeUnit.NANOSECONDS.sleep(remaining)
+      val remaining = deadline - nanoTime()
+      if (remaining > 0) sleepNanos(remaining)
     }
   }
   fun body(request: HttpServletRequest): JsonNode = parse {

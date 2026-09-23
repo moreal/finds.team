@@ -188,6 +188,53 @@ proxied clients share the proxy's IP budget; arbitrary forwarding headers are
 ignored. Production replicas must share stable identity HMAC keys and PostgreSQL.
 Security-management HTTP routes are added separately.
 
+To bootstrap the first administrator, put the administrator's full email address
+in `FINDS_INITIAL_ADMIN_EMAILS` in the **backend deployment environment** before
+enrollment. A host shell variable is not automatically forwarded into a Compose
+container; include it in that service's environment or deployment override.
+Complete email verification and the first Passkey registration, save the recovery
+code, then sign in with that Passkey. Only completed enrollment assigns `ADMIN`;
+the allowlist does not promote existing users on restart. Administrators use the
+same Passkey login and two-proof recovery as everyone else. Role changes require
+a live administrator session authenticated with a Passkey within five minutes.
+
+Recording mode has no public inbox or OTP-reading HTTP endpoint and never logs
+codes. Automated lifecycle tests read the recording transport directly after
+the real encrypted outbox dispatcher runs. For manual enrollment, use a local
+SMTP capture server: disable `FINDS_MAIL_RECORDING`, enable SMTP, configure its
+host/port, and explicitly select `finds.mail.smtp.tls=NONE` only for that trusted
+local relay. Supply an external 32-byte AES key via `FINDS_MAIL_ENCRYPTION_KEY`
+even under `dev` when SMTP is enabled. Read the OTP in the capture server's inbox;
+no production mailbox, SMTP credentials, or production secrets are needed.
+Keep using `localhost` in the browser: `127.0.0.1` is a different WebAuthn RP/origin.
+
+The real-signature lifecycle gate runs PostgreSQL Testcontainers, encrypted mail
+delivery, Spring WebAuthn registration/login, session and credential invalidation,
+two-proof recovery, role authorization, and audit/outbox rollback tests:
+
+```sh
+cd backend
+./gradlew :domain:test :application:test :adapter-persistence:test :adapter-notification:test :bootstrap:test
+./gradlew check
+```
+
+After installing the locked frontend dependencies and Playwright Chromium above,
+run the browser gate from `backend/`:
+
+```sh
+./gradlew :bootstrap:test -PbrowserSmoke --tests '*AuthenticationBrowserSmokeTest'
+```
+
+This opt-in test starts a temporary loopback HTTPS server on a free port with RP
+`localhost`, an exact matching origin, and a one-day test certificate. Chromium
+uses a CDP virtual authenticator with resident credentials and user verification.
+The test alone accepts that temporary certificate; OS trust is unchanged. OTPs
+travel through the recording transport and a private test process pipe. The
+browser checks actual Secure/HttpOnly/SameSite cookies, session and CSRF rotation,
+registration, discoverable login, recovery, and rejection of the old key and
+session. The certificate, database, and browser are removed when the test ends.
+The ordinary backend gate does not require Node or a browser installation.
+
 Defaults live in `backend/bootstrap/src/main/resources/application.yml`. The
 most commonly deployed overrides are:
 

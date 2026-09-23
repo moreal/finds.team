@@ -43,3 +43,10 @@ dependencies {
   testImplementation(libs.testcontainers.junit)
   testRuntimeOnly(libs.junit.platform.launcher)
 }
+
+// The browser gate needs frontend pnpm dependencies and Playwright Chromium in addition to Java/Docker.
+tasks.test {
+  useJUnitPlatform {
+    if (!providers.gradleProperty("browserSmoke").isPresent) excludeTags("browser")
+  }
+}
