@@ -15,6 +15,8 @@ import org.jooq.DSLContext
 import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
 import org.jooq.impl.DSL
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 class JooqStableCursorTest : PostgresIntegrationTest() {
   @Test
@@ -232,6 +234,80 @@ class JooqStableCursorTest : PostgresIntegrationTest() {
     assertPage(empty, next = false, previous = false)
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = [
+    "+300000-01-01T00:00:00Z",
+    "+294277-01-01T00:00:00Z",
+    "-5000-01-01T00:00:00Z",
+    "-4713-11-23T23:59:59.999999Z",
+    "+294276-12-31T23:59:59.999999999Z",
+    "2026-09-22T00:00:00.123456001Z",
+  ])
+  fun `unsupported finite posting cursor timestamps fail before SQL`(timestamp: String) {
+    val (_, db) = migratedContext()
+    val statements = AtomicInteger()
+    val intercepted = DSL.using(db.configuration().derive(object : ExecuteListener {
+      override fun executeStart(ctx: ExecuteContext) { statements.incrementAndGet() }
+    }))
+    // This token has a valid version, scope and checksum. Integrity is not authorization.
+    val cursor = postingCursor(timestamp)
+    assertFailsWith<InvalidConnectionCursor>(timestamp) {
+      JooqDiscoveryQuery(intercepted).postings(Filter.HasStatus(PostingStatus.OPEN), ConnectionRequest(1, cursor))
+    }
+    assertEquals(0, statements.get(), "Unsupported positions must be rejected before any SQL")
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = [
+    "-4713-11-24T00:00:00Z",
+    "-4713-11-24T00:00:00.000001Z",
+    "+294276-12-31T23:59:59.999999Z",
+    "2026-09-22T00:00:00.123456Z",
+  ])
+  fun `finite PostgreSQL cursor boundary positions execute without rounding`(timestamp: String) {
+    val (_, db) = migratedContext()
+    val instant = Instant.parse(timestamp)
+    // The parameter is bound through the same OffsetDateTime/JDBC path as the keyset predicate.
+    val stored = db.select(DSL.`val`(instant.atOffset(UTC))).fetchSingle().value1()
+    assertEquals(instant, stored.toInstant(), "The accepted position must survive a real PostgreSQL round trip")
+    val page = JooqDiscoveryQuery(db).postings(Filter.HasStatus(PostingStatus.OPEN),
+      ConnectionRequest(1, postingCursor(timestamp)))
+    assertEquals(0, page.totalCount)
+    assertPage(page, next = false, previous = false)
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = [
+    "-4713-11-24T00:00:00Z",
+    "-4713-11-24T00:00:00.000001Z",
+    "+294276-12-31T23:59:59.999999Z",
+    "2026-09-22T00:00:00.123456Z",
+  ])
+  fun `cursors emitted at finite timestamp boundaries can fetch equal timestamp tail`(timestamp: String) {
+    val (_, db) = migratedContext()
+    val site = site(db)
+    val time = Instant.parse(timestamp)
+    val older = posting(db, site, "older", time = time)
+    val newest = posting(db, site, "newest", time = time)
+    val query = JooqDiscoveryQuery(db)
+    assertEquals(time, db.select(JOB_POSTINGS.UPDATED_AT).from(JOB_POSTINGS)
+      .where(JOB_POSTINGS.ID.eq(newest.value)).fetchSingle().value1()!!.toInstant())
+    assertEquals(time, query.findPosting(newest)!!.updatedAt)
+    val first = query.postings(Filter.HasStatus(PostingStatus.OPEN), ConnectionRequest(1))
+    assertEquals(listOf(newest), first.edges.map { it.node.id })
+    assertEquals(time, first.edges.single().node.updatedAt)
+    assertEquals(time, first.edges.single().node.lastSeenAt)
+    val second = query.postings(Filter.HasStatus(PostingStatus.OPEN), ConnectionRequest(1, first.pageInfo.endCursor))
+    assertEquals(listOf(older), second.edges.map { it.node.id })
+    assertEquals(time, second.edges.single().node.updatedAt)
+    assertPage(second, next = false, previous = true)
+  }
+
+  private fun postingCursor(timestamp: String): ApplicationCursor = ConnectionCursors.encode(
+    ConnectionCursors.scope("postings", "updated-desc", ConnectionCursors.scope("status", "OPEN")),
+    listOf(timestamp, "1"),
+  )
+
   private fun assertPage(page: ConnectionPage<*>, next: Boolean, previous: Boolean) {
     assertEquals(next, page.pageInfo.hasNextPage)
     assertEquals(previous, page.pageInfo.hasPreviousPage)
@@ -252,7 +328,7 @@ class JooqStableCursorTest : PostgresIntegrationTest() {
       .set(JOB_POSTINGS.TITLE, key).set(JOB_POSTINGS.DESCRIPTION_TEXT, "Kotlin required")
       .set(JOB_POSTINGS.CANONICAL_URL, "https://jobs.example/$key").set(JOB_POSTINGS.CONTENT_HASH, "a".repeat(64))
       .set(JOB_POSTINGS.STATUS, if (open) "OPEN" else "CLOSED")
-      .set(JOB_POSTINGS.FIRST_SEEN_AT, NOW.minusSeconds(100).atOffset(UTC))
+      .set(JOB_POSTINGS.FIRST_SEEN_AT, minOf(NOW.minusSeconds(100), time).atOffset(UTC))
       .set(JOB_POSTINGS.LAST_SEEN_AT, time.atOffset(UTC)).set(JOB_POSTINGS.UPDATED_AT, time.atOffset(UTC))
       .set(JOB_POSTINGS.CLOSED_AT, if (open) null else time.atOffset(UTC))
       .set(JOB_POSTINGS.TAXONOMY_VERSION, 1).set(JOB_POSTINGS.ROLE_CATEGORY, "BACKEND")

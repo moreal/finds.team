@@ -6,11 +6,18 @@ import dev.moreal.finds.domain.career.CareerSite
 import dev.moreal.finds.domain.posting.*
 import dev.moreal.finds.domain.search.Filter
 import dev.moreal.finds.domain.search.normalize
+import dev.moreal.finds.persistence.jooq.generated.tables.records.JobPostingsRecord
 import dev.moreal.finds.persistence.jooq.generated.tables.references.CAREER_SITES
 import dev.moreal.finds.persistence.jooq.generated.tables.references.JOB_POSTINGS
 import dev.moreal.finds.persistence.jooq.generated.tables.references.POSTING_SKILLS
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneOffset.UTC
+import java.time.format.DateTimeFormatterBuilder
+import java.time.format.ResolverStyle
+import java.time.format.SignStyle
+import java.time.temporal.ChronoField.YEAR_OF_ERA
 import java.util.Locale
 import org.jooq.Condition
 import org.jooq.DSLContext
@@ -19,7 +26,7 @@ import org.jooq.impl.DSL
 /** Each database page, its count, PageInfo and nested evidence use one statement snapshot. */
 class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
   override fun findPosting(id: JobPostingId): JobPosting? = context
-    .select(JOB_POSTINGS, POSTING_SKILL_MENTIONS).from(JOB_POSTINGS)
+    .select(DISCOVERY_POSTING, POSTING_SKILL_MENTIONS).from(JOB_POSTINGS)
     .where(JOB_POSTINGS.ID.eq(id.value)).fetchOne()?.toPosting()
 
   override fun findSiteBySlug(slug: String): CareerSite? = context.selectFrom(CAREER_SITES)
@@ -33,6 +40,9 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
       try {
         val time = Instant.parse(values[0])
         require(time.toString() == values[0])
+        // JDBC rounds fractional microseconds and accepts a wider year range than PostgreSQL.
+        // Reject both before executing SQL; never shift an untrusted keyset boundary.
+        require(time >= MIN_POSTGRES_TIMESTAMP && time < END_POSTGRES_TIMESTAMP && time.nano % 1_000 == 0)
         time.atOffset(UTC) to positiveId(values[1])
       } catch (_: java.time.DateTimeException) { throw InvalidConnectionCursor() }
       catch (_: IllegalArgumentException) { throw InvalidConnectionCursor() }
@@ -45,7 +55,7 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
     val result = context.select(
       DSL.field(DSL.select(DSL.count().cast(Long::class.java)).from(JOB_POSTINGS).where(condition)),
       DSL.field(DSL.exists(DSL.selectOne().from(JOB_POSTINGS).where(condition.and(previous)))),
-      DSL.multiset(DSL.select(JOB_POSTINGS, POSTING_SKILL_MENTIONS).from(JOB_POSTINGS)
+      DSL.multiset(DSL.select(DISCOVERY_POSTING, POSTING_SKILL_MENTIONS).from(JOB_POSTINGS)
         .where(condition.and(after)).orderBy(JOB_POSTINGS.UPDATED_AT.desc(), JOB_POSTINGS.ID.desc())
         .limit(page.first + 1)),
     ).fetchSingle()
@@ -148,6 +158,28 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
       edges.firstOrNull()?.cursor, edges.lastOrNull()?.cursor), total)
   }
 }
+
+// PostgreSQL's exact finite timestamp bounds (ISO/proleptic Gregorian), at microsecond resolution.
+// https://github.com/postgres/postgres/blob/REL_17_STABLE/src/include/datatype/timestamp.h
+private val MIN_POSTGRES_TIMESTAMP = Instant.parse("-4713-11-24T00:00:00Z")
+private val END_POSTGRES_TIMESTAMP = Instant.parse("+294277-01-01T00:00:00Z")
+
+private val POSTGRES_CALENDAR_FORMAT = DateTimeFormatterBuilder()
+  .appendValue(YEAR_OF_ERA, 4, 6, SignStyle.NOT_NEGATIVE)
+  .appendPattern("-MM-dd'T'HH:mm:ss.SSSSSS G")
+  .toFormatter(Locale.ENGLISH).withResolverStyle(ResolverStyle.STRICT)
+
+// MULTISET uses JSON. jOOQ's ISO parser can turn PostgreSQL's extended-year / BC text
+// into null. Format UTC calendar fields and era explicitly, retaining all six fractional
+// digits; epoch extraction can itself round at PostgreSQL's maximum timestamp.
+private val DISCOVERY_POSTING = DSL.row(*JOB_POSTINGS.fields().map { field ->
+  if (field.type == OffsetDateTime::class.java) {
+    DSL.field("to_char({0} at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US AD')", String::class.java, field)
+      .convertFrom(OffsetDateTime::class.java) { text ->
+        text?.let { LocalDateTime.parse(it, POSTGRES_CALENDAR_FORMAT).atOffset(UTC) }
+      }
+  } else field
+}.toTypedArray()).convertFrom { record -> JobPostingsRecord().apply { fromArray(*record.intoArray()) } }
 
 /** Length-prefixed structural hashing avoids ambiguous user text/delimiters in filter bindings. */
 private fun Filter.cursorKey(): String = when (this) {
