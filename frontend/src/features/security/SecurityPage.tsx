@@ -119,14 +119,19 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
       setRegistration(undefined); setCancelRecovery(false);
       if (result === 'added') {
         setNewLabel('');
-        await load();
-        setMessage('Passkey를 추가했어요. 현재 로그인은 유지돼요.');
+        // The ceremony is acknowledged. A viewer failure must never restore it
+        // as an uncertain registration or offer another credential submission.
+        try {
+          await load();
+          if (viewer()) setMessage('Passkey를 추가했어요. 현재 로그인은 유지돼요.');
+        } catch (error) { setError(failure(error)); }
       } else setMessage('Passkey 등록을 취소했어요. 계정 관리를 계속할 수 있어요.');
     } catch (error) {
       setRegistration({ ...command });
       setCancelRecovery(command.stage === 'cancel');
       if (error instanceof SecurityRequestError && error.status === 403) {
-        if (command.stage === 'begin') setRegistration(undefined);
+        // A rejected retry does not prove that an earlier lost response failed
+        // to enter restricted scope. Retain the key until cancel is acknowledged.
         setError('최근 Passkey 인증이 필요해요. Passkey로 다시 로그인해 주세요.');
       } else setError(securityError(error));
     } finally { setPending(false); }
