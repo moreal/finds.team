@@ -34,6 +34,29 @@ class AdditionalPasskeyHttpTest : OtpHttpSupport() {
     options(current, beginKey).andExpect(status().isOk)
   }
 
+  @Test fun `additional registration binding cannot be used in enrollment or recovery restricted scopes`() {
+    val (original, _) = enroll()
+    val (recovering, _) = enroll()
+    val email = email()
+    challenge(email, VerificationPurpose.ENROLLMENT)
+    val enrollment = verify("enrollment", email).andExpect(status().isOk).andReturn().request.session as MockHttpSession
+    val recoveryScope = RestrictedSession(RestrictedSessionId(UUID.randomUUID()), recovering,
+      RestrictedSessionScope.RECOVERY, now, now.plusSeconds(600))
+    tx.execute { transaction ->
+      val user = transaction.users.findById(recovering)!!
+      transaction.users.lockByEmail(user.email)
+      transaction.restrictedSessions.save(recoveryScope)
+    }
+    val recovery = MockHttpSession().apply { setAttribute(WebAuthnCeremonies.RESTRICTED_SESSION, recoveryScope.id) }
+    val body = json.writeValueAsString(mapOf("expectedUserId" to dev.moreal.finds.graphql.GlobalIdCodec.encode(
+      dev.moreal.finds.graphql.NodeType.User, original.value), "beginKey" to UUID.randomUUID().toString()))
+    for (restricted in listOf(enrollment, recovery)) {
+      postJson("/webauthn/register/options", body, restricted).andExpect(status().isUnauthorized)
+      assertNull(restricted.getAttribute("finds.webauthn.registration"))
+      postJson("/webauthn/register/options", "{}", restricted).andExpect(status().isOk)
+    }
+  }
+
   @Test fun `superseded and completed begin retries cannot replace a later ceremony`() {
     for (completeFirst in listOf(false, true)) {
       val (user, session) = enroll()

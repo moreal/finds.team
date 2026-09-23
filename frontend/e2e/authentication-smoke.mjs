@@ -90,7 +90,8 @@ try {
   assert.ok(!JSON.stringify(viewer).includes(first.credentialId));
   assert.equal((await call("/graphql", { query: "{ auditEvents { totalCount } }" })).data.errors[0].extensions.code, "FORBIDDEN");
   const rename = { query: "mutation Rename($input: RenamePasskeyInput!) { renamePasskey(input: $input) { outcome clientMutationId } }",
-    variables: { input: { passkeyId: viewer.data.viewer.passkeys.edges[0].node.id, label: "My browser",
+    variables: { input: { expectedUserId: viewer.data.viewer.user.id,
+      passkeyId: viewer.data.viewer.passkeys.edges[0].node.id, label: "My browser",
       idempotencyKey: randomUUID(), clientMutationId: "browser-rename" } } };
   assert.equal((await call("/graphql", rename, randomUUID(), "")).status, 403);
   for (let i = 0; i < 2; i++) assert.deepEqual((await call("/graphql", rename)).data.data.renamePasskey,

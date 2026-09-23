@@ -102,6 +102,8 @@ class WebAuthnCeremonies(
   fun registrationOptions(request: HttpServletRequest,
     authentication: Authentication?, expectedUserId: String?, beginKey: String?): PublicKeyCredentialCreationOptions = synchronized(WebUtils.getSessionMutex(request.session)) {
     val scope = restricted(request)
+    if (scope.scope != RestrictedSessionScope.ADDITIONAL_PASSKEY && (expectedUserId != null || beginKey != null))
+      throw CeremonyRejected()
     if (scope.scope == RestrictedSessionScope.ADDITIONAL_PASSKEY) {
       val principal = actors.sessionPrincipal(authentication) ?: throw CeremonyRejected()
       val begin = request.session.getAttribute(AdditionalPasskeyController.BEGIN) as? AdditionalPasskeyController.Begin

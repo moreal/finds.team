@@ -205,7 +205,8 @@ problem-details 401. Account-security GraphQL mutations require
 `expectedUserId` (the viewer's opaque User ID), and
 `POST /webauthn/register/begin` requires the same field in its JSON body.
 Additional-Passkey `/webauthn/register/options` requires both that ID and the
-original `beginKey`; enrollment/recovery options remain unchanged. The adapters
+original `beginKey`; enrollment/recovery options remain unbound and reject those
+additional-registration fields. The adapters
 reject a changed account or superseded begin before a security command, new
 registration scope, or additional-registration challenge is created.
 
