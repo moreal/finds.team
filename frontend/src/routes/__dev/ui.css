@@ -1,0 +1,18 @@
+.ui-catalog { display: grid; gap: var(--space-8); padding-block: var(--space-8); }
+.ui-catalog h1 { font-size: var(--text-title); margin-block: var(--space-2) var(--space-4); }
+.ui-catalog h2 { font-size: var(--text-lg); margin-block: 0 var(--space-6); }
+.ui-catalog h3 { font-size: var(--text-base); margin-block: 0 var(--space-4); }
+.ui-catalog section { padding: var(--space-6); background: var(--color-surface); border: 1px solid var(--color-border-subtle); border-radius: var(--radius-surface); min-inline-size: 0; }
+.catalog-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-block: var(--space-3); }
+.catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: var(--space-6); }
+.catalog-grid > * { min-inline-size: 0; }
+.catalog-stack { display: grid; gap: var(--space-3); align-content: start; }
+.catalog-confirm { border-block-start: 1px solid var(--color-border-subtle); margin-block-start: var(--space-6); padding-block-start: var(--space-3); }
+.ui-catalog .ui-dialog-trigger, .ui-catalog .ui-dialog button:not(.ui-button) { color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-control); border-radius: var(--radius-control); }
+.ui-catalog .ui-dialog { color: var(--color-text); background: var(--color-surface); border-color: var(--color-border-subtle); box-shadow: var(--elevation-overlay); }
+.ui-catalog .ui-dialog button { margin-inline-end: var(--space-3); }
+.ui-catalog output { min-inline-size: 4ch; font-size: var(--text-lg); }
+@media (max-width: 480px) {
+  .ui-catalog { padding-inline: var(--space-4); }
+  .ui-catalog section { padding: var(--space-4); }
+}

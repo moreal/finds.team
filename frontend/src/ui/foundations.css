@@ -1,0 +1,65 @@
+@import "./tokens.css";
+
+.ui-button, .ui-link, .ui-input {
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--text-base);
+  min-block-size: var(--target-regular);
+  min-inline-size: var(--target-regular);
+  touch-action: manipulation;
+}
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  cursor: pointer;
+  color: var(--color-on-action);
+  background: var(--color-action);
+  overflow-wrap: anywhere;
+}
+.ui-button[data-variant="secondary"] { color: var(--color-text); background: var(--color-surface); border-color: var(--color-border-control); }
+.ui-button[data-variant="ghost"] { color: var(--color-action); background: transparent; }
+.ui-button[data-variant="danger"] { color: var(--color-danger-text); background: var(--color-danger-surface); }
+.ui-button[data-variant="danger-confirm"] { color: var(--color-on-danger); background: var(--color-danger-text); }
+.ui-button:disabled, .ui-input:disabled { cursor: not-allowed; opacity: 0.55; }
+.ui-button:active:not(:disabled) { box-shadow: inset 0 0 0 2px currentColor; }
+@media (hover: hover) and (pointer: fine) {
+  .ui-button:hover:not(:disabled) { background: var(--color-action-hover); }
+  .ui-button[data-variant="secondary"]:hover:not(:disabled), .ui-button[data-variant="ghost"]:hover:not(:disabled) { background: var(--color-action-soft); }
+  .ui-button[data-variant^="danger"]:hover:not(:disabled) { box-shadow: inset 0 0 0 1px currentColor; background: var(--color-danger-surface); color: var(--color-danger-text); }
+  .ui-link:hover { text-decoration-thickness: 2px; }
+  .ui-button[data-size="dense"] { min-block-size: var(--target-dense); min-inline-size: var(--target-dense); }
+}
+.ui-button:focus-visible, .ui-link:focus-visible, .ui-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+.ui-icon-button { padding: var(--space-2); }
+.ui-icon-button > span { display: inline-flex; align-items: center; justify-content: center; }
+.ui-link { display: inline-flex; align-items: center; color: var(--color-action); text-underline-offset: 0.2em; overflow-wrap: anywhere; }
+.ui-field { display: grid; align-content: start; gap: var(--space-2); min-inline-size: 0; }
+.ui-field label { font-weight: var(--weight-medium); }
+.ui-input { inline-size: 100%; padding: var(--space-2) var(--space-3); color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-control); border-radius: var(--radius-control); }
+.ui-input[aria-invalid="true"] { border-color: var(--color-danger-text); }
+.ui-field-hint, .ui-field-error { margin: 0; font-size: var(--text-sm); }
+.ui-field-error { color: var(--color-danger-text); }
+.ui-field-hint, .ui-muted { color: var(--color-text-muted); }
+.ui-badge { display: inline-flex; align-items: center; padding: var(--space-1) var(--space-2); font-size: var(--text-sm); font-weight: var(--weight-medium); border-radius: var(--radius-pill); color: var(--color-text-muted); background: var(--color-elevated); }
+.ui-badge[data-tone="action"] { color: var(--color-action); background: var(--color-action-soft); }
+.ui-badge[data-tone="success"] { color: var(--color-success-text); background: var(--color-success-surface); }
+.ui-badge[data-tone="warning"] { color: var(--color-warning-text); background: var(--color-warning-surface); }
+.ui-badge[data-tone="danger"] { color: var(--color-danger-text); background: var(--color-danger-surface); }
+.ui-skeleton { block-size: 1.5rem; inline-size: 100%; border-radius: var(--radius-control); background: var(--color-elevated); }
+.ui-skeleton[data-shape="card"] { block-size: 10rem; }
+.ui-skeleton[data-shape="circle"] { inline-size: 2.75rem; block-size: 2.75rem; border-radius: 50%; }
+.ui-async-state { display: grid; gap: var(--space-3); }
+.ui-async-state > .ui-button { justify-self: start; }
+.ui-async-message p { margin: 0; }
+.ui-tabular { font-variant-numeric: tabular-nums; }
+.ui-visually-hidden { position: absolute; inline-size: 1px; block-size: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

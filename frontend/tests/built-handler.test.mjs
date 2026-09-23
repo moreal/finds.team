@@ -6,6 +6,21 @@ import test from "node:test";
 const server = await import("../dist/server/server.js");
 const handleRequest = server.handleRequest ?? server.default?.fetch;
 
+test("development catalog is absent from the production router and bundles", async () => {
+  for (const path of ["/ui", "/__dev/ui"]) {
+    const response = await handleRequest(new Request(`https://finds.team${path}`));
+    assert.equal(response.status, 404);
+    assert.doesNotMatch(await response.text(), /컴포넌트 카탈로그/);
+  }
+  for (const side of ["client", "server"]) {
+    const directory = new URL(`../dist/${side}/`, import.meta.url);
+    const files = await readdir(directory, { recursive: true });
+    for (const file of files.filter((name) => name.endsWith(".js"))) {
+      assert.doesNotMatch(await readFile(new URL(file, directory), "utf8"), /컴포넌트 카탈로그|최종 삭제 확인 예시/, join(side, file));
+    }
+  }
+});
+
 function nonceFrom(policy) {
   return /(?:^|;)\s*script-src\s+'nonce-([^']+)'/.exec(policy)?.[1];
 }

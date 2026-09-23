@@ -4,9 +4,9 @@ import { cjsInterop } from "vite-plugin-cjs-interop";
 import relay from "vite-plugin-relay-lite";
 import solid from "vite-plugin-solid";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [
-    tanstackStart(),
+    tanstackStart({ router: { routeFileIgnorePattern: command === "build" ? "__dev" : undefined } }),
     relay({ cwd: import.meta.dirname }),
     cjsInterop({ dependencies: ["relay-runtime"] }),
     solid({ ssr: true }),
@@ -20,4 +20,4 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}"],
   },
-});
+}));

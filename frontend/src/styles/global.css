@@ -1,7 +1,16 @@
+@import "../ui/tokens.css";
+
 :root {
-  color: #172033;
-  font-family: system-ui, sans-serif;
+  color: var(--color-text);
+  background: var(--color-canvas);
+  font-family: var(--font-sans);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
 }
+
+* { box-sizing: border-box; }
+h1, h2, h3 { text-wrap: balance; line-height: var(--leading-heading); }
+p { text-wrap: pretty; }
 
 body {
   margin: 0;
