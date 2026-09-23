@@ -98,6 +98,10 @@ class FindsGraphqlFacade(
 
   fun now(): Instant = clock.now()
 
+  /** Independent categorical append after an account command has returned and its transaction exited. */
+  fun recordAccountAuthorizationDenial() =
+    securityEvents.denied(SecurityEventAction.AUTHORIZATION_DENIED, clock.now(), anonymousMetadata())
+
   fun jobPostings(filter: PostingFilterInput?, first: Int?, after: String?): JobPostingConnectionDto =
     PostingGraphqlMapping.connection(
       searchHandler(PostingGraphqlMapping.filter(filter), PostingGraphqlMapping.page(first, after)),

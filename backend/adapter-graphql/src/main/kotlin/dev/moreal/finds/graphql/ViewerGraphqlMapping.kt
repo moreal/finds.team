@@ -77,6 +77,10 @@ internal fun RuntimeWiring.Builder.viewer(facade: FindsGraphqlFacade): RuntimeWi
             })
           } catch (_: QueryForbidden) { rejected(ApiErrorCode.FORBIDDEN) }
             catch (error: GraphqlRequestException) { rejected(error.code) }
+          // GraphQL payload denials return HTTP 200, so Spring's HTTP denial handlers do not run.
+          // Keep the append outside the command transaction and outside payload error conversion;
+          // storage failures must propagate to the sanitized infrastructure-error boundary.
+          if (payload.error?.code == ApiErrorCode.FORBIDDEN) facade.recordAccountAuthorizationDenial()
           payload.copy(clientMutationId = client)
         }
       }

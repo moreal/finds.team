@@ -104,8 +104,7 @@ private fun DataFetchingEnvironment.auditFilter(): AuditSearch {
     return AuditSearch(actorUserId = f["actorUserId"]?.let { UUID.fromString(GlobalIdCodec.decode(NodeType.User, it)) },
       actorKind = f["actorKind"]?.let(AuditActorKind::valueOf), action = f["action"]?.let(AuditAction::valueOf),
       targetType = f["targetType"], targetId = f["targetId"], from = timestamp("from"), until = timestamp("until"))
-  } catch (error: GlobalIdException) { throw error }
-    catch (_: IllegalArgumentException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid audit filter") }
+  } catch (_: IllegalArgumentException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid audit filter") }
     catch (_: java.time.DateTimeException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid audit filter") }
 }
 private const val SUMMARIES = "operations.summaries"

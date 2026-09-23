@@ -11,6 +11,8 @@ import org.jooq.ExecuteContext
 import org.jooq.ExecuteListener
 import org.jooq.impl.DefaultExecuteListenerProvider
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.mock.web.MockHttpSession
 import org.springframework.security.core.context.SecurityContextImpl
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository
@@ -153,6 +155,43 @@ class ViewerAdminGraphqlTest : OtpHttpSupport() {
     assertEquals("AuditEvent", execute("""{ node(id: "$id") { __typename } }""", admin)["node"]["__typename"].asText())
     assertEquals("INVALID_CURSOR", execute("{ auditEvents(after: \"bad\") { error { code } } }", admin)["auditEvents"]["error"]["code"].asText())
     assertEquals("INVALID_FILTER", execute("{ auditEvents(filter: {from: \"+300000-01-01T00:00:00Z\"}) { error { code } } }", admin)["auditEvents"]["error"]["code"].asText())
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = ["bad", "djE6Q2FyZWVyU2l0ZTox"])
+  fun `invalid audit actor IDs stay local before SQL and preserve valid siblings`(invalidId: String) {
+    val (user, admin) = account(admin = true)
+    val eventId = UUID.randomUUID()
+    tx.execute { it.auditLog.append(AuditEvent(eventId, 1, now,
+      Actor.User(user.id.value, user.roles, now, AuthenticationStrength.PASSKEY), AuditAction.ROLE_GRANTED,
+      "user", user.id.value.toString(), UUID.randomUUID(), UUID.randomUUID(), AuditOutcome.SUCCEEDED,
+      AuditDetails.from(AuditAction.ROLE_GRANTED, mapOf("role" to "ADMIN")))) }
+    val userId = GlobalIdCodec.encode(NodeType.User, user.id.value)
+    val selects = countSelects()
+    val data = execute("""{
+      viewer { user { id } }
+      good: auditEvents(filter: {actorUserId: "$userId"}, first: 1) {
+        totalCount edges { node { id } } error { code }
+      }
+      bad: auditEvents(filter: {actorUserId: "$invalidId"}) {
+        totalCount edges { cursor } pageInfo { hasNextPage hasPreviousPage startCursor endCursor } error { code }
+      }
+    }""", admin)
+    assertEquals(userId, data["viewer"]["user"]["id"].asText())
+    assertEquals(1, data["good"]["totalCount"].asInt())
+    assertEquals(GlobalIdCodec.encode(NodeType.AuditEvent, eventId), data["good"]["edges"][0]["node"]["id"].asText())
+    assertTrue(data["good"]["error"].isNull)
+    val bad = data["bad"]
+    assertEquals("INVALID_FILTER", bad["error"]["code"].asText())
+    assertEquals(0, bad["totalCount"].asInt())
+    assertEquals(0, bad["edges"].size())
+    assertFalse(bad["pageInfo"]["hasNextPage"].asBoolean())
+    assertFalse(bad["pageInfo"]["hasPreviousPage"].asBoolean())
+    assertTrue(bad["pageInfo"]["startCursor"].isNull && bad["pageInfo"]["endCursor"].isNull)
+    assertEquals(3, selects.get(), "Actor lookup plus only the valid audit key may execute SQL")
+    selects.set(0)
+    assertEquals("INVALID_FILTER", execute("""{ auditEvents(filter: {actorUserId: "$invalidId"}) { error { code } } }""", admin)["auditEvents"]["error"]["code"].asText())
+    assertEquals(2, selects.get(), "An invalid-only query must execute Actor lookup but no audit SQL")
   }
 
   @Test fun `all management mutations retain selected-operation CSRF and typed admin payloads`() {
