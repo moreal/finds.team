@@ -3,8 +3,76 @@ package dev.moreal.finds.domain.posting
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.junit.jupiter.api.Assertions.assertAll
+import org.junit.jupiter.api.function.Executable
 
 class ClassificationTest {
+  @Test
+  fun `shared list suffixes apply to every member while independent qualifiers retain scope`() {
+    val required = SkillRequirementLevel.REQUIRED
+    val preferred = SkillRequirementLevel.PREFERRED
+    val mentioned = SkillRequirementLevel.MENTIONED
+    val fixtures = listOf(
+      "Requirements:\nJava and Kotlin not required" to mapOf("java" to mentioned, "kotlin" to mentioned),
+      "Java, Kotlin required" to mapOf("java" to required, "kotlin" to required),
+      "자격요건\n자바 및 코틀린 필수는 아닙니다" to mapOf("java" to mentioned, "kotlin" to mentioned),
+      "자바, 코틀린 필수" to mapOf("java" to required, "kotlin" to required),
+      "Java and Kotlin preferred" to mapOf("java" to preferred, "kotlin" to preferred),
+      "Java required and Kotlin preferred" to mapOf("java" to required, "kotlin" to preferred),
+      "Java required, Kotlin not required" to mapOf("java" to required, "kotlin" to mentioned),
+      "자바 필수 및 코틀린 우대" to mapOf("java" to required, "kotlin" to preferred),
+      "Java, Kotlin required; Python, Rust preferred" to mapOf("java" to required, "kotlin" to required,
+        "python" to preferred, "rust" to preferred),
+      "Requirements:\nNo Java and Kotlin experience required" to mapOf("java" to mentioned, "kotlin" to mentioned),
+      "Java; Kotlin required" to mapOf("java" to mentioned, "kotlin" to required),
+      "Java not required. Kotlin required" to mapOf("java" to mentioned, "kotlin" to required),
+      "Java not required but Kotlin required" to mapOf("java" to mentioned, "kotlin" to required),
+    )
+    assertClassificationFixtures(fixtures)
+  }
+
+  @Test
+  fun `qualification headings do not turn everyday Go and React prose into skills`() {
+    val required = SkillRequirementLevel.REQUIRED
+    val fixtures = listOf(
+      "Requirements:\nYou go above and beyond for customers" to emptyMap(),
+      "Requirements:\nReact to incidents quickly" to emptyMap(),
+      "자격요건\nYou go above and beyond for customers\nReact to incidents quickly" to emptyMap(),
+      "Skills:\nReact to incidents quickly and go above and beyond" to emptyMap(),
+      "Requirements:\nGo, React" to mapOf("go" to required, "react" to required),
+      "Requirements:\ngo and react experience required" to mapOf("go" to required, "react" to required),
+      "자격요건\nGo 및 React 개발 경험 필수" to mapOf("go" to required, "react" to required),
+      "Requirements:\nExperience with Go and React" to mapOf("go" to required, "react" to required),
+      "Requirements:\nReact developer and Go engineer" to mapOf("react" to required, "go" to required),
+    )
+    assertClassificationFixtures(fixtures)
+  }
+
+  @Test
+  fun `English and Korean explicit requirement negations precede positive hints`() {
+    val mentioned = SkillRequirementLevel.MENTIONED
+    val required = SkillRequirementLevel.REQUIRED
+    assertClassificationFixtures(listOf(
+      "Requirements:\nNo Java experience required" to mapOf("java" to mentioned),
+      "Requirements:\nKotlin 필수는 아닙니다" to mapOf("kotlin" to mentioned),
+      "Requirements:\nJava experience is not required" to mapOf("java" to mentioned),
+      "자격요건\n코틀린 필수가 아닙니다" to mapOf("kotlin" to mentioned),
+      "자격요건\n코틀린 필수 아님" to mapOf("kotlin" to mentioned),
+      "No Java experience required; Kotlin required" to mapOf("java" to mentioned, "kotlin" to required),
+      "Java experience required" to mapOf("java" to required),
+      "코틀린 필수입니다" to mapOf("kotlin" to required),
+    ))
+  }
+
+  private fun assertClassificationFixtures(fixtures: List<Pair<String, Map<String, SkillRequirementLevel>>>) {
+    assertAll(fixtures.map { (text, expected) ->
+      Executable {
+        assertEquals(expected, classifyPosting(raw(description = text)).skills
+          .filter { it.slug != null }.associate { requireNotNull(it.slug) to it.level }, text)
+      }
+    })
+  }
+
   @Test
   fun `Korean and English sections and inline hints classify requirement levels`() {
     val fixtures = listOf(

@@ -50,15 +50,8 @@ fun classifyPosting(raw: RawPosting, taxonomy: SkillTaxonomy = SkillTaxonomy.V1)
       retainUnknown = heading !in RESET_HEADINGS
     }
     val content = if (recognizedHeading) line.substringAfter(':', "") else line
-    content.split(Regex("""[,;/]|\s+(?:and|및)\s+""", RegexOption.IGNORE_CASE))
-      .map(String::trim).filter(String::isNotEmpty).forEach { clause ->
-      val level = when {
-        NEGATED_REQUIREMENT.containsMatchIn(clause) -> SkillRequirementLevel.MENTIONED
-        PREFERRED_HINT.containsMatchIn(clause) -> SkillRequirementLevel.PREFERRED
-        REQUIRED_HINT.containsMatchIn(clause) -> SkillRequirementLevel.REQUIRED
-        else -> section
-      }
-      val found = taxonomy.findMentions(clause, retainUnknown || level != SkillRequirementLevel.MENTIONED)
+    qualifiedClauses(content, section).forEach { (clause, level) ->
+      val found = taxonomy.findMentions(clause)
       found.forEach { (skill, text) ->
         val previous = known[skill.slug]
         if (previous == null || level.ordinal < previous.level.ordinal) {
@@ -86,6 +79,38 @@ fun classifyPosting(raw: RawPosting, taxonomy: SkillTaxonomy = SkillTaxonomy.V1)
 private fun String.compactWhitespace(): String = trim().replace(Regex("\\s+"), " ")
 private fun String.hintKey(): String = compactWhitespace().lowercase(Locale.ROOT).replace('_', '-')
 
+private fun explicitRequirement(text: String): SkillRequirementLevel? = when {
+  NEGATED_REQUIREMENT.containsMatchIn(text) -> SkillRequirementLevel.MENTIONED
+  PREFERRED_HINT.containsMatchIn(text) -> SkillRequirementLevel.PREFERRED
+  REQUIRED_HINT.containsMatchIn(text) -> SkillRequirementLevel.REQUIRED
+  else -> null
+}
+
+/**
+ * A suffix closes the pending list: "Java, Kotlin required" qualifies both members.
+ * An already qualified member closes its own group, so "Java required, Kotlin preferred"
+ * keeps two levels. Sentence/semicolon/contrast boundaries never share a qualifier.
+ * Evaluate the whole group before splitting its evidence to retain prefix negation.
+ */
+private fun qualifiedClauses(text: String, fallback: SkillRequirementLevel): List<Pair<String, SkillRequirementLevel>> =
+  buildList {
+    text.split(CLAUSE_BOUNDARY).forEach { sentence ->
+      val pending = mutableListOf<String>()
+      sentence.split(LIST_SEPARATOR).map(String::trim).filter(String::isNotEmpty).forEach { member ->
+        pending += member
+        if (explicitRequirement(member) != null) {
+          val level = requireNotNull(explicitRequirement(pending.joinToString(" and ")))
+          pending.forEach { add(it to level) }
+          pending.clear()
+        }
+      }
+      pending.forEach { add(it to fallback) }
+    }
+  }
+
+private val CLAUSE_BOUNDARY = Regex(""";|(?<=[.!?])\s+|\s+(?:but|하지만)\s+""", RegexOption.IGNORE_CASE)
+private val LIST_SEPARATOR = Regex("""[,/]|\s+(?:and|및)\s+""", RegexOption.IGNORE_CASE)
+
 private val RESET_HEADINGS = setOf("responsibilities", "what you will do", "benefits", "about us", "담당업무", "주요업무", "복리후생", "회사소개")
 private val HEADINGS = buildMap {
   listOf("requirements", "required", "qualifications", "minimum qualifications", "자격요건", "자격 요건",
@@ -98,7 +123,9 @@ private val HEADINGS = buildMap {
 }
 private val PREFERRED_HINT = Regex("""(?i)\b(preferred|nice to have|optional)\b|우대""")
 private val REQUIRED_HINT = Regex("""(?i)\b(required|must have|essential)\b|필수""")
-private val NEGATED_REQUIREMENT = Regex("""(?i)\bnot (?:required|essential)\b|필수(?:가)?\s*아""")
+private val NEGATED_REQUIREMENT = Regex(
+  """(?i)\bnot (?:required|essential)\b|\bno\s+.+\b(?:experience|knowledge)\s+(?:is\s+)?required\b|필수(?:가|는)?\s*아""",
+)
 
 private val ROLE_PATTERNS = mapOf(
   RoleCategory.BACKEND to Regex("""\b(back[- ]?end|server[- ]side)\b|백엔드|서버 개발"""),
@@ -129,7 +156,7 @@ private val LOCATIONS = mapOf(
   "경기" to "gyeonggi", "경기도" to "gyeonggi", "gyeonggi" to "gyeonggi",
 )
 
-private fun SkillTaxonomy.findMentions(text: String, explicitSkills: Boolean): List<Pair<SkillDefinition, String>> =
+private fun SkillTaxonomy.findMentions(text: String): List<Pair<SkillDefinition, String>> =
   skills.mapNotNull { skill ->
     skill.aliases.asSequence().sortedByDescending(String::length).mapNotNull { alias ->
       // Punctuation forms are atomic: C must not match C++ or C#, and Go must not match Go-to-market.
@@ -138,13 +165,26 @@ private fun SkillTaxonomy.findMentions(text: String, explicitSkills: Boolean): L
       val pattern = Regex("""(?<![\p{L}\p{N}_+#.])${Regex.escape(alias)}(?=$|[^\p{L}\p{N}_+#.\-]$suffix)""",
         RegexOption.IGNORE_CASE)
       pattern.findAll(text).firstOrNull { match ->
-        explicitSkills || when (alias) {
-          "Go" -> match.value == alias && (
-            text.trim() == alias || Regex("""(?i)\b(go (?:developer|engineer|programming|language)|(?:in|using) go)\b""").containsMatchIn(text)
-          )
-          "React", "Spring", "REST" -> match.value == alias
+        when (alias) {
+          "Go", "React" -> isTechnicalMention(text, match)
+          "Spring", "REST" -> match.value == alias || isTechnicalMention(text, match)
           else -> true
         }
       }?.value
     }.firstOrNull()?.let { skill to it }
   }
+
+/** Section importance cannot establish whether an everyday word names a technology. */
+private fun isTechnicalMention(text: String, match: MatchResult): Boolean {
+  if (text.trim().trimEnd('.', '!').equals(match.value, ignoreCase = true)) return true
+  val before = text.substring(0, match.range.first)
+  val after = text.substring(match.range.last + 1)
+  return TECHNICAL_BEFORE.containsMatchIn(before) || TECHNICAL_AFTER.containsMatchIn(after)
+}
+
+private val TECHNICAL_BEFORE = Regex(
+  """(?i)\b(?:with|using|in|of|required|preferred)\s+$""",
+)
+private val TECHNICAL_AFTER = Regex(
+  """(?i)^(?:과|와|을|를|은|는|이|가|로|으로)?\s+(?:(?:developer|engineer|programming|language|framework|experience|knowledge|required|preferred|optional)\b|(?:is\s+)?not\s+required\b|개발|경험|사용|필수|우대)""",
+)
