@@ -18,12 +18,13 @@ import './security.css';
 type Viewer = NonNullable<AccountOperationsViewerQuery['response']['viewer']>;
 type Payload = { outcome: string; error?: { code: string }; recoveryCode?: string };
 type Confirmation = { title: string; description: string; button: string; document: GraphQLTaggedNode; field: string; input: Variables };
-type PendingCommand = { document: GraphQLTaggedNode; field: string; input: Variables };
+type PendingCommand = { document: GraphQLTaggedNode; field: string; input: Variables; accountId: string };
 type AccountRegistration = AdditionalPasskeyCommand & { accountId: string };
 class AccountActionError extends Error {}
 function mutationError(code?: string) {
   if (code === 'LAST_CREDENTIAL') return '마지막 Passkey는 삭제할 수 없어요.';
   if (code === 'FORBIDDEN') return '최근 Passkey 인증이 필요해요. 다시 로그인해 주세요.';
+  if (code === 'ACCOUNT_MISMATCH') return '계정이 변경되어 요청을 실행하지 않았어요. Passkey로 다시 로그인해 주세요.';
   if (code === 'IDEMPOTENCY_CONFLICT') return '요청이 충돌했어요. 상태를 새로 확인한 뒤 다시 시도해 주세요.';
   return '변경하지 못했어요. 입력과 로그인 상태를 확인해 주세요.';
 }
@@ -58,6 +59,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
   function clearProtectedState() {
     ownedCommand = undefined; ownedRegistration = undefined;
     setViewer(undefined); setCode(''); setConfirmation(undefined); setUnresolved(undefined); setMessage('');
+    setRegistration(undefined); setCancelRecovery(false); setNewLabel('');
     clearAccountRecords(environment());
   }
   function accountId(value: Viewer) { return readFragment<AccountOperations_user$key>(environment(), operations.user, value.user).id; }
@@ -104,7 +106,8 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     if (busy || ownedCommand || ownedRegistration) return;
     // Immutable logical command: all uncertain transport retries keep both
     // this UUID and the exact input. A separate explicit action starts a new one.
-    const command = { document, field, input: { ...structuredClone(input), idempotencyKey: crypto.randomUUID() } };
+    const originatingAccount = accountId(viewer()!);
+    const command = { document, field, accountId: originatingAccount, input: { ...structuredClone(input), expectedUserId: originatingAccount, idempotencyKey: crypto.randomUUID() } };
     ownedCommand = command;
     setUnresolved(command);
     void executeCommand(command);
@@ -113,6 +116,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     if (busy || ownedCommand !== command) return;
     busy = true; setPending(true); setError(''); setMessage('');
     try {
+      if (!await load(undefined, command.accountId)) return;
       // Execute the compiled Relay operation through its network, without normalizing
       // a one-time recovery secret into Relay's long-lived store or devtools records.
       const result = await environment().getNetwork().execute(RelayRuntime.getRequest(command.document).params, { input: command.input }, {}).toPromise();
@@ -120,22 +124,38 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
       const payload = result.data?.[command.field] as Payload | undefined;
       // A semantic response resolves the command; a network failure does not.
       if (payload) { ownedCommand = undefined; setUnresolved(undefined); }
-      if (!payload || payload.error || payload.outcome === 'REJECTED') throw new AccountActionError(mutationError(payload?.error?.code));
+      if (!payload || payload.error || payload.outcome === 'REJECTED') {
+        if (payload?.error?.code === 'ACCOUNT_MISMATCH') clearProtectedState();
+        throw new AccountActionError(mutationError(payload?.error?.code));
+      }
       setConfirmation(undefined);
       if (payload.recoveryCode) setCode(payload.recoveryCode);
       else if (payload.outcome === 'ALREADY_ROTATED') setMessage('이미 발급된 복구 코드는 다시 표시할 수 없어요. 필요한 경우 새로 발급해 주세요.');
       else setMessage('변경했어요.');
       if (payload.outcome === 'SIGNED_OUT') { clearProtectedState(); setError('이 세션이 종료되었어요. 다시 로그인해 주세요.'); }
-      else await load();
+      else await load(undefined, command.accountId);
     } catch (error) { setError(failure(error)); } finally { busy = false; setPending(false); }
   }
   function abandonCommand() { if (busy) return; ownedCommand = undefined; setUnresolved(undefined); setConfirmation(undefined); setError(''); }
   async function addPasskey(cancel = false) {
     if (busy || ownedCommand) return;
-    const command = ownedRegistration ?? { ...additionalPasskeyCommand(newLabel().trim()), accountId: accountId(viewer()!) };
+    const command = ownedRegistration ?? additionalPasskeyCommand(newLabel().trim(), accountId(viewer()!));
     ownedRegistration = command; busy = true;
     setRegistration(command); setPending(true); setError(''); setMessage('');
     try {
+      if (!cancel && command.stage === 'begin') {
+        const response = await fetch('/auth/session', { credentials: 'same-origin', cache: 'no-store' });
+        if (response.status === 401 || response.status === 403) {
+          clearProtectedState();
+          throw new AccountActionError('Passkey로 다시 로그인해 주세요.');
+        }
+        if (!response.ok) throw new SecurityRequestError(response.status, response.headers.get('x-request-id') ?? '');
+        const current = await response.json();
+        if (current.authenticated !== true || current.userGlobalId !== command.accountId) {
+          clearProtectedState();
+          throw new AccountActionError('계정이 변경되어 등록하지 못했어요. Passkey로 다시 로그인해 주세요.');
+        }
+      }
       const result = cancel ? (await cancelAdditionalPasskey(command), 'cancelled') : await beginAdditionalPasskey(command);
       ownedRegistration = undefined; setRegistration(undefined); setCancelRecovery(false);
       if (result === 'added') {
@@ -159,6 +179,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
         } catch (error) { setError(failure(error)); }
       } else setMessage('Passkey 등록을 취소했어요. 계정 관리를 계속할 수 있어요.');
     } catch (error) {
+      if (error instanceof AccountActionError) { setError(error.message); return; }
       ownedRegistration = { ...command }; setRegistration(ownedRegistration);
       setCancelRecovery(command.stage === 'cancel');
       if (error instanceof SecurityRequestError && error.status === 403) {

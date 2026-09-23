@@ -525,7 +525,38 @@ class AdditionalPasskeyHttpTest : OtpHttpSupport() {
     assertTrue(tx.execute { it.restrictedSessions.findById(originalScope)!!.isUsable(now) })
   }
 
-  private fun begin(session: MockHttpSession, key: UUID = UUID.randomUUID()) = postJson("/webauthn/register/begin", "{}", session, key)
+  @Test fun `begin bound to another account cannot create or replace a restricted scope`() {
+    val (original, originalSession) = enroll()
+    val (user, session) = enroll()
+    val expected = dev.moreal.finds.graphql.GlobalIdCodec.encode(dev.moreal.finds.graphql.NodeType.User, original.value)
+    val key = UUID.randomUUID()
+    for (retry in listOf(false, true)) {
+      if (retry) begin(originalSession, key).andExpect(status().isOk)
+      val count = scopes(user)
+      postJson("/webauthn/register/begin", """{"expectedUserId":"$expected"}""", session, key)
+        .andExpect(status().isForbidden).andExpect(header().string("Cache-Control", "no-store"))
+      assertEquals(count, scopes(user))
+      assertNull(session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    }
+  }
+
+  @Test fun `restricted scope permits no-store session account preflight with the viewer global identity`() {
+    val (user, session) = enroll()
+    begin(session).andExpect(status().isOk)
+    mvc.perform(get("/auth/session").secure(true).session(session)).andExpect(status().isOk)
+      .andExpect(header().string("Cache-Control", "no-store"))
+      .andExpect(jsonPath("$.userId").value(user.value.toString()))
+      .andExpect(jsonPath("$.userGlobalId").value(dev.moreal.finds.graphql.GlobalIdCodec.encode(dev.moreal.finds.graphql.NodeType.User, user.value)))
+    mvc.perform(post("/graphql").secure(true).session(session).contentType("application/json")
+      .content("""{"query":"{ viewer { user { id } } }"}""")).andExpect(status().isForbidden)
+  }
+
+  private fun begin(session: MockHttpSession, key: UUID = UUID.randomUUID()): org.springframework.test.web.servlet.ResultActions {
+    val authentication = (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as? SecurityContext)?.authentication
+    val actor = context.getBean(ActorResolver::class.java).sessionPrincipal(authentication)
+    val id = actor?.let { dev.moreal.finds.graphql.GlobalIdCodec.encode(dev.moreal.finds.graphql.NodeType.User, it.actor.userId) }
+    return postJson("/webauthn/register/begin", json.writeValueAsString(mapOf("expectedUserId" to id)), session, key)
+  }
   private fun scope(session: MockHttpSession) = session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) as RestrictedSessionId
   private fun scopes(user: UserId) = sql.fetchCount(sql.selectFrom("restricted_sessions").where("user_id = ? and scope = 'ADDITIONAL_PASSKEY'", user.value))
   private fun audits(user: UserId) = sql.fetchCount(sql.selectFrom("audit_events").where("target_id = ? and action = 'passkey.registered'", user.value.toString()))

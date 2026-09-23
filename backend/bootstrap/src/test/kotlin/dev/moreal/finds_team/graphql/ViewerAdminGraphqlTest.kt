@@ -57,13 +57,13 @@ class ViewerAdminGraphqlTest : OtpHttpSupport() {
     val id = execute("{ viewer { passkeys { edges { node { id } } } } }", session)["viewer"]["passkeys"]["edges"][0]["node"]["id"].asText()
     val key = UUID.randomUUID()
     fun rename(label: String, selected: MockHttpSession = session, requestKey: String = key.toString()) = execute("""mutation {
-      renamePasskey(input: {passkeyId: "$id", label: "$label", idempotencyKey: "$requestKey", clientMutationId: "relay-7"}) {
+      renamePasskey(input: {expectedUserId: "${GlobalIdCodec.encode(NodeType.User, user.id.value)}", passkeyId: "$id", label: "$label", idempotencyKey: "$requestKey", clientMutationId: "relay-7"}) {
         outcome clientMutationId error { code }
       } }""", selected)["renamePasskey"]
     assertEquals("CHANGED", rename("Laptop")["outcome"].asText())
     assertEquals("relay-7", rename("Laptop")["clientMutationId"].asText())
     assertEquals("IDEMPOTENCY_CONFLICT", rename("Other")["error"]["code"].asText())
-    assertEquals("NOT_FOUND", rename("Other", other)["error"]["code"].asText())
+    assertEquals("ACCOUNT_MISMATCH", rename("Other", other)["error"]["code"].asText())
     assertEquals("INVALID_INPUT", rename("Other", requestKey = "bad")["error"]["code"].asText())
     assertEquals("Laptop", tx.execute { it.credentials.findById(user.credentials.single())!! }.label)
     now = now.plusSeconds(301)
@@ -75,9 +75,10 @@ class ViewerAdminGraphqlTest : OtpHttpSupport() {
     val viewer = execute("{ viewer { passkeys { edges { node { id } } } sessions { edges { node { id current } } } } }", session)["viewer"]
     val passkey = viewer["passkeys"]["edges"][0]["node"]["id"].asText()
     val current = viewer["sessions"]["edges"][0]["node"]["id"].asText()
-    assertEquals("LAST_CREDENTIAL", execute("""mutation { removePasskey(input: {passkeyId: "$passkey", idempotencyKey: "${UUID.randomUUID()}"}) { error { code } } }""", session)["removePasskey"]["error"]["code"].asText())
+    val expectedUserId = GlobalIdCodec.encode(NodeType.User, user.id.value)
+    assertEquals("LAST_CREDENTIAL", execute("""mutation { removePasskey(input: {expectedUserId: "$expectedUserId", passkeyId: "$passkey", idempotencyKey: "${UUID.randomUUID()}"}) { error { code } } }""", session)["removePasskey"]["error"]["code"].asText())
     val key = UUID.randomUUID()
-    val rotate = """mutation { rotateRecoveryCode(input: {idempotencyKey: "$key", clientMutationId: "r"}) { outcome recoveryCode clientMutationId error { code } } }"""
+    val rotate = """mutation { rotateRecoveryCode(input: {expectedUserId: "$expectedUserId", idempotencyKey: "$key", clientMutationId: "r"}) { outcome recoveryCode clientMutationId error { code } } }"""
     val first = execute(rotate, session)["rotateRecoveryCode"]
     assertEquals("ROTATED", first["outcome"].asText())
     assertFalse(first["recoveryCode"].isNull)
@@ -85,7 +86,7 @@ class ViewerAdminGraphqlTest : OtpHttpSupport() {
     assertEquals("ALREADY_ROTATED", replay["outcome"].asText())
     assertTrue(replay["recoveryCode"].isNull)
     assertEquals("r", replay["clientMutationId"].asText())
-    assertEquals("SIGNED_OUT", execute("""mutation { revokeSession(input: {sessionId: "$current", idempotencyKey: "${UUID.randomUUID()}"}) { outcome } }""", session)["revokeSession"]["outcome"].asText())
+    assertEquals("SIGNED_OUT", execute("""mutation { revokeSession(input: {expectedUserId: "$expectedUserId", sessionId: "$current", idempotencyKey: "${UUID.randomUUID()}"}) { outcome } }""", session)["revokeSession"]["outcome"].asText())
     assertTrue(execute("{ viewer { user { id } } }", session)["viewer"].isNull)
     assertEquals(1, tx.execute { it.credentials.findByUserId(user.id) }.size)
   }
@@ -217,7 +218,7 @@ class ViewerAdminGraphqlTest : OtpHttpSupport() {
     }
     val passkeys = execute("{ viewer { passkeys { edges { node { id label } } } } }", session)["viewer"]["passkeys"]["edges"]
     val id = passkeys.toList().single { it["node"]["label"].asText() == "Second" }["node"]["id"].asText()
-    val command = """mutation { removePasskey(input: {passkeyId: "$id", idempotencyKey: "${UUID.randomUUID()}", clientMutationId: "remove"}) { outcome clientMutationId error { code } } }"""
+    val command = """mutation { removePasskey(input: {expectedUserId: "${GlobalIdCodec.encode(NodeType.User, user.id.value)}", passkeyId: "$id", idempotencyKey: "${UUID.randomUUID()}", clientMutationId: "remove"}) { outcome clientMutationId error { code } } }"""
     assertEquals("CHANGED", execute(command, session)["removePasskey"]["outcome"].asText())
     assertNull(tx.execute { it.credentials.findById(secondId) })
     val replay = execute(command, session)["removePasskey"]

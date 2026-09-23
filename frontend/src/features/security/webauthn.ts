@@ -49,6 +49,7 @@ export async function registerPasskey(label: string) {
 }
 /** Kept only in component memory: uncertain writes must retain key and payload. */
 export type AdditionalPasskeyCommand = {
+  readonly accountId: string;
   readonly beginKey: string;
   readonly label: string;
   stage: 'begin' | 'credential' | 'complete' | 'cancel';
@@ -56,8 +57,8 @@ export type AdditionalPasskeyCommand = {
   passkeyId?: string;
   completion?: { key: string; body: { publicKey: { credential: ReturnType<typeof serializedCredential>; label: string } } };
 };
-export function additionalPasskeyCommand(label: string): AdditionalPasskeyCommand {
-  return { beginKey: crypto.randomUUID(), label, stage: 'begin' };
+export function additionalPasskeyCommand(label: string, accountId: string): AdditionalPasskeyCommand {
+  return { beginKey: crypto.randomUUID(), label, accountId, stage: 'begin' };
 }
 export async function cancelAdditionalPasskey(command: AdditionalPasskeyCommand) {
   command.stage = 'cancel';
@@ -68,7 +69,7 @@ export async function beginAdditionalPasskey(command: AdditionalPasskeyCommand):
   ensureSupported();
   if (command.stage === 'cancel') { await cancelAdditionalPasskey(command); return 'cancelled'; }
   if (command.stage === 'begin') {
-    const result = await securityPost<{ ready: boolean }>('/webauthn/register/begin', {}, command.beginKey);
+    const result = await securityPost<{ ready: boolean }>('/webauthn/register/begin', { expectedUserId: command.accountId }, command.beginKey);
     if (!result.ready) throw new Error('등록 준비를 확인하지 못했어요. 같은 요청을 다시 시도해 주세요.');
     command.stage = 'credential';
   }

@@ -2,6 +2,8 @@ package dev.moreal.finds_team.graphql
 
 import dev.moreal.finds.application.port.*
 import dev.moreal.finds.domain.identity.*
+import dev.moreal.finds.graphql.GlobalIdCodec
+import dev.moreal.finds.graphql.NodeType
 import dev.moreal.finds_team.security.*
 import org.jooq.DSLContext
 import org.jooq.ExecuteContext
@@ -27,6 +29,24 @@ import kotlin.test.*
 @ExtendWith(OutputCaptureExtension::class)
 class AccountMutationSecurityEventsTest : OtpHttpSupport() {
   private val sql get() = context.getBean(DSLContext::class.java)
+
+  @ParameterizedTest
+  @ValueSource(strings = ["renamePasskey", "removePasskey", "rotateRecoveryCode", "revokeSession", "revokeOtherSessions"])
+  fun `commands bound to another account deny before reserving or changing state`(operation: String) {
+    for (retry in listOf(false, true)) {
+      val original = account()
+      val current = account()
+      val query = original.command(operation)
+      if (retry) response(query, original.session)
+      val before = listOf(businessState(original.user), businessState(current.user))
+      val existing = eventIds()
+      val result = response(query, current.session)
+      assertNull(result["errors"], result.toString())
+      assertEquals("ACCOUNT_MISMATCH", result["data"][operation]["error"]["code"].asText())
+      assertEquals(before, listOf(businessState(original.user), businessState(current.user)))
+      assertEquals(1, (eventIds() - existing).size)
+    }
+  }
 
   @ParameterizedTest
   @ValueSource(strings = ["renamePasskey", "removePasskey", "rotateRecoveryCode", "revokeSession", "revokeOtherSessions"])
@@ -114,14 +134,14 @@ class AccountMutationSecurityEventsTest : OtpHttpSupport() {
   }
 
   private data class Fixture(val user: User, val session: MockHttpSession, val passkeyId: String, val otherSessionId: String) {
-    fun command(operation: String, key: UUID = UUID.randomUUID()): String {
+    fun command(operation: String, key: UUID = UUID.randomUUID(), expectedUserId: String = GlobalIdCodec.encode(NodeType.User, user.id.value)): String {
       val argument = when (operation) {
         "renamePasskey" -> "passkeyId: \"$passkeyId\", label: \"$PRIVATE_LABEL\", "
         "removePasskey" -> "passkeyId: \"$passkeyId\", "
         "revokeSession" -> "sessionId: \"$otherSessionId\", "
         else -> ""
       }
-      return """mutation { $operation(input: {${argument}idempotencyKey: "$key", clientMutationId: "denial-client"}) { outcome clientMutationId error { code } } }"""
+      return """mutation { $operation(input: {expectedUserId: "$expectedUserId", ${argument}idempotencyKey: "$key", clientMutationId: "denial-client"}) { outcome clientMutationId error { code } } }"""
     }
   }
   private fun account(): Fixture {

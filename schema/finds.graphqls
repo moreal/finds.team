@@ -98,6 +98,7 @@ enum ApiErrorCode {
   CRAWL_FAILED
   INTERNAL
   FORBIDDEN
+  ACCOUNT_MISMATCH
   IDEMPOTENCY_CONFLICT
   LAST_CREDENTIAL
 }
@@ -194,10 +195,10 @@ type CareerSite implements Node {
 input RegisterCareerSiteInput { url: String!, displayName: String!, idempotencyKey: ID!, clientMutationId: String }
 type RegisterCareerSitePayload { site: CareerSite, error: ApiError, clientMutationId: String }
 input TriggerCrawlInput { careerSiteId: ID!, idempotencyKey: ID!, clientMutationId: String }
-input RenamePasskeyInput { passkeyId: ID!, label: String!, idempotencyKey: ID!, clientMutationId: String }
-input RemovePasskeyInput { passkeyId: ID!, idempotencyKey: ID!, clientMutationId: String }
-input RevokeSessionInput { sessionId: ID!, idempotencyKey: ID!, clientMutationId: String }
-input SecurityCommandInput { idempotencyKey: ID!, clientMutationId: String }
+input RenamePasskeyInput { expectedUserId: ID!, passkeyId: ID!, label: String!, idempotencyKey: ID!, clientMutationId: String }
+input RemovePasskeyInput { expectedUserId: ID!, passkeyId: ID!, idempotencyKey: ID!, clientMutationId: String }
+input RevokeSessionInput { expectedUserId: ID!, sessionId: ID!, idempotencyKey: ID!, clientMutationId: String }
+input SecurityCommandInput { expectedUserId: ID!, idempotencyKey: ID!, clientMutationId: String }
 enum SecurityChangeOutcome { CHANGED UNCHANGED SIGNED_OUT ROTATED ALREADY_ROTATED REJECTED }
 type SecurityChangePayload { outcome: SecurityChangeOutcome!, error: ApiError, clientMutationId: String }
 type RotateRecoveryCodePayload { outcome: SecurityChangeOutcome!, recoveryCode: String, error: ApiError, clientMutationId: String }

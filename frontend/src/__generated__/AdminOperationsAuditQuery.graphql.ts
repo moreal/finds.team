@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<7e738c7e759a957cd02c4b58ffd1713c>>
+ * @generated SignedSource<<71f33433ecd65df64a9e51a2d471d30a>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -11,7 +11,7 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
-export type ApiErrorCode = "ALREADY_REGISTERED" | "AMBIGUOUS_PROVIDER" | "BUSY" | "CRAWL_FAILED" | "DISABLED" | "DISCOVERY_FAILED" | "FORBIDDEN" | "IDEMPOTENCY_CONFLICT" | "INTERNAL" | "INVALID_CURSOR" | "INVALID_FILTER" | "INVALID_INPUT" | "INVALID_PAGE" | "INVALID_URL" | "LAST_CREDENTIAL" | "NOT_DUE" | "NOT_FOUND" | "UNKNOWN_SKILL" | "UNSUPPORTED_PROVIDER" | "%future added value";
+export type ApiErrorCode = "ACCOUNT_MISMATCH" | "ALREADY_REGISTERED" | "AMBIGUOUS_PROVIDER" | "BUSY" | "CRAWL_FAILED" | "DISABLED" | "DISCOVERY_FAILED" | "FORBIDDEN" | "IDEMPOTENCY_CONFLICT" | "INTERNAL" | "INVALID_CURSOR" | "INVALID_FILTER" | "INVALID_INPUT" | "INVALID_PAGE" | "INVALID_URL" | "LAST_CREDENTIAL" | "NOT_DUE" | "NOT_FOUND" | "UNKNOWN_SKILL" | "UNSUPPORTED_PROVIDER" | "%future added value";
 export type AuditAction = "ACCOUNT_RECOVERY_COMPLETED" | "ADMIN_CONFIGURATION_CHANGED" | "CAREER_SITE_REGISTERED" | "CAREER_SITE_SETTINGS_CHANGED" | "MANUAL_CRAWL_TRIGGERED" | "PASSKEY_REGISTERED" | "PASSKEY_REMOVED" | "PASSKEY_RENAMED" | "RECOVERY_CODE_ROTATED" | "ROLE_GRANTED" | "ROLE_REVOKED" | "SESSION_REVOKED" | "%future added value";
 export type AuditActorKind = "SYSTEM" | "USER" | "%future added value";
 export type AuditFilterInput = {

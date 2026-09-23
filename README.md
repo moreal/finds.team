@@ -180,13 +180,15 @@ only after email ownership verification. It does not match domains, wildcards,
 plus-tags, or dot variations. Call `GET /auth/csrf` to obtain the session-bound
 token and header name before ceremony POSTs. Cookies are always `Secure`,
 `HttpOnly`, and `SameSite=Lax`; normal sessions require a discoverable Passkey
-with user verification. Public GraphQL queries remain open; HTTP GraphQL
-mutations stay closed until the audited command adapters are connected.
+with user verification. Public GraphQL queries remain open; authenticated
+GraphQL security and administrator mutations use audited command adapters.
 
 Registration completion uses `Idempotency-Key` (UUID), with optional UUID
 `X-Request-ID` and `X-Correlation-ID`. Only a server-bound restricted enrollment,
-recovery or additional-Passkey session can register. Completion returns the
-recovery code once; same-command retries return success without the secret.
+recovery or additional-Passkey session can register. Enrollment/recovery
+completion returns the recovery code once; same-command retries return success
+without the secret. Additional-Passkey completion returns only its opaque
+management ID and retains the normal login.
 `POST /auth/enrollment/otp/request` and `/auth/recovery/otp/request` accept
 `{"email":"person@example.com"}` and the same idempotency/correlation headers.
 Both return `202 {"accepted":true}` regardless of account existence, with the
@@ -194,9 +196,16 @@ same 200–220ms minimum response timing class. Database slowness may exceed tha
 floor. `/auth/enrollment/otp/verify` accepts `email` and `otp`; recovery verification
 also requires `recoveryCode`. Proof verification replaces the browser session and
 CSRF token; fetch `/auth/csrf` again before registering a Passkey. Neither proof
-flow logs in. Restricted sessions cannot access `/auth/session` or GraphQL.
-`GET /auth/session` returns current user ID, roles and authentication time only
-for a live Passkey session; expired/revoked sessions return problem-details 401.
+flow logs in. Enrollment/recovery restricted sessions cannot access
+`/auth/session` or GraphQL. An additional-Passkey restricted session can read
+`/auth/session` to confirm its account, but cannot use GraphQL. For a live
+Passkey session, `GET /auth/session` returns the raw user ID, opaque
+`userGlobalId`, roles and authentication time; expired/revoked sessions return
+problem-details 401. Account-security GraphQL mutations require
+`expectedUserId` (the viewer's opaque User ID), and
+`POST /webauthn/register/begin` requires the same field in its JSON body.
+The adapters reject a changed account before any security command or new
+registration scope is created.
 
 V6 stores shared fixed-window abuse counters keyed by purpose-separated HMACs;
 raw email/IP/device values never enter the counter table. Enrollment and recovery

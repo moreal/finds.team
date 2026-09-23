@@ -5,6 +5,8 @@ import dev.moreal.finds.application.usecase.AdditionalPasskeySessionResult
 import dev.moreal.finds.application.usecase.BeginAdditionalPasskeyRegistration
 import dev.moreal.finds.domain.identity.UserId
 import dev.moreal.finds.domain.identity.UserStatus
+import dev.moreal.finds.graphql.GlobalIdCodec
+import dev.moreal.finds.graphql.NodeType
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
@@ -12,6 +14,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.util.WebUtils
 import java.util.UUID
 
@@ -28,7 +31,7 @@ class AdditionalPasskeyController(
   private val begin = BeginAdditionalPasskeyRegistration(transactions, clock, random)
 
   @PostMapping("/webauthn/register/begin", produces = ["application/json"])
-  fun begin(request: HttpServletRequest, authentication: Authentication?): ResponseEntity<*> {
+  fun begin(request: HttpServletRequest, authentication: Authentication?, @RequestBody(required = false) body: BeginRequest?): ResponseEntity<*> {
     val session = request.getSession(false) ?: return denied(request, HttpStatus.UNAUTHORIZED)
     // Share the registration mutex with options/completion, including their post-commit cleanup.
     return synchronized(WebUtils.getSessionMutex(session)) {
@@ -38,6 +41,8 @@ class AdditionalPasskeyController(
       if (header == null || !UUID_PATTERN.matches(header)) return@synchronized ResponseEntity.badRequest()
         .header("Cache-Control", "no-store").body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed Passkey request"))
       val key = UUID.fromString(header)
+      if (body?.expectedUserId != GlobalIdCodec.encode(NodeType.User, principal.actor.userId))
+        return@synchronized denied(request, HttpStatus.FORBIDDEN)
       val canceled = session.getAttribute(CANCELED) as? CanceledHistory
       if (canceled?.commands?.containsKey(key) == true) return@synchronized denied(request, HttpStatus.FORBIDDEN)
       val previous = session.getAttribute(BEGIN) as? Begin
@@ -115,6 +120,7 @@ class AdditionalPasskeyController(
   }
 
   private class Begin(val key: UUID, val scopeId: RestrictedSessionId)
+  data class BeginRequest(val expectedUserId: String?)
   private class CanceledHistory(val commands: Map<UUID, UserSessionId>)
   private class AcceptedHistory(val keys: Set<UUID>)
   private companion object {

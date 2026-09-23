@@ -21,7 +21,10 @@ for (const path of routes) {
     if (path === '/jobs/job-1') {
       // Shared styles may arrive after route styles on a warm dev server or
       // client navigation. The filled CTA must not inherit ordinary link ink.
-      await page.addStyleTag({ url: '/src/ui/foundations.css?direct' });
+      // Inject only the competing late rule, without asking Vite to turn a
+      // source stylesheet into an HMR module under the production CSP.
+      await page.route('**/late-foundations.css', route => route.fulfill({ contentType: 'text/css', body: '.ui-link { color: var(--color-action); }' }));
+      await page.addStyleTag({ url: '/late-foundations.css' });
       const apply = page.getByRole('link', { name: /지원하기/ });
       const colors = await apply.evaluate(element => ({ text: getComputedStyle(element).color, fill: getComputedStyle(element).backgroundColor }));
       expect(colors.text, 'Application CTA text must remain visible over its filled background').not.toBe(colors.fill);

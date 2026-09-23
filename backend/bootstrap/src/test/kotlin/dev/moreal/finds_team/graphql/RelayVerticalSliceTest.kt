@@ -157,7 +157,7 @@ class RelayVerticalSliceTest : OtpHttpSupport() {
     val forbidden = response("AccountOperationsUserRefetchQuery", mapOf("id" to firstViewer["user"]["id"].asText()), second)
     assertEquals("FORBIDDEN", forbidden["errors"][0]["extensions"]["code"].asText())
     val passkey = ids(firstViewer["passkeys"]).single()
-    val input = mapOf("passkeyId" to passkey, "label" to "Relay laptop", "idempotencyKey" to UUID.randomUUID().toString(), "clientMutationId" to "rename-first")
+    val input = mapOf("expectedUserId" to firstViewer["user"]["id"].asText(), "passkeyId" to passkey, "label" to "Relay laptop", "idempotencyKey" to UUID.randomUUID().toString(), "clientMutationId" to "rename-first")
     val changed = execute("AccountOperationsRenameMutation", mapOf("input" to input), first)["renamePasskey"]
     assertEquals("CHANGED", changed["outcome"].asText())
     assertEquals("rename-first", changed["clientMutationId"].asText())
@@ -211,7 +211,7 @@ class RelayVerticalSliceTest : OtpHttpSupport() {
     val (_, session) = account()
     val (_, admin) = account(true)
     val viewer = execute("AccountOperationsViewerQuery", session = session)["viewer"]
-    val base = mapOf("idempotencyKey" to UUID.randomUUID().toString(), "clientMutationId" to "relay-command")
+    val base = mapOf("idempotencyKey" to UUID.randomUUID().toString(), "clientMutationId" to "relay-command", "expectedUserId" to viewer["user"]["id"].asText())
     val last = execute("AccountOperationsRemoveMutation", mapOf("input" to (base + ("passkeyId" to ids(viewer["passkeys"]).single()))), session)["removePasskey"]
     assertEquals("LAST_CREDENTIAL", last["error"]["code"].asText())
     assertEquals("relay-command", last["clientMutationId"].asText())
@@ -223,12 +223,12 @@ class RelayVerticalSliceTest : OtpHttpSupport() {
     assertTrue(replay["recoveryCode"].isNull)
     assertEquals("relay-command", replay["clientMutationId"].asText())
     assertEquals("UNCHANGED", execute("AccountOperationsRevokeOthersMutation", mapOf("input" to base), session)["revokeOtherSessions"]["outcome"].asText())
-    val register = base + mapOf("url" to "https://relay-new.example", "displayName" to "Relay")
+    val register = (base - "expectedUserId") + mapOf("url" to "https://relay-new.example", "displayName" to "Relay")
     assertEquals("FORBIDDEN", execute("AdminOperationsRegisterMutation", mapOf("input" to register), session)["registerCareerSite"]["error"]["code"].asText())
     val invalid = execute("AdminOperationsRegisterMutation", mapOf("input" to (register + ("url" to "not-a-url"))), admin)["registerCareerSite"]
     assertEquals("INVALID_URL", invalid["error"]["code"].asText())
     assertEquals("relay-command", invalid["clientMutationId"].asText())
-    val trigger = base + ("careerSiteId" to siteId(Long.MAX_VALUE))
+    val trigger = (base - "expectedUserId") + ("careerSiteId" to siteId(Long.MAX_VALUE))
     assertEquals("FORBIDDEN", execute("AdminOperationsTriggerMutation", mapOf("input" to trigger), session)["triggerCrawl"]["error"]["code"].asText())
     val missing = execute("AdminOperationsTriggerMutation", mapOf("input" to trigger), admin)["triggerCrawl"]
     assertEquals("NOT_FOUND", missing["outcome"].asText())

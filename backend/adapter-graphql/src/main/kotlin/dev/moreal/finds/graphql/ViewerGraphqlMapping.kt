@@ -60,6 +60,8 @@ internal fun RuntimeWiring.Builder.viewer(facade: FindsGraphqlFacade): RuntimeWi
           val client = input["clientMutationId"] as String?
           val payload = try {
             val principal = env.principal() ?: throw QueryForbidden()
+            if (input["expectedUserId"] != user(principal).id)
+              throw GraphqlRequestException(ApiErrorCode.ACCOUNT_MISMATCH, "Account changed")
             val metadata = commandMetadata(input.getValue("idempotencyKey") as String)
             val accounts = requireNotNull(facade.accounts)
             if (operation == "rotateRecoveryCode") {
@@ -80,7 +82,8 @@ internal fun RuntimeWiring.Builder.viewer(facade: FindsGraphqlFacade): RuntimeWi
           // GraphQL payload denials return HTTP 200, so Spring's HTTP denial handlers do not run.
           // Keep the append outside the command transaction and outside payload error conversion;
           // storage failures must propagate to the sanitized infrastructure-error boundary.
-          if (payload.error?.code == ApiErrorCode.FORBIDDEN) facade.recordAccountAuthorizationDenial()
+          if (payload.error?.code == ApiErrorCode.FORBIDDEN || payload.error?.code == ApiErrorCode.ACCOUNT_MISMATCH)
+            facade.recordAccountAuthorizationDenial()
           payload.copy(clientMutationId = client)
         }
       }
