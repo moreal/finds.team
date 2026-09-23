@@ -20,6 +20,71 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 class AdditionalPasskeyHttpTest : OtpHttpSupport() {
   private val sql get() = context.getBean(DSLContext::class.java)
 
+  @Test fun `canceled begin retry cannot replace a later active registration`() {
+    val (user, session) = enroll()
+    val first = UUID.randomUUID()
+    val second = UUID.randomUUID()
+    begin(session, first).andExpect(status().isOk)
+    postJson("/webauthn/register/cancel", "{}", session, first).andExpect(status().isOk)
+    begin(session, second).andExpect(status().isOk)
+    val active = scope(session)
+    val body = registration(session, Fixture())
+    val ceremony = session.getAttribute("finds.webauthn.registration")
+    val audit = audits(user)
+    begin(session, first).andExpect(status().isForbidden)
+    assertEquals(active, scope(session))
+    assertSame(ceremony, session.getAttribute("finds.webauthn.registration"))
+    assertTrue(tx.execute { it.restrictedSessions.findById(active)!!.isUsable(now) })
+    assertEquals(2, scopes(user))
+    postJson("/webauthn/register", body, session).andExpect(status().isOk)
+    assertEquals(2, tx.execute { it.credentials.findByUserId(user).size })
+    assertEquals(audit + 1, audits(user))
+  }
+
+  @Test fun `canceled begin retry cannot restore restricted mode after a later cancellation`() {
+    val (user, session) = enroll()
+    val first = UUID.randomUUID()
+    val second = UUID.randomUUID()
+    val audit = audits(user)
+    for (key in listOf(first, second)) {
+      begin(session, key).andExpect(status().isOk)
+      postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isOk)
+    }
+    begin(session, first).andExpect(status().isForbidden)
+    begin(session, second).andExpect(status().isForbidden)
+    for (key in listOf(first, second)) {
+      postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isOk)
+        .andExpect(content().string("""{"success":true}"""))
+        .andExpect(header().string("Cache-Control", "no-store"))
+    }
+    assertNull(session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    val query = mvc.perform(post("/graphql").secure(true).session(session).contentType("application/json")
+      .content("""{"query":"{ __typename }"}""")).andExpect(request().asyncStarted()).andReturn()
+    mvc.perform(asyncDispatch(query)).andExpect(status().isOk).andExpect(jsonPath("$.data.__typename").value("Query"))
+    mvc.perform(get("/auth/session").secure(true).session(session)).andExpect(status().isOk)
+    assertEquals(2, scopes(user))
+    assertEquals(1, tx.execute { it.credentials.findByUserId(user).size })
+    assertEquals(audit, audits(user))
+  }
+
+  @Test fun `cancellation history limit rejects new begins without evicting old canceled commands`() {
+    val (user, session) = enroll()
+    val keys = List(64) { UUID.randomUUID() }
+    for (key in keys) {
+      begin(session, key).andExpect(status().isOk)
+      postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isOk)
+    }
+    begin(session).andExpect(status().isForbidden)
+    for (key in listOf(keys.first(), keys.last())) {
+      begin(session, key).andExpect(status().isForbidden)
+      postJson("/webauthn/register/cancel", "{}", session, key).andExpect(status().isOk)
+        .andExpect(content().string("""{"success":true}"""))
+    }
+    assertEquals(64, scopes(user))
+    assertNull(session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION))
+    assertEquals(1, tx.execute { it.credentials.findByUserId(user).size })
+  }
+
   @Test fun `cancel releases registration without changing credentials principal or CSRF and retries are harmless`() {
     val (user, session) = enroll()
     val auth = authentication(session)

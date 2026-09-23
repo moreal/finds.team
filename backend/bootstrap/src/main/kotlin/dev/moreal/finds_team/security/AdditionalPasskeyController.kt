@@ -38,7 +38,8 @@ class AdditionalPasskeyController(
       if (header == null || !UUID_PATTERN.matches(header)) return@synchronized ResponseEntity.badRequest()
         .header("Cache-Control", "no-store").body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed Passkey request"))
       val key = UUID.fromString(header)
-      if ((session.getAttribute(CANCELED) as? Canceled)?.key == key) return@synchronized denied(request, HttpStatus.FORBIDDEN)
+      val canceled = session.getAttribute(CANCELED) as? CanceledHistory
+      if (canceled?.commands?.containsKey(key) == true) return@synchronized denied(request, HttpStatus.FORBIDDEN)
       val previous = session.getAttribute(BEGIN) as? Begin
       if (previous?.key == key) {
         val usable = previous.scopeId == session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) && transactions.execute { tx ->
@@ -48,12 +49,13 @@ class AdditionalPasskeyController(
         }
         if (!usable) return@synchronized denied(request, HttpStatus.FORBIDDEN)
       } else {
+        // Never evict canceled keys: delayed begin retries must stay canceled for this HTTP session.
+        if ((canceled?.commands?.size ?: 0) >= MAX_CANCELED_COMMANDS) return@synchronized denied(request, HttpStatus.FORBIDDEN)
         when (val result = begin.execute(principal)) {
           AdditionalPasskeySessionResult.Forbidden -> return@synchronized denied(request, HttpStatus.FORBIDDEN)
           is AdditionalPasskeySessionResult.Ready -> {
             session.setAttribute(WebAuthnCeremonies.RESTRICTED_SESSION, result.session.id)
             session.setAttribute(BEGIN, Begin(key, result.session.id))
-            session.removeAttribute(CANCELED)
           }
         }
       }
@@ -72,9 +74,9 @@ class AdditionalPasskeyController(
         .header("Cache-Control", "no-store").body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed Passkey request"))
       val key = UUID.fromString(header)
       val pending = session.getAttribute(BEGIN) as? Begin
-      val canceled = session.getAttribute(CANCELED) as? Canceled
+      val canceled = session.getAttribute(CANCELED) as? CanceledHistory
       val replay = pending == null && session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) == null &&
-        canceled?.key == key && canceled.sessionId == principal.sessionId
+        canceled?.commands?.get(key) == principal.sessionId
       if (!replay && (pending?.key != key || pending.scopeId != session.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION)))
         return@synchronized denied(request, HttpStatus.FORBIDDEN)
       val allowed = transactions.execute { tx ->
@@ -96,7 +98,7 @@ class AdditionalPasskeyController(
       if (!replay) {
         ceremonies.clearPendingRegistration(request, checkNotNull(pending).scopeId)
         session.removeAttribute(BEGIN)
-        session.setAttribute(CANCELED, Canceled(key, principal.sessionId))
+        session.setAttribute(CANCELED, CanceledHistory((canceled?.commands ?: emptyMap()) + (key to principal.sessionId)))
       }
       ResponseEntity.ok().header("Cache-Control", "no-store").body(mapOf("success" to true))
     }
@@ -109,10 +111,11 @@ class AdditionalPasskeyController(
   }
 
   private class Begin(val key: UUID, val scopeId: RestrictedSessionId)
-  private class Canceled(val key: UUID, val sessionId: UserSessionId)
+  private class CanceledHistory(val commands: Map<UUID, UserSessionId>)
   private companion object {
     const val BEGIN = "finds.webauthn.additional-begin"
     const val CANCELED = "finds.webauthn.additional-canceled"
+    const val MAX_CANCELED_COMMANDS = 64
     val UUID_PATTERN = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
   }
 }
