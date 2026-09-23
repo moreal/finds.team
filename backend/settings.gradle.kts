@@ -14,6 +14,7 @@ rootProject.name = "finds-team"
 include(
   "domain",
   "application",
+  "mail-core",
   "adapter-source",
   "adapter-persistence",
   "adapter-graphql",
