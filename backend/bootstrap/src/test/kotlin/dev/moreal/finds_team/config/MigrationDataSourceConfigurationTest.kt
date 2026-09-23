@@ -1,6 +1,7 @@
 package dev.moreal.finds_team.config
 
 import dev.moreal.finds_team.Application
+import java.util.Base64
 import javax.sql.DataSource
 import org.flywaydb.core.Flyway
 import org.jooq.DSLContext
@@ -14,6 +15,11 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class MigrationDataSourceConfigurationTest {
+  private val mailConfiguration = arrayOf(
+    "--finds.mail.smtp.enabled=true", "--finds.mail.smtp.host=localhost", "--finds.mail.scan-interval=1h",
+    "--finds.mail.encryption-key=${Base64.getEncoder().encodeToString(ByteArray(32) { 7 })}",
+  )
+
   @Test
   fun `production refuses a shared runtime and migrator username`() {
     PostgreSQLContainer("postgres:17-alpine").use { postgres ->
@@ -21,6 +27,7 @@ class MigrationDataSourceConfigurationTest {
       for (profile in listOf("prod", "production")) {
         val failure = assertFailsWith<Exception> {
           SpringApplicationBuilder(Application::class.java).web(WebApplicationType.NONE).run(
+            *mailConfiguration,
             "--spring.profiles.active=$profile",
             "--spring.datasource.url=${postgres.jdbcUrl}",
             "--spring.datasource.username=${postgres.username}",
@@ -53,6 +60,7 @@ class MigrationDataSourceConfigurationTest {
         }
       }
       SpringApplicationBuilder(Application::class.java).web(WebApplicationType.NONE).run(
+        *mailConfiguration,
         "--spring.profiles.active=production",
         "--spring.datasource.url=${postgres.jdbcUrl}",
         "--spring.datasource.username=finds_app",

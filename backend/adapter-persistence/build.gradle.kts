@@ -19,6 +19,8 @@ dependencies {
   testImplementation(libs.testcontainers.postgresql)
   testImplementation(libs.testcontainers.junit)
   testImplementation(testFixtures(project(":application")))
+  testImplementation(project(":adapter-notification"))
+  testImplementation(libs.kotlinx.coroutines.core)
   testImplementation(libs.logback.classic)
   testRuntimeOnly(libs.junit.platform.launcher)
   add(codegen.implementationConfigurationName, libs.jooq.codegen.lib)

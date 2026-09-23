@@ -10,6 +10,16 @@ import dev.moreal.finds.application.port.SourceFetchPort
 import dev.moreal.finds.application.port.SuccessfulCrawlPort
 import dev.moreal.finds.application.port.TransactionPort
 import dev.moreal.finds.application.port.MailPayloadCrypto
+import dev.moreal.finds.application.port.MailOutbox
+import dev.moreal.finds.application.port.VerificationCodeNotifier
+import dev.moreal.finds.notification.MailVerificationCodeNotifier
+import dev.moreal.finds.notification.MailOutboxDispatcher
+import dev.moreal.finds.notification.MailDispatchMetrics
+import dev.moreal.finds.notification.DispatchOutcome
+import dev.moreal.finds.persistence.JooqMailOutbox
+import dev.moreal.mail.MailTransport
+import dev.moreal.mail.Mailbox
+import dev.moreal.finds_team.mail.ScheduledMailDispatcher
 import dev.moreal.finds.application.usecase.CrawlAllDue
 import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
@@ -50,8 +60,8 @@ import org.jooq.impl.DSL
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.DependsOn
-import org.springframework.beans.factory.ObjectProvider
 import java.time.Instant
+import java.time.Duration
 import javax.sql.DataSource
 
 @Configuration(proxyBeanMethods = false)
@@ -64,8 +74,29 @@ class RuntimeConfiguration {
   fun careerSites(context: DSLContext): CareerSiteRepository = JooqCareerSiteRepository(context)
 
   @Bean
-  fun transactions(context: DSLContext, crypto: ObjectProvider<MailPayloadCrypto>): TransactionPort =
-    JooqTransactionAdapter(context) { crypto.getIfAvailable() }
+  fun transactions(context: DSLContext, crypto: MailPayloadCrypto): TransactionPort =
+    JooqTransactionAdapter(context) { crypto }
+
+  @Bean
+  fun mailOutbox(context: DSLContext, crypto: MailPayloadCrypto): MailOutbox = JooqMailOutbox(context, crypto)
+
+  @Bean
+  fun verificationCodeNotifier(clock: ClockPort): VerificationCodeNotifier = MailVerificationCodeNotifier(clock)
+
+  @Bean
+  fun mailOutboxDispatcher(outbox: MailOutbox, crypto: MailPayloadCrypto, transport: MailTransport,
+    clock: ClockPort, properties: MailProperties, registry: MeterRegistry): MailOutboxDispatcher =
+    MailOutboxDispatcher(outbox, crypto, transport, Mailbox(properties.sender, properties.senderName), clock,
+      properties.dispatch, object : MailDispatchMetrics {
+        override fun record(outcome: DispatchOutcome) {
+          registry.counter("finds.mail.dispatch", "outcome", outcome.name).increment()
+        }
+        override fun queueAge(age: Duration) { registry.timer("finds.mail.queue.age").record(age) }
+      })
+
+  @Bean
+  fun scheduledMailDispatcher(dispatcher: MailOutboxDispatcher, scope: ManagedCoroutineScope,
+    registry: MeterRegistry) = ScheduledMailDispatcher(dispatcher::dispatch, scope, registry)
 
   @Bean
   fun postings(context: DSLContext): PostingRepository = JooqPostingRepository(context)

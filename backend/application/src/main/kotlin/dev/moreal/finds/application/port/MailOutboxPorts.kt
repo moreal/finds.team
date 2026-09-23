@@ -45,6 +45,7 @@ data class MailOutboxLease(
   val attemptCount: Int,
   /** A prior worker may have sent this message. Apply provider idempotency policy before sending. */
   val recovered: Boolean,
+  val createdAt: Instant,
 )
 
 /** Transaction-compatible enqueue only; encryption uses a loaded key and performs no external I/O. */

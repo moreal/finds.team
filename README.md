@@ -14,7 +14,7 @@ docker compose up -d postgres
 docker compose run --rm postgres-roles
 nix develop
 cd backend
-./gradlew :bootstrap:bootRun
+SPRING_PROFILES_ACTIVE=dev FINDS_MAIL_RECORDING=true ./gradlew :bootstrap:bootRun
 ```
 
 ### Frontend workspace
@@ -75,6 +75,10 @@ docker compose down
 The opt-in `app` Compose profile builds the Spring Boot and TanStack Start
 production images and exposes one Caddy origin at `http://127.0.0.1:8080`:
 
+The backend explicitly uses the `dev` Spring profile and recording mail for this
+local topology; it sends no external mail. External deployments must supply the
+production mail settings described below.
+
 ```sh
 docker compose --profile app up -d --build
 pnpm --dir frontend exec playwright test e2e/same-origin-routing.spec.ts
@@ -133,6 +137,40 @@ Durations, concurrency, retry backoff, close grace, sitemap bounds, response
 limits, and the GraphQL body limit are normal Spring configuration properties
 under `finds.source`, `finds.crawl`, and `finds.graphql`.
 
+### Verification mail
+
+Default and production startup require an enabled SMTP or SES transport and an
+external AES-256 key. Inject a Base64-encoded 32-byte random key through
+`FINDS_MAIL_ENCRYPTION_KEY`, with its positive version in
+`FINDS_MAIL_ACTIVE_KEY_VERSION`. Never store this key in the database or repository.
+Set `FINDS_MAIL_SENDER` to the verified sending address.
+
+Enable SMTP using `FINDS_MAIL_SMTP_ENABLED=true`, `FINDS_MAIL_SMTP_HOST`, and
+`FINDS_MAIL_SMTP_PORT`. Credentials bind through `finds.mail.smtp.username` and
+`finds.mail.smtp.password` (Spring environment variables
+`FINDS_MAIL_SMTP_USERNAME` and `FINDS_MAIL_SMTP_PASSWORD`). TLS defaults to required
+STARTTLS; `finds.mail.smtp.tls=IMPLICIT` selects implicit TLS, and `NONE` is an
+explicit trusted-local-relay setting. Enable SES using
+`FINDS_MAIL_SES_ENABLED=true` and `FINDS_MAIL_SES_REGION`; SES uses the default AWS
+credential chain. `finds.mail.ses.configuration-set` is optional.
+
+Provider `priority` values under `finds.mail.smtp` and `finds.mail.ses` determine
+order (larger first, defaults 100 and 50). Each provider has bounded retries under
+`finds.mail.retry`; only definite temporary rejection permits retry or fallback.
+`finds.mail.dispatch` configures the batch, lease, total send timeout, maximum
+outbox attempts and retry delays. The lease must exceed the send timeout by at
+least five seconds. SMTP also has connect/read timeouts. Expiry is checked before
+every provider attempt. An ambiguous send or recovered lease is held until expiry,
+because neither SMTP Message-ID nor SES tags guarantee deduplication.
+
+On key rotation, keep old Base64 keys in `finds.mail.retained-keys` keyed by their
+integer version until all outbox payloads for those versions expire or are
+redacted. The active version must not also appear in this map. Explicit `dev` or
+`test` with `FINDS_MAIL_RECORDING=true` may use an ephemeral in-memory key; queued
+development mail cannot survive a restart unless a stable external key is supplied.
+Recording cannot be combined with `production`/`prod` or an enabled real provider.
+Metrics contain only categorical outcomes, provider names, latency and queue age.
+
 ### Database roles and existing volumes
 
 The checked-in Compose credentials are only for local development. For an
@@ -157,8 +195,9 @@ and grants themselves; the bundled SQL provisions `finds_migrator` and
 `finds_app`. Future migrations must explicitly grant their runtime privileges.
 
 Set `SPRING_PROFILES_ACTIVE=production` (or `prod`) in deployed environments;
-startup rejects equal runtime and migrator usernames. The app Compose profile
-sets this automatically. The runtime login has read/insert permission only on
+startup rejects equal runtime and migrator usernames. The local app Compose
+profile uses `dev` with recording mail and still supplies distinct database roles.
+The runtime login has read/insert permission only on
 the audit and security ledgers, no ownership or role membership, and no schema
 CREATE permission. It cannot change Flyway history, disable triggers, or
 truncate the audit ledger. The migrator remains a privileged operational

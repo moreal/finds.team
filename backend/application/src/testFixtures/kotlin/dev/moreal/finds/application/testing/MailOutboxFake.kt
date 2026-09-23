@@ -38,7 +38,7 @@ class MailOutboxFake(private val crypto: MailPayloadCrypto) : MailOutbox {
         MailOutboxLease(
           row.metadata, row.payload!!, owner, UUID.randomUUID(),
           minOf(now.plus(ttl), row.metadata.expiresAt).truncatedTo(ChronoUnit.MICROS),
-          row.attemptCount, row.state == "LEASED",
+          row.attemptCount, row.state == "LEASED", row.createdAt,
         ).also {
           row.state = "LEASED"
           row.lease = it

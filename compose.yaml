@@ -46,7 +46,9 @@ services:
       FINDS_DB_PASSWORD: ${FINDS_DB_PASSWORD:-finds}
       FINDS_MIGRATION_DB_USER: finds_migrator
       FINDS_MIGRATION_DB_PASSWORD: ${FINDS_MIGRATION_DB_PASSWORD:-finds}
-      SPRING_PROFILES_ACTIVE: production
+      # This Compose profile is explicitly local development: no external mail is sent.
+      SPRING_PROFILES_ACTIVE: dev
+      FINDS_MAIL_RECORDING: "true"
     depends_on:
       postgres:
         condition: service_healthy

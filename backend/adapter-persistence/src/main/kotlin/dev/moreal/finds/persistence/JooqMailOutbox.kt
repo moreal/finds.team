@@ -69,6 +69,7 @@ class JooqMailOutbox(private val context: DSLContext, private val crypto: MailPa
           leaseExpiresAt = leaseExpiresAt,
           attemptCount = row.attemptCount!!,
           recovered = row.state == "LEASED",
+          createdAt = row.createdAt!!.toInstant(),
         )
       }
     }

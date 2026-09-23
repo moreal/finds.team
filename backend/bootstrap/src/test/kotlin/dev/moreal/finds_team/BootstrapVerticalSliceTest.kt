@@ -6,6 +6,8 @@ import dev.moreal.finds.application.port.SourceDiscoveryPort
 import dev.moreal.finds.application.port.SourceFetchPort
 import dev.moreal.finds.application.port.SourceFetchResult
 import dev.moreal.finds.application.port.TransactionPort
+import dev.moreal.finds.application.port.VerificationCodeNotifier
+import dev.moreal.finds.notification.MailOutboxDispatcher
 import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
 import dev.moreal.finds.application.usecase.RegisterCareerSite
@@ -51,6 +53,9 @@ class BootstrapVerticalSliceTest {
     SpringApplicationBuilder(Application::class.java)
       .web(WebApplicationType.NONE)
       .run(
+        "--spring.profiles.active=test",
+        "--finds.mail.recording=true",
+        "--finds.mail.scan-interval=1h",
         "--spring.datasource.url=${container.jdbcUrl}",
         "--spring.datasource.username=${container.username}",
         "--spring.datasource.password=${container.password}",
@@ -59,6 +64,8 @@ class BootstrapVerticalSliceTest {
         "--finds.crawl.scan-interval=1h",
       )
       .use { context ->
+        context.getBean(VerificationCodeNotifier::class.java)
+        context.getBean(MailOutboxDispatcher::class.java)
         context.getBean(TransactionPort::class.java).execute { it.careerSites.findEnabled() }
         val result = context.getBean(graphql.GraphQL::class.java).execute(
           "{ jobPostings { totalCount } crawlStatuses { careerSiteId } }",

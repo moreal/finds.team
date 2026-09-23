@@ -33,6 +33,37 @@ management:
         enabled: true
 
 finds:
+  mail:
+    sender: ${FINDS_MAIL_SENDER:verify@finds.team}
+    sender-name: ${FINDS_MAIL_SENDER_NAME:finds.team}
+    recording: ${FINDS_MAIL_RECORDING:false}
+    encryption-key: ${FINDS_MAIL_ENCRYPTION_KEY:}
+    active-key-version: ${FINDS_MAIL_ACTIVE_KEY_VERSION:1}
+    scan-interval: 5s
+    smtp:
+      enabled: ${FINDS_MAIL_SMTP_ENABLED:false}
+      priority: 100
+      host: ${FINDS_MAIL_SMTP_HOST:}
+      port: ${FINDS_MAIL_SMTP_PORT:587}
+      tls: STARTTLS
+      connect-timeout: 5s
+      read-timeout: 10s
+    ses:
+      enabled: ${FINDS_MAIL_SES_ENABLED:false}
+      priority: 50
+      region: ${FINDS_MAIL_SES_REGION:}
+    retry:
+      max-attempts: 3
+      initial-delay: 100ms
+      maximum-delay: 1s
+      jitter-ratio: 0.2
+    dispatch:
+      owner: ${FINDS_MAIL_LEASE_OWNER:${HOSTNAME:local}-mail}
+      batch-size: 20
+      lease-duration: 2m
+      send-timeout: 30s
+      max-attempts: 3
+      retry-delays: [10s, 30s]
   source:
     user-agent-product: ${FINDS_USER_AGENT_PRODUCT:finds.team}
     robots-product-token: ${FINDS_ROBOTS_PRODUCT_TOKEN:findsteam}

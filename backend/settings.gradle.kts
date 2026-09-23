@@ -23,6 +23,7 @@ include(
   "mail-transport-ses",
   "adapter-source",
   "adapter-persistence",
+  "adapter-notification",
   "adapter-graphql",
   "bootstrap",
 )
