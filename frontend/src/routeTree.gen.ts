@@ -14,10 +14,14 @@ import { Route as JoinRouteImport } from './routes/join'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RecoverRouteImport } from './routes/recover'
 import { Route as AccountSecurityRouteImport } from './routes/account/security'
+import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as AdminAuditRouteImport } from './routes/admin/audit'
 import { Route as CompaniesSlugRouteImport } from './routes/companies/$slug'
 import { Route as JobsIndexRouteImport } from './routes/jobs/index'
 import { Route as JobsIdRouteImport } from './routes/jobs/$id'
 import { Route as SkillsSlugRouteImport } from './routes/skills/$slug'
+import { Route as AdminSitesIndexRouteImport } from './routes/admin/sites/index'
+import { Route as AdminSitesIdRouteImport } from './routes/admin/sites/$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -44,6 +48,16 @@ const AccountSecurityRoute = AccountSecurityRouteImport.update({
   path: '/account/security',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAuditRoute = AdminAuditRouteImport.update({
+  id: '/admin/audit',
+  path: '/admin/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CompaniesSlugRoute = CompaniesSlugRouteImport.update({
   id: '/companies/$slug',
   path: '/companies/$slug',
@@ -64,6 +78,16 @@ const SkillsSlugRoute = SkillsSlugRouteImport.update({
   path: '/skills/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminSitesIndexRoute = AdminSitesIndexRouteImport.update({
+  id: '/admin/sites/',
+  path: '/admin/sites/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSitesIdRoute = AdminSitesIdRouteImport.update({
+  id: '/admin/sites/$id',
+  path: '/admin/sites/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -71,10 +95,14 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/recover': typeof RecoverRoute
   '/account/security': typeof AccountSecurityRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/companies/$slug': typeof CompaniesSlugRoute
   '/jobs/$id': typeof JobsIdRoute
   '/skills/$slug': typeof SkillsSlugRoute
+  '/admin/': typeof AdminIndexRoute
   '/jobs/': typeof JobsIndexRoute
+  '/admin/sites/$id': typeof AdminSitesIdRoute
+  '/admin/sites/': typeof AdminSitesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -82,10 +110,14 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/recover': typeof RecoverRoute
   '/account/security': typeof AccountSecurityRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/companies/$slug': typeof CompaniesSlugRoute
   '/jobs/$id': typeof JobsIdRoute
   '/skills/$slug': typeof SkillsSlugRoute
+  '/admin': typeof AdminIndexRoute
   '/jobs': typeof JobsIndexRoute
+  '/admin/sites/$id': typeof AdminSitesIdRoute
+  '/admin/sites': typeof AdminSitesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -94,10 +126,14 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/recover': typeof RecoverRoute
   '/account/security': typeof AccountSecurityRoute
+  '/admin/audit': typeof AdminAuditRoute
   '/companies/$slug': typeof CompaniesSlugRoute
   '/jobs/$id': typeof JobsIdRoute
   '/skills/$slug': typeof SkillsSlugRoute
+  '/admin/': typeof AdminIndexRoute
   '/jobs/': typeof JobsIndexRoute
+  '/admin/sites/$id': typeof AdminSitesIdRoute
+  '/admin/sites/': typeof AdminSitesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -107,10 +143,14 @@ export interface FileRouteTypes {
     | '/login'
     | '/recover'
     | '/account/security'
+    | '/admin/audit'
     | '/companies/$slug'
     | '/jobs/$id'
     | '/skills/$slug'
+    | '/admin/'
     | '/jobs/'
+    | '/admin/sites/$id'
+    | '/admin/sites/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -118,10 +158,14 @@ export interface FileRouteTypes {
     | '/login'
     | '/recover'
     | '/account/security'
+    | '/admin/audit'
     | '/companies/$slug'
     | '/jobs/$id'
     | '/skills/$slug'
+    | '/admin'
     | '/jobs'
+    | '/admin/sites/$id'
+    | '/admin/sites'
   id:
     | '__root__'
     | '/'
@@ -129,10 +173,14 @@ export interface FileRouteTypes {
     | '/login'
     | '/recover'
     | '/account/security'
+    | '/admin/audit'
     | '/companies/$slug'
     | '/jobs/$id'
     | '/skills/$slug'
+    | '/admin/'
     | '/jobs/'
+    | '/admin/sites/$id'
+    | '/admin/sites/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -141,10 +189,14 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RecoverRoute: typeof RecoverRoute
   AccountSecurityRoute: typeof AccountSecurityRoute
+  AdminAuditRoute: typeof AdminAuditRoute
   CompaniesSlugRoute: typeof CompaniesSlugRoute
   JobsIdRoute: typeof JobsIdRoute
   SkillsSlugRoute: typeof SkillsSlugRoute
+  AdminIndexRoute: typeof AdminIndexRoute
   JobsIndexRoute: typeof JobsIndexRoute
+  AdminSitesIdRoute: typeof AdminSitesIdRoute
+  AdminSitesIndexRoute: typeof AdminSitesIndexRoute
 }
 
 declare module '@tanstack/solid-router' {
@@ -184,6 +236,20 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof AccountSecurityRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/': {
+      id: '/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/audit': {
+      id: '/admin/audit'
+      path: '/admin/audit'
+      fullPath: '/admin/audit'
+      preLoaderRoute: typeof AdminAuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/companies/$slug': {
       id: '/companies/$slug'
       path: '/companies/$slug'
@@ -212,6 +278,20 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof SkillsSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/sites/': {
+      id: '/admin/sites/'
+      path: '/admin/sites'
+      fullPath: '/admin/sites/'
+      preLoaderRoute: typeof AdminSitesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/sites/$id': {
+      id: '/admin/sites/$id'
+      path: '/admin/sites/$id'
+      fullPath: '/admin/sites/$id'
+      preLoaderRoute: typeof AdminSitesIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -221,10 +301,14 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RecoverRoute: RecoverRoute,
   AccountSecurityRoute: AccountSecurityRoute,
+  AdminAuditRoute: AdminAuditRoute,
   CompaniesSlugRoute: CompaniesSlugRoute,
   JobsIdRoute: JobsIdRoute,
   SkillsSlugRoute: SkillsSlugRoute,
+  AdminIndexRoute: AdminIndexRoute,
   JobsIndexRoute: JobsIndexRoute,
+  AdminSitesIdRoute: AdminSitesIdRoute,
+  AdminSitesIndexRoute: AdminSitesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

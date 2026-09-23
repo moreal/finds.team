@@ -1,11 +1,13 @@
 import { createServer } from "node:http";
 import { detailData } from "./discovery-data.ts";
+import { adminData, adminRequests } from './admin-data.ts';
 
 const requests: { variables: any }[] = [];
 const pendingRegistrations = new Map<string, string>();
 const acceptedRegistrations = new Map<string, Set<string>>();
 const canceledRegistrations = new Map<string, Set<string>>();
 createServer(async (req, res) => {
+  if (req.url === '/__admin-requests') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(adminRequests)); return; }
   const account = /(?:^|;\s*)security-account=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
   if (req.url === '/auth/csrf') {
     res.setHeader('content-type', 'application/json');
@@ -41,6 +43,14 @@ createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const { variables, operationName } = JSON.parse(body);
+    if (operationName === 'AdminOperationsStatusesQuery') {
+      const fault = /admin-fault=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
+      if (fault === 'http-forbidden') { res.writeHead(403); res.end(); return; }
+      if (fault === 'graphql-forbidden') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: null, errors: [{ message: 'Private diagnostic', extensions: { code: 'FORBIDDEN' } }] })); return; }
+      if (fault === 'semantic-forbidden') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: { crawlStatuses: { edges: [], totalCount: 0, error: { code: 'FORBIDDEN', message: 'Private diagnostic' }, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null } } } })); return; }
+    }
+    const admin = adminData(operationName, variables, req.headers.cookie ?? '');
+    if (admin) { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: admin })); return; }
     if (operationName === 'AccountOperationsViewerQuery') {
       const account = /(?:^|;\s*)security-account=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
       if (account === 'restricted' || (account && pendingRegistrations.has(account))) { res.writeHead(403); res.end(); return; }

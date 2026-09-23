@@ -1,0 +1,14 @@
+.admin-page { max-width: 72rem; margin: 0 auto; padding: clamp(1rem, 4vw, 3rem); }
+.admin-page nav { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1.5rem; }
+.admin-page h1, .admin-page h2 { text-wrap: balance; }
+.admin-page p { text-wrap: pretty; overflow-wrap: anywhere; }
+.admin-page section { margin-block: 2rem; }
+.admin-records { list-style: none; padding: 0; display: grid; gap: 1rem; }
+.admin-records li { padding: 1.25rem; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-surface); overflow-wrap: anywhere; }
+.admin-records .ui-badge { margin-inline-start: 1rem; }
+.admin-page time, .admin-records p { font-variant-numeric: tabular-nums; }
+.admin-form, .admin-filters { display: grid; gap: 1rem; }
+.admin-filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); align-items: end; }
+.admin-filters label { display: grid; gap: .4rem; }
+.admin-filters select { min-height: 44px; width: 100%; font: inherit; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border-control); border-radius: var(--radius-sm); padding: .5rem; }
+.admin-page dd { margin-inline: 0; overflow-wrap: anywhere; margin-bottom: .75rem; }

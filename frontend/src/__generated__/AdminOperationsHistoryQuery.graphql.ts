@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<c351376754f3a7af580708d97c048293>>
+ * @generated SignedSource<<506b67c817e84d31ccf615af64d40a99>>
  * @lightSyntaxTransform
  * @nogrep
  * @codegen-command: node scripts/relay.ts
@@ -13,6 +13,7 @@ import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
 export type ApiErrorCode = "ALREADY_REGISTERED" | "AMBIGUOUS_PROVIDER" | "BUSY" | "CRAWL_FAILED" | "DISABLED" | "DISCOVERY_FAILED" | "FORBIDDEN" | "IDEMPOTENCY_CONFLICT" | "INTERNAL" | "INVALID_CURSOR" | "INVALID_FILTER" | "INVALID_INPUT" | "INVALID_PAGE" | "INVALID_URL" | "LAST_CREDENTIAL" | "NOT_DUE" | "NOT_FOUND" | "UNKNOWN_SKILL" | "UNSUPPORTED_PROVIDER" | "%future added value";
 export type CrawlOutcome = "FAILED" | "SUCCESS" | "%future added value";
+export type SourceProvider = "FLEX" | "GREETING" | "NINEHIRE" | "%future added value";
 export type AdminOperationsHistoryQuery$variables = {
   after?: string | null | undefined;
   first?: number | null | undefined;
@@ -20,6 +21,7 @@ export type AdminOperationsHistoryQuery$variables = {
 };
 export type AdminOperationsHistoryQuery$data = {
   readonly careerSite: {
+    readonly canonicalBaseUrl: string;
     readonly crawlHistory: {
       readonly edges: ReadonlyArray<{
         readonly cursor: string;
@@ -43,7 +45,9 @@ export type AdminOperationsHistoryQuery$data = {
       readonly finishedAt: string | null | undefined;
       readonly outcome: CrawlOutcome | null | undefined;
     } | null | undefined;
+    readonly displayName: string;
     readonly id: string;
+    readonly provider: SourceProvider;
     readonly slug: string;
   } | null | undefined;
 };
@@ -93,17 +97,38 @@ v6 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
-  "name": "outcome",
+  "name": "displayName",
   "storageKey": null
 },
 v7 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
-  "name": "finishedAt",
+  "name": "canonicalBaseUrl",
   "storageKey": null
 },
 v8 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "provider",
+  "storageKey": null
+},
+v9 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "outcome",
+  "storageKey": null
+},
+v10 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "finishedAt",
+  "storageKey": null
+},
+v11 = {
   "alias": null,
   "args": null,
   "concreteType": "CrawlSummary",
@@ -111,26 +136,26 @@ v8 = {
   "name": "crawlSummary",
   "plural": false,
   "selections": [
-    (v6/*: any*/),
-    (v7/*: any*/)
+    (v9/*: any*/),
+    (v10/*: any*/)
   ],
   "storageKey": null
 },
-v9 = {
+v12 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "cursor",
   "storageKey": null
 },
-v10 = {
+v13 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "__typename",
   "storageKey": null
 },
-v11 = {
+v14 = {
   "alias": null,
   "args": null,
   "concreteType": "PageInfo",
@@ -169,14 +194,14 @@ v11 = {
   ],
   "storageKey": null
 },
-v12 = {
+v15 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
   "name": "totalCount",
   "storageKey": null
 },
-v13 = [
+v16 = [
   {
     "alias": null,
     "args": null,
@@ -192,17 +217,17 @@ v13 = [
     "storageKey": null
   }
 ],
-v14 = {
+v17 = {
   "alias": null,
   "args": null,
   "concreteType": "DiscoveryError",
   "kind": "LinkedField",
   "name": "error",
   "plural": false,
-  "selections": (v13/*: any*/),
+  "selections": (v16/*: any*/),
   "storageKey": null
 },
-v15 = [
+v18 = [
   {
     "kind": "Variable",
     "name": "after",
@@ -235,7 +260,10 @@ return {
         "selections": [
           (v4/*: any*/),
           (v5/*: any*/),
+          (v6/*: any*/),
+          (v7/*: any*/),
           (v8/*: any*/),
+          (v11/*: any*/),
           {
             "alias": "crawlHistory",
             "args": null,
@@ -252,7 +280,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v9/*: any*/),
+                  (v12/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -266,16 +294,16 @@ return {
                         "kind": "FragmentSpread",
                         "name": "AdminOperations_crawl"
                       },
-                      (v10/*: any*/)
+                      (v13/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v11/*: any*/),
-              (v12/*: any*/),
-              (v14/*: any*/)
+              (v14/*: any*/),
+              (v15/*: any*/),
+              (v17/*: any*/)
             ],
             "storageKey": null
           }
@@ -306,10 +334,13 @@ return {
         "selections": [
           (v4/*: any*/),
           (v5/*: any*/),
+          (v6/*: any*/),
+          (v7/*: any*/),
           (v8/*: any*/),
+          (v11/*: any*/),
           {
             "alias": null,
-            "args": (v15/*: any*/),
+            "args": (v18/*: any*/),
             "concreteType": "CrawlRunConnection",
             "kind": "LinkedField",
             "name": "crawlHistory",
@@ -323,7 +354,7 @@ return {
                 "name": "edges",
                 "plural": true,
                 "selections": [
-                  (v9/*: any*/),
+                  (v12/*: any*/),
                   {
                     "alias": null,
                     "args": null,
@@ -347,8 +378,8 @@ return {
                         "name": "startedAt",
                         "storageKey": null
                       },
-                      (v7/*: any*/),
-                      (v6/*: any*/),
+                      (v10/*: any*/),
+                      (v9/*: any*/),
                       {
                         "alias": null,
                         "args": null,
@@ -416,25 +447,25 @@ return {
                         "kind": "LinkedField",
                         "name": "error",
                         "plural": false,
-                        "selections": (v13/*: any*/),
+                        "selections": (v16/*: any*/),
                         "storageKey": null
                       },
-                      (v10/*: any*/)
+                      (v13/*: any*/)
                     ],
                     "storageKey": null
                   }
                 ],
                 "storageKey": null
               },
-              (v11/*: any*/),
-              (v12/*: any*/),
-              (v14/*: any*/)
+              (v14/*: any*/),
+              (v15/*: any*/),
+              (v17/*: any*/)
             ],
             "storageKey": null
           },
           {
             "alias": null,
-            "args": (v15/*: any*/),
+            "args": (v18/*: any*/),
             "filters": null,
             "handle": "connection",
             "key": "AdminOperations_crawlHistory",
@@ -447,7 +478,7 @@ return {
     ]
   },
   "params": {
-    "cacheID": "72679967db4298f174fef23681fabd7d",
+    "cacheID": "842805b5981ed643d94373f105b25dfa",
     "id": null,
     "metadata": {
       "connection": [
@@ -464,11 +495,11 @@ return {
     },
     "name": "AdminOperationsHistoryQuery",
     "operationKind": "query",
-    "text": "query AdminOperationsHistoryQuery(\n  $slug: String!\n  $first: Int = 20\n  $after: String\n) {\n  careerSite(slug: $slug) {\n    id\n    slug\n    crawlSummary {\n      outcome\n      finishedAt\n    }\n    crawlHistory(first: $first, after: $after) {\n      edges {\n        cursor\n        node {\n          ...AdminOperations_crawl\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment AdminOperations_crawl on CrawlRun {\n  id\n  careerSiteId\n  startedAt\n  finishedAt\n  outcome\n  counts {\n    fetched\n    inserted\n    updated\n    touched\n    missing\n    closed\n    reopened\n  }\n  error {\n    code\n    message\n  }\n}\n"
+    "text": "query AdminOperationsHistoryQuery(\n  $slug: String!\n  $first: Int = 20\n  $after: String\n) {\n  careerSite(slug: $slug) {\n    id\n    slug\n    displayName\n    canonicalBaseUrl\n    provider\n    crawlSummary {\n      outcome\n      finishedAt\n    }\n    crawlHistory(first: $first, after: $after) {\n      edges {\n        cursor\n        node {\n          ...AdminOperations_crawl\n          id\n          __typename\n        }\n      }\n      pageInfo {\n        hasNextPage\n        hasPreviousPage\n        startCursor\n        endCursor\n      }\n      totalCount\n      error {\n        code\n        message\n      }\n    }\n  }\n}\n\nfragment AdminOperations_crawl on CrawlRun {\n  id\n  careerSiteId\n  startedAt\n  finishedAt\n  outcome\n  counts {\n    fetched\n    inserted\n    updated\n    touched\n    missing\n    closed\n    reopened\n  }\n  error {\n    code\n    message\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "c0a3fe417bc824a67e999e7a6704fe14";
+(node as any).hash = "1cc70fc6ac3f0dbf17dc322173a58886";
 
 export default node;

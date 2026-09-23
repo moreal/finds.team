@@ -1,5 +1,18 @@
 import { graphql } from "relay-runtime";
 
+export const viewer = graphql`
+  query AdminOperationsViewerQuery { viewer { user { id roles } } }
+`;
+export const sites = graphql`
+  query AdminOperationsSitesQuery($first: Int = 50, $after: String) {
+    careerSites(first: $first, after: $after) @connection(key: "AdminOperations_careerSites") {
+      edges { cursor node { id slug displayName canonicalBaseUrl provider crawlSummary { outcome finishedAt } } }
+      pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+      totalCount error { code message }
+    }
+  }
+`;
+
 export const crawl = graphql`
   fragment AdminOperations_crawl on CrawlRun
   @refetchable(queryName: "AdminOperationsCrawlRefetchQuery") {
@@ -28,7 +41,7 @@ export const auditPage = graphql`
 export const history = graphql`
   query AdminOperationsHistoryQuery($slug: String!, $first: Int = 20, $after: String) {
     careerSite(slug: $slug) {
-      id slug
+      id slug displayName canonicalBaseUrl provider
       crawlSummary { outcome finishedAt }
       crawlHistory(first: $first, after: $after)
       @connection(key: "AdminOperations_crawlHistory") {
