@@ -9,6 +9,7 @@ import dev.moreal.finds.application.port.*
 import dev.moreal.finds.application.security.Actor
 import dev.moreal.finds.application.security.AuthenticationStrength
 import dev.moreal.finds.domain.identity.*
+import java.util.Base64
 
 data class CompletePasskeyEnrollmentCommand(
   val sessionId: RestrictedSessionId,
@@ -48,8 +49,20 @@ class CompletePasskeyEnrollment(
         return@execute CompletePasskeyEnrollmentResult.Rejected
       val now = clock.now()
       val key = CommandRequestKey(user.id.value.toString(), "enrollment.complete", checkNotNull(command.metadata.idempotencyKey))
-      // Stable semantic IDs only: no session identifier, recovery secret, challenge or public key.
-      val requestHash = CanonicalCommandEncoder.hash(mapOf("user" to user.id.value.toString(), "credential" to proof.credential.id.value))
+      // Fingerprint every persisted input; only the digest is stored. Ceremony proofs, session IDs,
+      // generated timestamps and recovery plaintext are not semantic credential inputs.
+      val credential = proof.credential
+      val requestHash = CanonicalCommandEncoder.hash(mapOf(
+        "user" to user.id.value.toString(),
+        "credential" to mapOf(
+          "id" to credential.id.value,
+          "publicKeyCose" to Base64.getEncoder().encodeToString(credential.publicKeyCose),
+          "signatureCount" to credential.signatureCount,
+          "transports" to credential.transports.sorted(),
+          "backupEligible" to credential.backupEligible,
+          "backedUp" to credential.backedUp,
+        ),
+      ))
       when (val reservation = tx.commandRequests.reserve(CommandRequest(key, requestHash, now, CommandRetention.AUDIT))) {
         CommandReservation.Conflict -> return@execute CompletePasskeyEnrollmentResult.IdempotencyConflict
         is CommandReservation.Replay -> {

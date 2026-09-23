@@ -11,6 +11,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 class EnrollmentTest {
@@ -137,11 +138,9 @@ class EnrollmentTest {
     val f = Fixture()
     f.request()
     val code = f.code()
-    Executors.newFixedThreadPool(2).use { pool ->
-      val results = pool.invokeAll(List(2) { Callable { f.verify(code) } }).map { it.get() }
-      assertEquals(1, results.count { it is VerifyEnrollmentOtpResult.Verified })
-      assertEquals(1, results.count { it == VerifyEnrollmentOtpResult.Rejected })
-    }
+    val results = runConcurrently { f.verify(code) }
+    assertEquals(1, results.count { it is VerifyEnrollmentOtpResult.Verified })
+    assertEquals(1, results.count { it == VerifyEnrollmentOtpResult.Rejected })
     assertEquals(1, f.tx.users.size)
   }
 
@@ -242,6 +241,47 @@ class EnrollmentTest {
   }
 
   @Test
+  fun `same credential ID with changed public key conflicts on enrollment replay`() {
+    assertMaterialConflict(credentialMaterial(), credentialMaterial(publicKey = byteArrayOf(4, 5, 6)))
+  }
+
+  @Test
+  fun `same credential ID with changed signature counter conflicts on enrollment replay`() {
+    assertMaterialConflict(credentialMaterial(), credentialMaterial(signatureCount = 1))
+  }
+
+  @Test
+  fun `same credential ID with changed transports conflicts on enrollment replay`() {
+    assertMaterialConflict(credentialMaterial(), credentialMaterial(transports = setOf("usb")))
+  }
+
+  @Test
+  fun `same credential ID with changed backup state conflicts on enrollment replay`() {
+    assertMaterialConflict(credentialMaterial(), credentialMaterial(backedUp = false))
+  }
+
+  @Test
+  fun `same credential ID with changed backup eligibility conflicts on enrollment replay`() {
+    assertMaterialConflict(credentialMaterial(backedUp = false), credentialMaterial(backupEligible = false, backedUp = false))
+  }
+
+  @Test
+  fun `transport order does not change enrollment semantics or replay recovery plaintext`() {
+    val f = Fixture()
+    val session = f.enroll()
+    val metadata = metadata()
+    val original = VerifiedPasskeyRegistration(session.userId, session.id,
+      credentialMaterial(transports = linkedSetOf("usb", "internal")))
+    assertIs<CompletePasskeyEnrollmentResult.Completed>(f.complete(session, original, metadata))
+    val reordered = VerifiedPasskeyRegistration(session.userId, session.id,
+      credentialMaterial(transports = linkedSetOf("internal", "usb")))
+    assertEquals(CompletePasskeyEnrollmentResult.AlreadyCompleted(session.userId), f.complete(session, reordered, metadata))
+    assertEquals(1, f.tx.credentials.size)
+    assertEquals(1, f.tx.auditEvents.size)
+    assertEquals(1, f.tx.recoveryCodes.size)
+  }
+
+  @Test
   fun `outbox failure rolls back request challenge and reservation so retry can issue`() {
     val f = Fixture()
     val metadata = metadata()
@@ -279,11 +319,9 @@ class EnrollmentTest {
     val f = Fixture()
     val session = f.enroll()
     val metadata = metadata()
-    Executors.newFixedThreadPool(2).use { pool ->
-      val results = pool.invokeAll(List(2) { Callable { f.complete(session, metadata = metadata) } }).map { it.get() }
-      assertEquals(1, results.count { it is CompletePasskeyEnrollmentResult.Completed })
-      assertEquals(1, results.count { it is CompletePasskeyEnrollmentResult.AlreadyCompleted })
-    }
+    val results = runConcurrently { f.complete(session, metadata = metadata) }
+    assertEquals(1, results.count { it is CompletePasskeyEnrollmentResult.Completed })
+    assertEquals(1, results.count { it is CompletePasskeyEnrollmentResult.AlreadyCompleted })
     assertEquals(1, f.tx.credentials.size)
     assertEquals(1, f.tx.auditEvents.size)
   }
@@ -304,6 +342,42 @@ class EnrollmentTest {
     credentials = setOf(CredentialId("already-registered")))
 
   private fun metadata() = CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID())
+
+  private fun assertMaterialConflict(original: PasskeyCredentialMaterial, changed: PasskeyCredentialMaterial) {
+    val f = Fixture()
+    val session = f.enroll()
+    val metadata = metadata()
+    val proof = VerifiedPasskeyRegistration(session.userId, session.id, original)
+    assertIs<CompletePasskeyEnrollmentResult.Completed>(f.complete(session, proof, metadata))
+    val changedProof = VerifiedPasskeyRegistration(session.userId, session.id, changed)
+    assertEquals(CompletePasskeyEnrollmentResult.IdempotencyConflict, f.complete(session, changedProof, metadata))
+    assertEquals(CompletePasskeyEnrollmentResult.AlreadyCompleted(session.userId), f.complete(session, proof, metadata))
+    val persisted = f.tx.credentials.single().material
+    assertContentEquals(original.publicKeyCose, persisted.publicKeyCose)
+    assertEquals(original.signatureCount, persisted.signatureCount)
+    assertEquals(original.transports, persisted.transports)
+    assertEquals(original.backupEligible, persisted.backupEligible)
+    assertEquals(original.backedUp, persisted.backedUp)
+    assertEquals(1, f.tx.auditEvents.size)
+    assertEquals(1, f.tx.recoveryCodes.size)
+  }
+
+  private fun credentialMaterial(publicKey: ByteArray = byteArrayOf(1, 2, 3), signatureCount: Long = 0,
+    transports: Set<String> = setOf("internal"), backupEligible: Boolean = true, backedUp: Boolean = true) =
+    PasskeyCredentialMaterial(CredentialId("credential-1"), publicKey, signatureCount, transports, backupEligible, backedUp)
+
+  private fun <T> runConcurrently(work: () -> T): List<T> {
+    val pool = Executors.newFixedThreadPool(2) { task ->
+      Thread(task, "enrollment-test").apply { isDaemon = true }
+    }
+    try {
+      return pool.invokeAll(List(2) { Callable { work() } }, 5, TimeUnit.SECONDS)
+        .map { it.get(1, TimeUnit.SECONDS) }
+    } finally {
+      pool.shutdownNow()
+      assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS), "Enrollment test executor did not terminate")
+    }
+  }
 
   private fun registration(session: RestrictedSession, userId: UserId = session.userId,
     sessionId: RestrictedSessionId = session.id, credentialId: CredentialId = CredentialId("credential-1")) =
