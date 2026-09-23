@@ -11,6 +11,7 @@ import { TextField } from '../../ui/TextField';
 import { Dialog } from '../../ui/Dialog';
 import { Link } from '../../ui/Link';
 import { RecoveryCodeDisplay } from './RecoveryCodeDisplay';
+import { additionalPasskeyCommand, beginAdditionalPasskey, cancelAdditionalPasskey, securityError, SecurityRequestError, type AdditionalPasskeyCommand } from './webauthn';
 import { accountFailureMessage, clearAccountRecords, type AccountFailure } from './AccountPageQuery';
 import './security.css';
 
@@ -43,7 +44,10 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
   const [code, setCode] = createSignal('');
   const [confirmation, setConfirmation] = createSignal<Confirmation>();
   const [unresolved, setUnresolved] = createSignal<PendingCommand>();
-  const controlsDisabled = () => !ready() || pending() || !!unresolved();
+  const [newLabel, setNewLabel] = createSignal('');
+  const [registration, setRegistration] = createSignal<AdditionalPasskeyCommand>();
+  const [cancelRecovery, setCancelRecovery] = createSignal(false);
+  const controlsDisabled = () => !ready() || pending() || !!unresolved() || !!registration();
   let disposed = false;
   onCleanup(() => { disposed = true; });
   onSettled(() => { setReady(true); });
@@ -106,6 +110,27 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     } catch (error) { setError(failure(error)); } finally { setPending(false); }
   }
   function abandonCommand() { setUnresolved(undefined); setConfirmation(undefined); setError(''); }
+  async function addPasskey(cancel = false) {
+    if (pending() || unresolved()) return;
+    const command = registration() ?? additionalPasskeyCommand(newLabel().trim());
+    setRegistration(command); setPending(true); setError(''); setMessage('');
+    try {
+      const result = cancel ? (await cancelAdditionalPasskey(command), 'cancelled') : await beginAdditionalPasskey(command);
+      setRegistration(undefined); setCancelRecovery(false);
+      if (result === 'added') {
+        setNewLabel('');
+        await load();
+        setMessage('Passkey를 추가했어요. 현재 로그인은 유지돼요.');
+      } else setMessage('Passkey 등록을 취소했어요. 계정 관리를 계속할 수 있어요.');
+    } catch (error) {
+      setRegistration({ ...command });
+      setCancelRecovery(command.stage === 'cancel');
+      if (error instanceof SecurityRequestError && error.status === 403) {
+        if (command.stage === 'begin') setRegistration(undefined);
+        setError('최근 Passkey 인증이 필요해요. Passkey로 다시 로그인해 주세요.');
+      } else setError(securityError(error));
+    } finally { setPending(false); }
+  }
   return <main class="security-page" data-account-id={viewer() ? readFragment<AccountOperations_user$key>(environment(), operations.user, viewer()!.user).id : undefined}><h1>계정 보안</h1>
     {code() ? <RecoveryCodeDisplay code={code()} onDone={() => setCode('')} /> : <>
       <p>Passkey와 복구 코드, 로그인된 기기를 관리하세요.</p>
@@ -113,7 +138,17 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
       {!viewer() && <><Link href="/login">Passkey로 로그인</Link><Button variant="secondary" disabled={!ready() || pending()} onClick={() => void refresh()}>다시 시도</Button></>}
       {viewer() && <>
         <section aria-labelledby="passkeys-title"><h2 id="passkeys-title">Passkey</h2>
-          <p>추가 Passkey 등록은 현재 준비 중이에요. 마지막 Passkey는 삭제할 수 없어요.</p>
+          <p>기기를 잃어버려도 로그인할 수 있도록 Passkey를 두 개 이상 등록하는 것을 권장해요. 마지막 Passkey는 삭제할 수 없어요.</p>
+          <form class="security-form" onSubmit={event => { event.preventDefault(); if (!controlsDisabled()) void addPasskey(); }}>
+            <TextField label="새 Passkey 이름" value={newLabel()} required maxlength={80} disabled={controlsDisabled()} onInput={event => setNewLabel(event.currentTarget.value)} />
+            <Button type="submit" disabled={controlsDisabled() || !newLabel().trim()}>Passkey 추가</Button>
+          </form>
+          {registration() && <section aria-label="완료되지 않은 Passkey 등록">
+            <p>{cancelRecovery() ? '등록 취소를 확인하지 못했어요. 취소를 다시 시도하면 계정 관리를 계속할 수 있어요.' : '등록 상태를 확인하는 동안 다른 계정 변경은 잠시 사용할 수 없어요. 응답을 받지 못했다면 같은 등록을 다시 시도해 주세요.'}</p>
+            <Button disabled={pending()} onClick={() => void addPasskey()}>{cancelRecovery() ? '등록 취소 다시 시도' : '같은 등록 다시 시도'}</Button>
+            {!cancelRecovery() && registration()!.stage !== 'complete' && <Button variant="secondary" disabled={pending()} onClick={() => void addPasskey(true)}>등록 취소</Button>}
+            <Link href="/login">Passkey로 다시 인증</Link>
+          </section>}
           {!viewer()!.passkeys.edges.length && <p>등록된 Passkey가 없어요.</p>}
           <ul class="security-records"><For each={viewer()!.passkeys.edges}>{edge => <PasskeyRow item={edge.node} pending={controlsDisabled()}
             onRename={label => void mutate(operations.rename, 'renamePasskey', { passkeyId: edge.node.id, label })}
@@ -130,7 +165,7 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
           <Button variant="danger" disabled={controlsDisabled()} onClick={() => setConfirmation({ title: '다른 세션 모두 종료', description: '현재 세션을 제외한 모든 기기에서 로그아웃돼요.', button: '종료 확인', document: operations.revokeOthers, field: 'revokeOtherSessions', input: {} })}>다른 세션 모두 종료</Button>
         </section>
         {unresolved() && !confirmation() && <section aria-label="완료되지 않은 변경"><p>응답을 받지 못했어요. 이미 처리되었을 수 있으니 같은 요청을 다시 확인해 주세요.</p><Button disabled={pending()} onClick={() => void executeCommand(unresolved()!)}>같은 변경 다시 시도</Button><Button variant="ghost" disabled={pending()} onClick={abandonCommand}>현재 요청의 재시도 중단</Button></section>}
-        {error() && !unresolved() && <div class="security-actions"><Button variant="secondary" disabled={pending()} onClick={() => void refresh()}>다시 불러오기</Button><Link href="/login">Passkey로 다시 인증</Link></div>}
+        {error() && !unresolved() && !registration() && <div class="security-actions"><Button variant="secondary" disabled={pending()} onClick={() => void refresh()}>다시 불러오기</Button><Link href="/login">Passkey로 다시 인증</Link></div>}
       </>}
       {confirmation() && <Dialog trigger="변경 확인" title={confirmation()!.title} description={confirmation()!.description} closeLabel="취소" open onOpenChange={open => { if (!open && !pending()) setConfirmation(undefined); }}>
         {error() && <p role="alert">{error()}</p>}{unresolved() && <p>이미 처리되었을 수 있어요. 같은 요청을 다시 확인해도 새 코드를 중복 발급하지 않아요.</p>}

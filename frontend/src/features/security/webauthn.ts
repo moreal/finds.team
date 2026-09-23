@@ -47,6 +47,49 @@ export async function registerPasskey(label: string) {
   if (!credential) throw new DOMException('Cancelled', 'NotAllowedError');
   return securityPost<{ success: boolean; recoveryCode?: string }>('/webauthn/register', { publicKey: { credential: serializedCredential(credential), label } }, crypto.randomUUID());
 }
+/** Kept only in component memory: uncertain writes must retain key and payload. */
+export type AdditionalPasskeyCommand = {
+  readonly beginKey: string;
+  readonly label: string;
+  stage: 'begin' | 'credential' | 'complete' | 'cancel';
+  completion?: { key: string; body: { publicKey: { credential: ReturnType<typeof serializedCredential>; label: string } } };
+};
+export function additionalPasskeyCommand(label: string): AdditionalPasskeyCommand {
+  return { beginKey: crypto.randomUUID(), label, stage: 'begin' };
+}
+export async function cancelAdditionalPasskey(command: AdditionalPasskeyCommand) {
+  command.stage = 'cancel';
+  const result = await securityPost<{ success: boolean }>('/webauthn/register/cancel', {}, command.beginKey);
+  if (!result.success) throw new Error('등록 취소를 확인하지 못했어요. 다시 시도해 주세요.');
+}
+export async function beginAdditionalPasskey(command: AdditionalPasskeyCommand): Promise<'added' | 'cancelled'> {
+  ensureSupported();
+  if (command.stage === 'cancel') { await cancelAdditionalPasskey(command); return 'cancelled'; }
+  if (command.stage === 'begin') {
+    const result = await securityPost<{ ready: boolean }>('/webauthn/register/begin', {}, command.beginKey);
+    if (!result.ready) throw new Error('등록 준비를 확인하지 못했어요. 같은 요청을 다시 시도해 주세요.');
+    command.stage = 'credential';
+  }
+  if (command.stage === 'credential') {
+    const options = await securityPost<Creation>('/webauthn/register/options');
+    try {
+      const credential = await navigator.credentials.create({ publicKey: creationOptions(options) }) as PublicKeyCredential | null;
+      if (!credential) throw new DOMException('Cancelled', 'NotAllowedError');
+      command.completion = { key: crypto.randomUUID(), body: { publicKey: { credential: serializedCredential(credential), label: command.label } } };
+      command.stage = 'complete';
+    } catch (error) {
+      if (error instanceof DOMException && ['NotAllowedError', 'AbortError'].includes(error.name)) {
+        await cancelAdditionalPasskey(command);
+        return 'cancelled';
+      }
+      throw error;
+    }
+  }
+  const completion = command.completion!;
+  const result = await securityPost<{ success: boolean }>('/webauthn/register', completion.body, completion.key);
+  if (!result.success) throw new Error('등록을 확인하지 못했어요. 같은 요청을 다시 시도해 주세요.');
+  return 'added';
+}
 export async function loginPasskey() {
   ensureSupported();
   const options = await securityPost<Request>('/webauthn/authenticate/options');

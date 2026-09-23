@@ -7,22 +7,50 @@ const accountResponse = { data: { viewer: {
   passkeys: { edges: [{ cursor: 'key-1', node: { __typename: 'Passkey', id: 'key-1', label: 'Laptop', createdAt: '2026-09-20T00:00:00Z', lastUsedAt: null } }], totalCount: 1, error: null, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: 'key-1', endCursor: 'key-1' } },
   sessions: { edges: [], totalCount: 0, error: null, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null } },
 } } };
-async function authFixture(page: Page) {
+async function authFixture(page: Page, fault?: 'begin' | 'complete' | 'recent' | 'cancel' | 'rejected') {
   let registered: string | undefined;
+  const passkeys: { id: string; label: string }[] = [];
+  let scope: string | undefined;
+  const begins: string[] = [];
+  const completions: string[] = [];
+  let cancels = 0;
   let csrfEpoch = 0;
   let authenticated = false;
   let graphqlRequests = 0;
   await page.route('**/graphql', async route => {
     graphqlRequests++;
     expect(authenticated).toBe(true);
+    expect(scope).toBeUndefined();
     const { operationName } = route.request().postDataJSON();
     if (operationName === 'AccountOperationsRotateMutation') {
       expect(route.request().headers()['x-csrf-token']).toBe(`csrf-${csrfEpoch}`);
       return route.fulfill({ json: { data: { rotateRecoveryCode: { outcome: 'ROTATED', recoveryCode, error: null, clientMutationId: null } } } });
     }
     const empty = { edges: [], totalCount: 0, error: null, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null } };
-    return route.fulfill({ json: { data: { viewer: { user: { id: 'account-1', roles: ['USER'] }, passkeys: empty, sessions: empty } } } });
+    return route.fulfill({ json: { data: { viewer: { user: { id: 'account-1', roles: ['USER'] }, passkeys: { ...empty, totalCount: passkeys.length, edges: passkeys.map(key => ({ cursor: key.id, node: { __typename: 'Passkey', ...key, createdAt: '2026-09-24T00:00:00Z', lastUsedAt: null } })) }, sessions: empty } } } });
   });
+  const additionalRoute = async (route: import('@playwright/test').Route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/webauthn/register/begin') {
+      expect(authenticated).toBe(true);
+      if (fault === 'recent') return route.fulfill({ status: 403, json: {} });
+      const key = route.request().headers()['idempotency-key'];
+      expect(key).toMatch(/^[0-9a-f-]{36}$/);
+      expect(route.request().postDataJSON()).toEqual({});
+      begins.push(key);
+      if (scope) expect(key).toBe(scope);
+      scope = key; csrfEpoch++;
+      if (fault === 'begin' && begins.length === 1) return route.abort('failed');
+      return route.fulfill({ json: { ready: true } });
+    }
+    if (path === '/webauthn/register/cancel') {
+      expect(route.request().headers()['idempotency-key']).toBe(scope);
+      cancels++;
+      if (fault === 'cancel' && cancels === 1) return route.abort('failed');
+      scope = undefined; csrfEpoch++;
+      return route.fulfill({ json: { success: true } });
+    }
+  };
   await page.route('**/auth/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/auth/csrf') return route.fulfill({ json: { token: `csrf-${csrfEpoch}`, headerName: 'X-CSRF-TOKEN' } });
@@ -39,6 +67,7 @@ async function authFixture(page: Page) {
   await page.route(/\/(?:webauthn\/.*|login\/webauthn)$/, async route => {
     expect(route.request().headers()['x-csrf-token']).toBe(`csrf-${csrfEpoch}`);
     const path = new URL(route.request().url()).pathname;
+    if (path === '/webauthn/register/begin' || path === '/webauthn/register/cancel') return additionalRoute(route);
     if (path === '/webauthn/register/options') return route.fulfill({ json: {
       challenge: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8', rp: { id: 'localhost', name: 'finds.team' },
       user: { id: 'AQIDBA', name: 'person@example.com', displayName: 'Account' },
@@ -51,6 +80,17 @@ async function authFixture(page: Page) {
       expect(body.publicKey.credential.response.clientDataJSON).toBeTruthy();
       expect(route.request().headers()['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
       registered = body.publicKey.credential.id;
+      if (scope || completions.length) {
+        const command = JSON.stringify({ key: route.request().headers()['idempotency-key'], body });
+        completions.push(command);
+        if (completions.length > 1) expect(command).toBe(completions[0]);
+        if (fault === 'rejected' && completions.length === 1) return route.fulfill({ json: { success: false } });
+        if (!passkeys.some(key => key.id === registered)) passkeys.push({ id: registered!, label: body.publicKey.label });
+        scope = undefined; csrfEpoch++;
+        if (fault === 'complete' && completions.length === 1) return route.abort('failed');
+        return route.fulfill({ json: { success: true } });
+      }
+      passkeys.splice(0, passkeys.length, { id: registered!, label: body.publicKey.label });
       return route.fulfill({ json: { success: true, recoveryCode } });
     }
     expect(body.response.signature).toBeTruthy();
@@ -60,7 +100,7 @@ async function authFixture(page: Page) {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
-  return { cdp, authenticatorId, graphqlRequests: () => graphqlRequests };
+  return { cdp, authenticatorId, graphqlRequests: () => graphqlRequests, begins, completions, cancels: () => cancels };
 }
 async function verifyEmail(page: Page, mode = 'join') {
   await page.goto(`/${mode}`);
@@ -95,6 +135,46 @@ test('enrollment uses a real virtual Passkey and keeps recovery material ephemer
   await page.getByRole('button', { name: '복구 코드 새로 발급' }).click();
   await page.getByRole('button', { name: '발급 확인' }).click();
   await expect(page.getByText(recoveryCode)).toBeVisible();
+});
+
+for (const fault of [undefined, 'begin', 'complete', 'recent', 'cancel', 'rejected'] as const) test(`additional Passkey ${fault ?? 'success'} preserves session and safe retries`, async ({ page }) => {
+  const fixture = await authFixture(page, fault);
+  await verifyEmail(page);
+  await page.getByRole('button', { name: 'Passkey 등록', exact: true }).click();
+  await page.getByLabel('복구 코드를 안전한 곳에 저장했어요').check();
+  await page.getByRole('button', { name: '계속' }).click();
+  await page.getByRole('button', { name: 'Passkey로 로그인' }).click();
+  await expect(page).toHaveURL(/account\/security/);
+  if (fault === 'cancel') await page.evaluate(() => { navigator.credentials.create = async () => { throw new DOMException('Cancelled', 'NotAllowedError'); }; });
+  await page.getByLabel('새 Passkey 이름').fill('Travel key');
+  await page.getByRole('button', { name: 'Passkey 추가', exact: true }).click();
+  if (fault === 'recent') {
+    await expect(page.getByRole('alert')).toContainText('최근 Passkey 인증');
+    await expect(page.getByRole('link', { name: 'Passkey로 다시 인증' })).toBeVisible();
+    expect(fixture.completions).toHaveLength(0);
+    return;
+  }
+  if (fault === 'cancel') {
+    await expect(page.getByRole('button', { name: '등록 취소 다시 시도' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toBeDisabled();
+    await page.getByRole('button', { name: '등록 취소 다시 시도' }).click();
+    await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toBeEnabled();
+    expect(fixture.cancels()).toBe(2);
+    return;
+  }
+  if (fault) {
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.getByRole('status')).not.toContainText('추가했어요');
+    await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toBeDisabled();
+    if (fault === 'complete' || fault === 'rejected') await expect(page.getByRole('button', { name: '등록 취소', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '같은 등록 다시 시도' }).click();
+  }
+  await expect(page.getByLabel('Travel key 이름')).toBeVisible();
+  await expect(page.getByRole('button', { name: '이름 저장' })).toHaveCount(2);
+  await expect(page.getByRole('status')).toContainText('추가했어요');
+  await expect(page.getByText(recoveryCode)).toHaveCount(0);
+  if (fault === 'begin') expect(fixture.begins[1]).toBe(fixture.begins[0]);
+  if (fault === 'complete') expect(fixture.completions[1]).toBe(fixture.completions[0]);
 });
 
 test('old credential is rejected after two-proof recovery replaces it', async ({ page }) => {
@@ -228,6 +308,8 @@ test('account page SSR contains only its own hydrated viewer without initial bro
   const html = await response!.text();
   expect(html).toContain('data-account-id="account-a"');
   expect(html).toContain('account-a laptop');
+  expect(html).toContain('새 Passkey 이름');
+  expect(html).toContain('Passkey 추가');
   expect(html).not.toContain('account-b');
   expect(html).toContain('relayRecords');
   // Start consumes/removes its hydration payload scripts after execution; inspect
@@ -238,6 +320,8 @@ test('account page SSR contains only its own hydrated viewer without initial bro
   expect(serializedScripts).not.toContain('account-b');
   await expect(page.getByLabel('account-a laptop 이름')).toBeVisible();
   await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toBeEnabled();
+  await page.getByLabel('새 Passkey 이름').fill('Spare');
+  await expect(page.getByRole('button', { name: 'Passkey 추가', exact: true })).toBeEnabled();
   expect(browserQueries).toBe(0);
 });
 

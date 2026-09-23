@@ -2,7 +2,24 @@ import { createServer } from "node:http";
 import { detailData } from "./discovery-data.ts";
 
 const requests: { variables: any }[] = [];
+const pendingRegistrations = new Map<string, string>();
 createServer(async (req, res) => {
+  const account = /(?:^|;\s*)security-account=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
+  if (req.url === '/auth/csrf') {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ token: 'fixture-csrf', headerName: 'X-CSRF-TOKEN' })); return;
+  }
+  if (['/webauthn/register/begin', '/webauthn/register/cancel'].includes(req.url ?? '')) {
+    const key = req.headers['idempotency-key'];
+    const pending = account ? pendingRegistrations.get(account) : undefined;
+    const status = req.method !== 'POST' ? 405 : !account ? 401 : req.headers['x-csrf-token'] !== 'fixture-csrf' || account === 'stale' ? 403
+      : typeof key !== 'string' ? 400 : pending && pending !== key ? 409 : 200;
+    res.writeHead(status, { 'content-type': 'application/json' });
+    if (status !== 200) { res.end(JSON.stringify({ status })); return; }
+    if (req.url!.endsWith('/begin')) pendingRegistrations.set(account!, key as string);
+    else pendingRegistrations.delete(account!);
+    res.end(JSON.stringify(req.url!.endsWith('/begin') ? { ready: true } : { success: true })); return;
+  }
   if (req.url === "/__requests") {
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(requests));
@@ -14,7 +31,7 @@ createServer(async (req, res) => {
     const { variables, operationName } = JSON.parse(body);
     if (operationName === 'AccountOperationsViewerQuery') {
       const account = /(?:^|;\s*)security-account=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
-      if (account === 'restricted') { res.writeHead(403); res.end(); return; }
+      if (account === 'restricted' || (account && pendingRegistrations.has(account))) { res.writeHead(403); res.end(); return; }
       res.setHeader('content-type', 'application/json');
       const connection = (nodes: object[]) => ({ edges: nodes.map((node: any) => ({ cursor: node.id, node })), totalCount: nodes.length, error: null,
         pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: (nodes[0] as any)?.id ?? null, endCursor: (nodes.at(-1) as any)?.id ?? null } });
