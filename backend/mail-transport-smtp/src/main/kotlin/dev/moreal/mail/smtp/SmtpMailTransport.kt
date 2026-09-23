@@ -6,6 +6,7 @@ import dev.moreal.mail.MailMessage
 import dev.moreal.mail.MailProvider
 import dev.moreal.mail.MailTransport
 import dev.moreal.mail.Mailbox
+import dev.moreal.mail.smtp.internal.TrackedSmtpTransport
 import jakarta.mail.AuthenticationFailedException
 import jakarta.mail.Message
 import jakarta.mail.MessagingException
@@ -15,7 +16,6 @@ import jakarta.mail.internet.MimeBodyPart
 import jakarta.mail.internet.MimeMessage
 import jakarta.mail.internet.MimeMultipart
 import java.io.IOException
-import java.io.OutputStream
 import java.net.SocketTimeoutException
 import java.util.Collections
 import java.util.IdentityHashMap
@@ -26,7 +26,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import org.eclipse.angus.mail.smtp.SMTPAddressFailedException
 import org.eclipse.angus.mail.smtp.SMTPSendFailedException
-import org.eclipse.angus.mail.smtp.SMTPTransport
 import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -80,7 +79,7 @@ class SmtpMailTransport(private val settings: SmtpSettings) : MailTransport {
         throw cancelled
       } catch (failure: Exception) {
         context.ensureActive()
-        classify(failure, transport?.dataStarted == true)
+        classify(failure, transport?.dataStarted == true, transport?.preDataReply)
       } finally {
         // QUIT is cleanup, not the acceptance boundary. Never replace a 250 receipt with a close failure.
         try { transport?.close() } catch (_: MessagingException) { }
@@ -137,7 +136,7 @@ class SmtpMailTransport(private val settings: SmtpSettings) : MailTransport {
 
   private fun address(mailbox: Mailbox) = InternetAddress(mailbox.address, mailbox.name, "UTF-8")
 
-  private fun classify(failure: Exception, dataStarted: Boolean): MailDeliveryResult {
+  private fun classify(failure: Exception, dataStarted: Boolean, preDataReply: Int?): MailDeliveryResult {
     val causes = causes(failure)
     val authentication = causes.any { it is AuthenticationFailedException }
     val timeout = causes.any { it is SocketTimeoutException }
@@ -153,7 +152,10 @@ class SmtpMailTransport(private val settings: SmtpSettings) : MailTransport {
         else -> MailFailure.UNKNOWN
       })
     }
-    val codes = recipientFailures.map { it.returnCode } + listOfNotNull(sendFailure?.returnCode)
+    val codes = recipientFailures.map { it.returnCode } + listOfNotNull(
+      sendFailure?.returnCode,
+      preDataReply?.takeIf { !dataStarted && it in 400..599 },
+    )
     val permanent = codes.any { it in 500..599 }
     val category = when {
       authentication -> MailFailure.AUTHENTICATION
@@ -180,16 +182,5 @@ class SmtpMailTransport(private val settings: SmtpSettings) : MailTransport {
       (next as? MessagingException)?.nextException?.let(pending::add)
     }
     return seen.toList()
-  }
-}
-
-/** A fresh connection for each send keeps acceptance state local and disables ambiguous partial sends. */
-private class TrackedSmtpTransport(session: Session) : SMTPTransport(session, null) {
-  var dataStarted = false
-    private set
-
-  override fun data(): OutputStream {
-    dataStarted = true
-    return super.data()
   }
 }

@@ -12,6 +12,11 @@ import java.util.Properties
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import kotlin.concurrent.thread
 import kotlin.test.*
 import kotlin.time.Duration
@@ -19,7 +24,11 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.MethodOrderer
+import org.junit.jupiter.api.Order
+import org.junit.jupiter.api.TestMethodOrder
 
+@TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class SmtpMailTransportTest {
   private val message = MailMessage(
     MailMessageId.parse("0fd1ca40-aaaa-4bbb-8ccc-000000000001"),
@@ -33,6 +42,67 @@ class SmtpMailTransportTest {
     MailContent(text = "인증 코드: 123456", html = "<p>인증 코드: <b>123456</b></p>"),
     replyTo = Mailbox("reply@example.test", "답장 담당자"),
   )
+
+  @Test
+  @Order(1)
+  fun `verbose JUL before initialization cannot expose concurrent mail deliveries`() = runBlocking<Unit> {
+    val root = Logger.getLogger("")
+    val unrelated = Logger.getLogger("smtp-test.unrelated")
+    val previousRootLevel = root.level
+    val previousUnrelatedLevel = unrelated.level
+    val records = CopyOnWriteArrayList<LogRecord>()
+    val handler = object : Handler() {
+      override fun publish(record: LogRecord) { records += record }
+      override fun flush() = Unit
+      override fun close() = Unit
+    }.apply { level = Level.ALL }
+    root.addHandler(handler)
+    root.level = Level.FINEST
+    unrelated.level = Level.FINER
+    try {
+      val connected = CountDownLatch(2)
+      coroutineScope {
+        (1..2).map { index ->
+          async {
+            LocalSmtpServer(connected = connected).use { server ->
+              val sensitive = MailMessage(
+                MailMessageId.new(), Mailbox("private-sender-$index@example.test"),
+                Recipients(to = listOf(Mailbox("private-recipient-$index@example.test"))),
+                "private-subject-$index", MailContent(text = "private-body-$index OTP-987654-$index"),
+              )
+              assertIs<MailDeliveryResult.Accepted>(SmtpMailTransport(server.settings()).send(sensitive))
+              assertEquals(sensitive.content.text, server.delivery.get(3, TimeUnit.SECONDS).mime().content.toString().trimEnd())
+            }
+          }
+        }.awaitAll()
+      }
+      unrelated.finer("unrelated-log-still-enabled")
+      val captured = records.joinToString("\n") { record ->
+        record.message + record.parameters.orEmpty().joinToString() + record.thrown?.toString().orEmpty()
+      }
+      assertTrue(captured.contains("unrelated-log-still-enabled"))
+      assertEquals(Level.FINEST, root.level)
+      assertEquals(Level.FINER, unrelated.level)
+      for (marker in listOf("private-sender-", "private-recipient-", "private-subject-", "private-body-", "OTP-987654-")) {
+        assertFalse(captured.contains(marker), "Sensitive SMTP marker escaped to JUL: $marker")
+      }
+    } finally {
+      root.removeHandler(handler)
+      root.level = previousRootLevel
+      unrelated.level = previousUnrelatedLevel
+    }
+  }
+
+  @Test
+  fun `temporary greeting refusal is definitely unaccepted and retryable`() = runBlocking<Unit> {
+    LocalSmtpServer(greeting = "421 Service temporarily unavailable").use { server ->
+      assertEquals(
+        MailDeliveryResult.Rejected(MailProvider("smtp"), MailFailure.SERVICE_UNAVAILABLE, true),
+        SmtpMailTransport(server.settings()).send(message),
+      )
+      assertEquals(1L, server.dataStarted.count)
+    }
+  }
 
   @Test
   fun `renders Unicode alternatives and all envelope recipients without exposing Bcc`() = runBlocking<Unit> {
@@ -179,6 +249,8 @@ private class LocalSmtpServer(
   private val finalResponse: String? = "250 queued",
   private val recipientResponse: String = "250 recipient ok",
   private val greet: Boolean = true,
+  private val greeting: String = "220 localhost test SMTP",
+  private val connected: CountDownLatch? = null,
 ) : AutoCloseable {
   private val server = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
   private val stop = CountDownLatch(1)
@@ -189,11 +261,14 @@ private class LocalSmtpServer(
     try {
       server.accept().use { client ->
         socket = client
+        connected?.countDown()
+        check(connected?.await(3, TimeUnit.SECONDS) != false) { "Concurrent SMTP connections did not start" }
         val input = client.getInputStream().bufferedReader(Charsets.US_ASCII)
         val output = client.getOutputStream().bufferedWriter(Charsets.US_ASCII)
         fun reply(value: String) { output.write("$value\r\n"); output.flush() }
         if (!greet) { stop.await(5, TimeUnit.SECONDS); return@thread }
-        reply("220 localhost test SMTP")
+        reply(greeting)
+        if (!greeting.startsWith("220 ")) return@thread
         var sender = ""
         val recipients = mutableListOf<String>()
         while (true) {
