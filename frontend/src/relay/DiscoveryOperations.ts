@@ -60,7 +60,12 @@ export const companyQuery = graphql`
   query DiscoveryOperationsCompanyQuery(
     $slug: String!, $orderBy: PostingOrder = UPDATED_DESC, $first: Int = 20, $after: String
   ) {
-    careerSite(slug: $slug) {
+    careerSite(slug: $slug) { ...DiscoveryOperations_company }
+  }
+`;
+
+export const companyPage = graphql`
+  fragment DiscoveryOperations_company on CareerSite {
       id slug displayName canonicalBaseUrl provider
       crawlSummary { outcome finishedAt }
       openPostings(first: $first, after: $after, orderBy: $orderBy)
@@ -70,7 +75,6 @@ export const companyQuery = graphql`
         totalCount
         error { code message }
       }
-    }
   }
 `;
 
@@ -78,11 +82,18 @@ export const skillQuery = graphql`
   query DiscoveryOperationsSkillQuery(
     $slug: String!, $first: Int = 20, $after: String, $postingsOrder: PostingOrder = UPDATED_DESC,
     $companiesFirst: Int = 20, $companiesAfter: String, $companiesOrder: CareerSiteOrder = ID_ASC,
-    $relatedFirst: Int = 20, $relatedAfter: String, $relatedOrder: SkillOrder = SLUG_ASC
+    $relatedFirst: Int = 20, $relatedAfter: String, $relatedOrder: SkillOrder = SLUG_ASC,
+    $includeCompanies: Boolean = true, $includePostings: Boolean = true, $includeRelated: Boolean = true
   ) {
-    skill(slug: $slug) {
+    skill(slug: $slug) { ...DiscoveryOperations_skill }
+  }
+`;
+
+export const skillPage = graphql`
+  fragment DiscoveryOperations_skill on Skill {
       id slug displayName
       companies(first: $companiesFirst, after: $companiesAfter, orderBy: $companiesOrder)
+      @include(if: $includeCompanies)
       @connection(key: "DiscoveryOperationsSkill_companies", filters: ["orderBy"]) {
         edges { cursor node { id slug displayName } }
         pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
@@ -90,6 +101,7 @@ export const skillQuery = graphql`
         error { code message }
       }
       openPostings(first: $first, after: $after, orderBy: $postingsOrder)
+      @include(if: $includePostings)
       @connection(key: "DiscoveryOperationsSkill_openPostings", filters: ["orderBy"]) {
         edges { cursor node { ...DiscoveryOperations_job } }
         pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
@@ -98,13 +110,13 @@ export const skillQuery = graphql`
       }
       requirementCounts { required preferred mentioned }
       relatedSkills(first: $relatedFirst, after: $relatedAfter, orderBy: $relatedOrder)
+      @include(if: $includeRelated)
       @connection(key: "DiscoveryOperations_relatedSkills", filters: ["orderBy"]) {
         edges { cursor node { id slug displayName } }
         pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
         totalCount
         error { code message }
       }
-    }
   }
 `;
 

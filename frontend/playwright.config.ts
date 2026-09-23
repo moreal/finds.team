@@ -5,8 +5,8 @@ export default defineConfig({
   fullyParallel: true,
   use: { baseURL: "http://127.0.0.1:4174" },
   projects: [
-    { name: "chromium", testIgnore: ["ui-catalog.spec.ts", "jobs-list.spec.ts"], use: { ...devices["Desktop Chrome"] } },
-    { name: "jobs", testMatch: "jobs-list.spec.ts", use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4176" } },
+    { name: "chromium", testIgnore: ["ui-catalog.spec.ts", "jobs-list.spec.ts", "discovery-details.spec.ts"], use: { ...devices["Desktop Chrome"] } },
+    { name: "jobs", testMatch: ["jobs-list.spec.ts", "discovery-details.spec.ts"], use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4176" } },
     ...(["light", "dark"] as const).flatMap((colorScheme) => ([
       { name: `catalog-desktop-${colorScheme}`, testMatch: "ui-catalog.spec.ts", use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4175", colorScheme } },
       { name: `catalog-mobile-${colorScheme}`, testMatch: "ui-catalog.spec.ts", use: { ...devices["Pixel 7"], baseURL: "http://127.0.0.1:4175", colorScheme } },

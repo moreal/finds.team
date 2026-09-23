@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { detailData } from "./discovery-data.ts";
 
 const requests: { variables: any }[] = [];
 createServer(async (req, res) => {
@@ -10,7 +11,19 @@ createServer(async (req, res) => {
   if (req.url === "/graphql") {
     let body = "";
     for await (const chunk of req) body += chunk;
-    const { variables } = JSON.parse(body);
+    const { variables, operationName } = JSON.parse(body);
+    if (operationName !== "DiscoveryOperationsJobsQuery" && ["unavailable", "unauthorized", "forbidden"].includes(variables.slug ?? variables.id)) {
+      const value = variables.slug ?? variables.id;
+      res.writeHead(value === "unauthorized" ? 401 : value === "forbidden" ? 403 : 503); res.end(); return;
+    }
+    if (variables.slug === "pagination-failure" && variables.after) { res.writeHead(503); res.end(); return; }
+    const detail = detailData(operationName, variables);
+    if (detail) {
+      if (variables.after || variables.companiesAfter || variables.relatedAfter) await new Promise(resolve => setTimeout(resolve, 300));
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ data: detail }));
+      return;
+    }
     requests.push({ variables });
     const text = variables.filter?.all?.find((entry: any) => entry.textContains)?.textContains ?? "";
     if (text === "network-failure") { res.writeHead(503); res.end(); return; }
