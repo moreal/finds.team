@@ -26,7 +26,8 @@ class SchemaContractTest {
         .type("Node") { it.typeResolver { null } }.build(),
     )
 
-    assertEquals(setOf("node", "jobPosting", "jobPostings", "crawlStatuses"), schema.queryType.fieldDefinitions.map { it.name }.toSet())
+    assertEquals(setOf("node", "jobPosting", "jobPostings", "careerSite", "careerSites", "skill", "skills", "crawlStatuses"),
+      schema.queryType.fieldDefinitions.map { it.name }.toSet())
     assertEquals(
       setOf("registerCareerSite", "triggerCrawl"),
       requireNotNull(schema.mutationType).fieldDefinitions.map { it.name }.toSet(),

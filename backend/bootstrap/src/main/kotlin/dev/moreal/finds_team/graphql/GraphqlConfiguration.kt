@@ -12,9 +12,12 @@ import dev.moreal.finds_team.runtime.ManagedCoroutineScope
 import graphql.GraphQL
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import dev.moreal.finds.persistence.JooqDiscoveryQuery
+import org.jooq.DSLContext
 
 @Configuration(proxyBeanMethods = false)
 class GraphqlConfiguration {
+  @Bean fun discoveryQueries(context: DSLContext) = JooqDiscoveryQuery(context)
   @Bean(destroyMethod = "close")
   fun applicationCoroutineScope(): ManagedCoroutineScope = ManagedCoroutineScope()
 
@@ -26,7 +29,8 @@ class GraphqlConfiguration {
     statuses: GetCrawlStatus,
     securityEvents: SecurityEventPort,
     clock: ClockPort,
-  ): FindsGraphqlFacade = FindsGraphqlFacade(search, register, crawl, statuses, securityEvents, clock)
+    discovery: JooqDiscoveryQuery,
+  ): FindsGraphqlFacade = FindsGraphqlFacade(search, register, crawl, statuses, securityEvents, clock, discovery, discovery)
 
   @Bean
   fun graphQL(facade: FindsGraphqlFacade, scope: ManagedCoroutineScope): GraphQL =

@@ -6,6 +6,7 @@ import dev.moreal.finds.application.model.SearchPage
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.posting.JobPosting
 import dev.moreal.finds.domain.posting.PostingStatus
+import dev.moreal.finds.domain.posting.*
 import dev.moreal.finds.domain.search.Filter
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -19,7 +20,13 @@ data class PostingFilterInput(
   val not: PostingFilterInput? = null,
   val all: List<PostingFilterInput>? = null,
   val any: List<PostingFilterInput>? = null,
+  val hasSkill: SkillFilterInput? = null,
+  val hasRole: RoleCategory? = null,
+  val hasEmployment: EmploymentType? = null,
+  val hasRemotePolicy: RemotePolicy? = null,
+  val atLocation: String? = null,
 )
+data class SkillFilterInput(val slug: String, val level: SkillRequirementLevel? = null)
 
 data class JobPostingDto(
   val id: String,
@@ -37,6 +44,7 @@ data class JobPostingDto(
   val lastSeenAt: String,
   val updatedAt: String,
   val closedAt: String?,
+  val classification: PostingClassificationDto? = null,
 )
 
 data class JobPostingEdgeDto(val cursor: String, val node: JobPostingDto)
@@ -50,11 +58,16 @@ data class JobPostingConnectionDto(
   val edges: List<JobPostingEdgeDto>,
   val pageInfo: PageInfoDto,
   val totalCount: Int,
+  val error: ApiErrorDto? = null,
 )
 
 object PostingGraphqlMapping {
-  fun filter(input: PostingFilterInput?): Filter =
+  fun filter(input: PostingFilterInput?): Filter = try {
     input?.toDomain() ?: Filter.HasStatus(PostingStatus.OPEN)
+  } catch (error: GlobalIdException) { throw error }
+  catch (_: UnknownSkillException) { throw GraphqlRequestException(ApiErrorCode.UNKNOWN_SKILL, "Unknown canonical skill") }
+  catch (_: IllegalArgumentException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid posting filter") }
+  catch (_: java.time.DateTimeException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid posting filter") }
 
   fun page(first: Int?, after: String?): PageRequest = PageRequest(
     size = first ?: 20,
@@ -82,6 +95,8 @@ object PostingGraphqlMapping {
       atSite?.let { "atSite" }, textContains?.let { "textContains" },
       hasStatus?.let { "hasStatus" }, updatedAfter?.let { "updatedAfter" },
       not?.let { "not" }, all?.let { "all" }, any?.let { "any" },
+      hasSkill?.let { "hasSkill" }, hasRole?.let { "hasRole" }, hasEmployment?.let { "hasEmployment" },
+      hasRemotePolicy?.let { "hasRemotePolicy" }, atLocation?.let { "atLocation" },
     )
     require(operators.size == 1) { "Posting filter must specify exactly one operator" }
     return when (operators.single()) {
@@ -89,6 +104,11 @@ object PostingGraphqlMapping {
       "textContains" -> Filter.TextContains(requireNotNull(textContains))
       "hasStatus" -> Filter.HasStatus(requireNotNull(hasStatus))
       "updatedAfter" -> Filter.UpdatedAfter(Instant.parse(requireNotNull(updatedAfter)))
+      "hasSkill" -> Filter.HasSkill(requireNotNull(hasSkill).slug, hasSkill.level)
+      "hasRole" -> Filter.HasRole(requireNotNull(hasRole))
+      "hasEmployment" -> Filter.HasEmployment(requireNotNull(hasEmployment))
+      "hasRemotePolicy" -> Filter.HasRemotePolicy(requireNotNull(hasRemotePolicy))
+      "atLocation" -> Filter.AtLocation(requireNotNull(atLocation))
       "not" -> Filter.Not(requireNotNull(not).toDomain())
       "all" -> Filter.And(requireNotNull(all).map { it.toDomain() })
       "any" -> Filter.Or(requireNotNull(any).map { it.toDomain() })
@@ -96,11 +116,12 @@ object PostingGraphqlMapping {
     }
   }
 
-  private fun JobPosting.toDto() = JobPostingDto(
+  fun JobPosting.toDto() = JobPostingDto(
     GlobalIdCodec.encode(NodeType.JobPosting, id.value), GlobalIdCodec.encode(NodeType.CareerSite, careerSiteId.value), raw.externalKey, raw.title,
     raw.descriptionText, raw.canonicalUrl.value.toString(), status,
     raw.employmentHint, raw.locationHint, raw.remoteHint, raw.sourceUpdatedAt?.toString(),
     firstSeenAt.toString(), lastSeenAt.toString(), updatedAt.toString(), closedAt?.toString(),
+    classification?.let(DiscoveryGraphqlMapping::classification),
   )
 
 }

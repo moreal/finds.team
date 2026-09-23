@@ -3,16 +3,35 @@ scalar DateTime
 interface Node { id: ID! }
 
 type User implements Node { id: ID! }
-type Skill implements Node { id: ID! }
+type Skill implements Node {
+  id: ID!
+  slug: String!
+  displayName: String!
+  companies(orderBy: CareerSiteOrder = ID_ASC, first: Int = 20, after: String): CareerSiteConnection!
+  openPostings(orderBy: PostingOrder = UPDATED_DESC, first: Int = 20, after: String): JobPostingConnection!
+  requirementCounts: SkillRequirementCounts!
+  relatedSkills(orderBy: SkillOrder = SLUG_ASC, first: Int = 20, after: String): SkillConnection!
+}
 type CrawlRun implements Node { id: ID! }
 type AuditEvent implements Node { id: ID! }
 
 enum SourceProvider { FLEX GREETING NINEHIRE }
 enum PostingStatus { OPEN CLOSED }
 enum CrawlOutcome { SUCCESS FAILED }
+enum SkillRequirementLevel { REQUIRED PREFERRED MENTIONED }
+enum RoleCategory { BACKEND FRONTEND FULLSTACK MOBILE DATA DEVOPS DESIGN PRODUCT QA UNKNOWN }
+enum EmploymentType { FULL_TIME PART_TIME CONTRACT INTERNSHIP UNKNOWN }
+enum RemotePolicy { REMOTE HYBRID ONSITE UNKNOWN }
+enum PostingOrder { UPDATED_DESC }
+enum CareerSiteOrder { ID_ASC }
+enum SkillOrder { SLUG_ASC }
 
 enum ApiErrorCode {
   INVALID_INPUT
+  INVALID_FILTER
+  UNKNOWN_SKILL
+  INVALID_CURSOR
+  INVALID_PAGE
   INVALID_URL
   UNSUPPORTED_PROVIDER
   AMBIGUOUS_PROVIDER
@@ -39,10 +58,31 @@ input PostingFilterInput {
   textContains: String
   hasStatus: PostingStatus
   updatedAfter: DateTime
+  hasSkill: SkillFilterInput
+  hasRole: RoleCategory
+  hasEmployment: EmploymentType
+  hasRemotePolicy: RemotePolicy
+  atLocation: String
   not: PostingFilterInput
   all: [PostingFilterInput!]
   any: [PostingFilterInput!]
 }
+input SkillFilterInput { slug: String!, level: SkillRequirementLevel }
+type DiscoveryError { code: ApiErrorCode!, message: String! }
+type ClassifiedRole { value: RoleCategory!, rawValue: String }
+type ClassifiedEmployment { value: EmploymentType!, rawValue: String }
+type ClassifiedRemotePolicy { value: RemotePolicy!, rawValue: String }
+type NormalizedLocation { displayName: String!, searchValue: String! }
+type PostingSkill { skill: Skill, text: String!, level: SkillRequirementLevel! }
+type PostingClassification {
+  taxonomyVersion: Int!
+  skills: [PostingSkill!]!
+  role: ClassifiedRole!
+  employment: ClassifiedEmployment!
+  remote: ClassifiedRemotePolicy!
+  location: NormalizedLocation
+}
+type SkillRequirementCounts { required: Int!, preferred: Int!, mentioned: Int! }
 
 type JobPosting implements Node {
   id: ID!
@@ -60,6 +100,8 @@ type JobPosting implements Node {
   lastSeenAt: DateTime!
   updatedAt: DateTime!
   closedAt: DateTime
+  careerSite: CareerSite!
+  classification: PostingClassification
 }
 
 type JobPostingEdge { cursor: String!, node: JobPosting! }
@@ -73,16 +115,23 @@ type JobPostingConnection {
   edges: [JobPostingEdge!]!
   pageInfo: PageInfo!
   totalCount: Int!
+  error: DiscoveryError
 }
+type CareerSiteEdge { cursor: String!, node: CareerSite! }
+type CareerSiteConnection { edges: [CareerSiteEdge!]!, pageInfo: PageInfo!, totalCount: Int!, error: DiscoveryError }
+type SkillEdge { cursor: String!, node: Skill! }
+type SkillConnection { edges: [SkillEdge!]!, pageInfo: PageInfo!, totalCount: Int!, error: DiscoveryError }
 
 type CareerSite implements Node {
   id: ID!
+  slug: String!
   canonicalBaseUrl: String!
   host: String!
   provider: SourceProvider!
   displayName: String!
   enabled: Boolean!
   successfulIntervalSeconds: Int!
+  openPostings(orderBy: PostingOrder = UPDATED_DESC, first: Int = 20, after: String): JobPostingConnection!
 }
 
 input RegisterCareerSiteInput { url: String!, displayName: String!, idempotencyKey: ID! }
@@ -122,7 +171,11 @@ type CrawlStatus {
 type Query {
   node(id: ID!): Node
   jobPosting(id: ID!): JobPosting
-  jobPostings(filter: PostingFilterInput, first: Int = 20, after: String): JobPostingConnection!
+  jobPostings(filter: PostingFilterInput, orderBy: PostingOrder = UPDATED_DESC, first: Int = 20, after: String): JobPostingConnection!
+  careerSite(slug: String!): CareerSite
+  careerSites(orderBy: CareerSiteOrder = ID_ASC, first: Int = 20, after: String): CareerSiteConnection!
+  skill(slug: String!): Skill
+  skills(query: String, orderBy: SkillOrder = SLUG_ASC, first: Int = 20, after: String): SkillConnection!
   crawlStatuses: [CrawlStatus!]!
 }
 

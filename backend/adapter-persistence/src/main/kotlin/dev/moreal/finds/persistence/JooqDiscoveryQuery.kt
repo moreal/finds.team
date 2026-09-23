@@ -1,8 +1,9 @@
 package dev.moreal.finds.persistence
 
 import dev.moreal.finds.application.model.*
-import dev.moreal.finds.application.port.DiscoveryQueryPort
+import dev.moreal.finds.application.port.*
 import dev.moreal.finds.domain.career.CareerSite
+import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.posting.*
 import dev.moreal.finds.domain.search.Filter
 import dev.moreal.finds.domain.search.normalize
@@ -21,10 +22,61 @@ import java.time.temporal.ChronoField.YEAR_OF_ERA
 import java.util.Locale
 import org.jooq.Condition
 import org.jooq.DSLContext
+import org.jooq.Field
 import org.jooq.impl.DSL
 
 /** Each database page, its count, PageInfo and nested evidence use one statement snapshot. */
-class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
+class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort, DiscoveryBatchQueryPort {
+  override fun findPostings(ids: List<JobPostingId>): List<JobPosting?> {
+    if (ids.isEmpty()) return emptyList()
+    val rows = context.select(DISCOVERY_POSTING, POSTING_SKILL_MENTIONS).from(JOB_POSTINGS)
+      .where(JOB_POSTINGS.ID.`in`(ids.map { it.value })).fetch().map { it.toPosting() }.associateBy { it.id }
+    return ids.map { rows[it] }
+  }
+
+  override fun findSites(ids: List<CareerSiteId>): List<CareerSite?> {
+    if (ids.isEmpty()) return emptyList()
+    val rows = context.selectFrom(CAREER_SITES).where(CAREER_SITES.ID.`in`(ids.map { it.value }))
+      .fetch().map { it.toDomain() }.associateBy { it.id }
+    return ids.map { rows[it] }
+  }
+
+  override fun postingPages(keys: List<PostingPageKey>) = batchPages(keys.map { key ->
+    { postingField(key.filter, key.page) }
+  })
+  override fun companyPages(keys: List<SkillPageKey>) = batchPages(keys.map { key ->
+    { companyField(key.slug, key.page) }
+  })
+  override fun relatedSkillPages(keys: List<SkillPageKey>) = batchPages(keys.map { key ->
+    { relatedField(key.slug, key.page) }
+  })
+  override fun requirementCounts(slugs: List<String>): List<SkillRequirementCounts> {
+    if (slugs.isEmpty()) return emptyList()
+    slugs.forEach { SkillTaxonomy.V1.requireSkill(it) }
+    fun count(level: SkillRequirementLevel) = DSL.count().filterWhere(POSTING_SKILLS.REQUIREMENT_LEVEL.eq(level.name)).cast(Long::class.java)
+    val rows = context.select(POSTING_SKILLS.CANONICAL_SLUG, count(SkillRequirementLevel.REQUIRED),
+      count(SkillRequirementLevel.PREFERRED), count(SkillRequirementLevel.MENTIONED))
+      .from(POSTING_SKILLS).join(JOB_POSTINGS).on(JOB_POSTINGS.ID.eq(POSTING_SKILLS.JOB_POSTING_ID))
+      .where(POSTING_SKILLS.CANONICAL_SLUG.`in`(slugs)).and(JOB_POSTINGS.STATUS.eq("OPEN"))
+      .and(JOB_POSTINGS.TAXONOMY_VERSION.isNotNull).groupBy(POSTING_SKILLS.CANONICAL_SLUG)
+      .fetch().associate { it.value1() to SkillRequirementCounts(it.value2(), it.value3(), it.value4()) }
+    return slugs.map { rows[it] ?: SkillRequirementCounts(0, 0, 0) }
+  }
+
+  // The loop builds bounded SQL expressions; there is a single execute/fetch for the entire family.
+  // SQL failures propagate. Only caller-correctable cursor/taxonomy failures become per-key results.
+  private fun <T> batchPages(builders: List<() -> Field<ConnectionPage<T>>>): List<Result<ConnectionPage<T>>> {
+    if (builders.isEmpty()) return emptyList()
+    require(builders.size <= 100) { "Discovery batch exceeds 100 keys" }
+    val prepared = builders.map { build ->
+      try { Result.success(build()) }
+      catch (error: InvalidConnectionCursor) { Result.failure(error) }
+      catch (error: UnknownSkillException) { Result.failure(error) }
+    }
+    val fields = prepared.mapNotNull { it.getOrNull() }
+    val record = if (fields.isEmpty()) null else context.select(fields).fetchSingle()
+    return prepared.map { result -> result.map { field -> requireNotNull(record!![field]) } }
+  }
   override fun findPosting(id: JobPostingId): JobPosting? = context
     .select(DISCOVERY_POSTING, POSTING_SKILL_MENTIONS).from(JOB_POSTINGS)
     .where(JOB_POSTINGS.ID.eq(id.value)).fetchOne()?.toPosting()
@@ -32,7 +84,10 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
   override fun findSiteBySlug(slug: String): CareerSite? = context.selectFrom(CAREER_SITES)
     .where(CAREER_SITES.SLUG.eq(slug)).fetchOne()?.toDomain()
 
-  override fun postings(filter: Filter, page: ConnectionRequest): ConnectionPage<JobPosting> {
+  override fun postings(filter: Filter, page: ConnectionRequest): ConnectionPage<JobPosting> =
+    context.select(postingField(filter, page)).fetchSingle().value1()
+
+  private fun postingField(filter: Filter, page: ConnectionRequest): Field<ConnectionPage<JobPosting>> {
     val normalized = filter.normalize()
     val scope = ConnectionCursors.scope("postings", "updated-desc", normalized.cursorKey())
     val position = page.after?.let { cursor ->
@@ -52,41 +107,47 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
       JOB_POSTINGS.UPDATED_AT.lt(time).or(JOB_POSTINGS.UPDATED_AT.eq(time).and(JOB_POSTINGS.ID.lt(id)))
     } ?: DSL.trueCondition()
     val previous = if (position == null) DSL.falseCondition() else after.not()
-    val result = context.select(
+    return DSL.multiset(DSL.select(
       DSL.field(DSL.select(DSL.count().cast(Long::class.java)).from(JOB_POSTINGS).where(condition)),
       DSL.field(DSL.exists(DSL.selectOne().from(JOB_POSTINGS).where(condition.and(previous)))),
       DSL.multiset(DSL.select(DISCOVERY_POSTING, POSTING_SKILL_MENTIONS).from(JOB_POSTINGS)
         .where(condition.and(after)).orderBy(JOB_POSTINGS.UPDATED_AT.desc(), JOB_POSTINGS.ID.desc())
         .limit(page.first + 1)),
-    ).fetchSingle()
-    val postings = result.value3().map { it.toPosting() }
-    return connection(postings, page, result.value1(), result.value2(), scope) {
-      listOf(it.updatedAt.toString(), it.id.value.toString())
+    )).convertFrom { results ->
+      val result = results.single()
+      connection(result.value3().map { it.toPosting() }, page, result.value1(), result.value2(), scope) {
+        listOf(it.updatedAt.toString(), it.id.value.toString())
+      }
     }
   }
 
   override fun careerSites(page: ConnectionRequest): ConnectionPage<CareerSite> =
-    sitePage(DSL.trueCondition(), page, ConnectionCursors.scope("sites", "id-asc"))
+    context.select(siteField(DSL.trueCondition(), page, ConnectionCursors.scope("sites", "id-asc"))).fetchSingle().value1()
 
-  override fun skillCompanies(slug: String, page: ConnectionRequest): ConnectionPage<CareerSite> {
+  override fun skillCompanies(slug: String, page: ConnectionRequest): ConnectionPage<CareerSite> =
+    context.select(companyField(slug, page)).fetchSingle().value1()
+
+  private fun companyField(slug: String, page: ConnectionRequest): Field<ConnectionPage<CareerSite>> {
     val filter = openSkill(slug)
     val condition = DSL.exists(DSL.selectOne().from(JOB_POSTINGS)
       .where(JOB_POSTINGS.CAREER_SITE_ID.eq(CAREER_SITES.ID)).and(filter))
-    return sitePage(condition, page, ConnectionCursors.scope("skill-companies", "id-asc", slug))
+    return siteField(condition, page, ConnectionCursors.scope("skill-companies", "id-asc", slug))
   }
 
-  private fun sitePage(condition: Condition, page: ConnectionRequest, scope: String): ConnectionPage<CareerSite> {
+  private fun siteField(condition: Condition, page: ConnectionRequest, scope: String): Field<ConnectionPage<CareerSite>> {
     val id = page.after?.let { positiveId(ConnectionCursors.decode(it, scope, 1).single()) }
-    val result = context.select(
+    return DSL.multiset(DSL.select(
       DSL.field(DSL.select(DSL.count().cast(Long::class.java)).from(CAREER_SITES).where(condition)),
       DSL.field(DSL.exists(DSL.selectOne().from(CAREER_SITES).where(condition)
         .and(id?.let { CAREER_SITES.ID.le(it) } ?: DSL.falseCondition()))),
       DSL.multiset(DSL.select(CAREER_SITES).from(CAREER_SITES).where(condition)
         .and(id?.let { CAREER_SITES.ID.gt(it) } ?: DSL.trueCondition())
         .orderBy(CAREER_SITES.ID.asc()).limit(page.first + 1)),
-    ).fetchSingle()
-    return connection(result.value3().map { it.value1().toDomain() }, page, result.value1(), result.value2(), scope) {
-      listOf(it.id.value.toString())
+    )).convertFrom { results ->
+      val result = results.single()
+      connection(result.value3().map { it.value1().toDomain() }, page, result.value1(), result.value2(), scope) {
+        listOf(it.id.value.toString())
+      }
     }
   }
 
@@ -101,7 +162,10 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
       page, catalog.size.toLong(), after != null && catalog.any { it.slug <= after }, scope) { listOf(it.slug) }
   }
 
-  override fun relatedSkills(slug: String, page: ConnectionRequest): ConnectionPage<SkillDefinition> {
+  override fun relatedSkills(slug: String, page: ConnectionRequest): ConnectionPage<SkillDefinition> =
+    context.select(relatedField(slug, page)).fetchSingle().value1()
+
+  private fun relatedField(slug: String, page: ConnectionRequest): Field<ConnectionPage<SkillDefinition>> {
     val filter = openSkill(slug)
     val scope = ConnectionCursors.scope("related-skills", "slug-asc", slug)
     val after = page.after?.let { skillPosition(it, scope) }
@@ -112,16 +176,18 @@ class JooqDiscoveryQuery(private val context: DSLContext) : DiscoveryQueryPort {
       .where(filter).and(related.CANONICAL_SLUG.ne(slug))
       .and(related.CANONICAL_SLUG.`in`(SkillTaxonomy.V1.skills.map { it.slug })).asTable("candidates")
     val key = candidates.field("slug", String::class.java)!!
-    val result = context.select(
+    return DSL.multiset(DSL.select(
       DSL.field(DSL.select(DSL.count().cast(Long::class.java)).from(candidates)),
       DSL.field(DSL.exists(DSL.selectOne().from(candidates)
         .where(after?.let { key.le(it) } ?: DSL.falseCondition()))),
       DSL.multiset(DSL.select(key).from(candidates)
         .where(after?.let { key.gt(it) } ?: DSL.trueCondition())
         .orderBy(key.asc()).limit(page.first + 1)),
-    ).fetchSingle()
-    return connection(result.value3().map { SkillTaxonomy.V1.requireSkill(it.value1()) },
-      page, result.value1(), result.value2(), scope) { listOf(it.slug) }
+    )).convertFrom { results ->
+      val result = results.single()
+      connection(result.value3().map { SkillTaxonomy.V1.requireSkill(it.value1()) },
+        page, result.value1(), result.value2(), scope) { listOf(it.slug) }
+    }
   }
 
   override fun skillRequirementCounts(slug: String): SkillRequirementCounts {

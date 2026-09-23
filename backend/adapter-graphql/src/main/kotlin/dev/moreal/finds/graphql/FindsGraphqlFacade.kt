@@ -26,6 +26,7 @@ enum class ApiErrorCode {
   INVALID_INPUT, INVALID_URL, UNSUPPORTED_PROVIDER, AMBIGUOUS_PROVIDER,
   DISCOVERY_FAILED, ALREADY_REGISTERED, NOT_FOUND, NOT_DUE, DISABLED, BUSY,
   CRAWL_FAILED, INTERNAL, FORBIDDEN, IDEMPOTENCY_CONFLICT,
+  INVALID_FILTER, UNKNOWN_SKILL, INVALID_CURSOR, INVALID_PAGE,
 }
 
 data class ApiErrorDto(
@@ -42,6 +43,7 @@ data class CareerSiteDto(
   val displayName: String,
   val enabled: Boolean,
   val successfulIntervalSeconds: Int,
+  val slug: String? = null,
 )
 
 data class RegisterCareerSiteInput(val url: String, val displayName: String, val idempotencyKey: String)
@@ -75,6 +77,8 @@ class FindsGraphqlFacade(
   private val statusHandler: () -> List<CrawlStatus>,
   private val securityEvents: SecurityEventPort,
   private val clock: ClockPort = ClockPort(Instant::now),
+  val discovery: DiscoveryQueryPort? = null,
+  val discoveryBatches: DiscoveryBatchQueryPort? = null,
 ) {
   constructor(
     search: SearchPostings,
@@ -83,7 +87,9 @@ class FindsGraphqlFacade(
     statuses: GetCrawlStatus,
     securityEvents: SecurityEventPort,
     clock: ClockPort = ClockPort(Instant::now),
-  ) : this(search::execute, register::execute, crawl::execute, statuses::execute, securityEvents, clock)
+    discovery: DiscoveryQueryPort? = null,
+    discoveryBatches: DiscoveryBatchQueryPort? = null,
+  ) : this(search::execute, register::execute, crawl::execute, statuses::execute, securityEvents, clock, discovery, discoveryBatches)
 
   fun jobPostings(filter: PostingFilterInput?, first: Int?, after: String?): JobPostingConnectionDto =
     PostingGraphqlMapping.connection(
@@ -182,7 +188,7 @@ class FindsGraphqlFacade(
   private fun CareerSite.toDto() = CareerSiteDto(
     GlobalIdCodec.encode(NodeType.CareerSite, id.value), canonicalBaseUrl.value.toString(), canonicalBaseUrl.host.value,
     provider, displayName, crawlSettings.enabled,
-    Math.toIntExact(crawlSettings.successfulInterval.seconds),
+    Math.toIntExact(crawlSettings.successfulInterval.seconds), slug,
   )
 
   private fun errorPayload(code: ApiErrorCode, message: String) =
