@@ -17,7 +17,12 @@ export async function loadAccountPage(environment: Environment): Promise<{ failu
   try {
     const data = await RelayRuntime.fetchQuery<AccountOperationsViewerQuery>(environment, viewer, {}, { fetchPolicy: 'network-only' }).toPromise();
     if (!data?.viewer) { clearAccountRecords(environment); return { failure: { status: 401 } }; }
-    if (data.viewer.passkeys.error || data.viewer.sessions.error) return { failure: { status: (data.viewer.passkeys.error?.code ?? data.viewer.sessions.error?.code) === 'FORBIDDEN' ? 403 : 500 } };
+    const errors = [data.viewer.passkeys.error, data.viewer.sessions.error].filter(Boolean);
+    if (errors.length) {
+      const status = errors.some(error => error?.code === 'FORBIDDEN') ? 403 : 500;
+      if (status === 403) clearAccountRecords(environment);
+      return { failure: { status } };
+    }
     return {};
   } catch (error) {
     const failure = accountFailure(error);
@@ -28,38 +33,22 @@ export async function loadAccountPage(environment: Environment): Promise<{ failu
 
 /** Remove protected account records when the session is no longer authorized. */
 export function clearAccountRecords(environment: Environment) {
-  const removed = new Set<string>();
+  // A refetch can detach old nodes/edges without removing their records. Scan
+  // account-only schema types plus the viewer's synthetic-record namespace,
+  // rather than following only the latest connection edges. Public discovery
+  // types and their namespaces are deliberately outside this ownership scope.
+  const accountTypes = new Set(['Viewer', 'User', 'Passkey', 'Session', 'PasskeyEdge', 'SessionEdge', 'PasskeyConnection', 'SessionConnection']);
+  const source = environment.getStore().getSource() as MutableRecordSource;
+  const removed = source.getRecordIDs().filter(id => {
+    const type = source.get(id)?.__typename;
+    return id === 'client:root:viewer' || id.startsWith('client:root:viewer:') || (typeof type === 'string' && accountTypes.has(type));
+  });
   environment.commitUpdate(store => {
-    const drop = (id: string) => { removed.add(id); store.delete(id); };
-    const root = store.getRoot();
-    const account = root.getLinkedRecord('viewer') ?? store.get('client:root:viewer');
-    if (!account) return;
-    const user = account.getLinkedRecord('user');
-    if (user) drop(user.getDataID());
-    for (const key of ['passkeys', 'sessions']) {
-      // Relay connection handles coexist with their server fields. Delete the
-      // entire account-owned graph below viewer, including paginated edges.
-      const source = environment.getStore().getSource();
-      const accountRecord = source.get(account.getDataID());
-      for (const field of Object.keys(accountRecord ?? {}).filter(field => field.includes(key))) {
-        const connection = account.getLinkedRecord(field);
-        if (!connection) continue;
-        for (const edge of connection.getLinkedRecords('edges') ?? []) {
-          const node = edge?.getLinkedRecord('node');
-          if (node) drop(node.getDataID());
-          if (edge) drop(edge.getDataID());
-        }
-        const pageInfo = connection.getLinkedRecord('pageInfo');
-        if (pageInfo) drop(pageInfo.getDataID());
-        drop(connection.getDataID());
-      }
-    }
-    drop(account.getDataID());
-    root.setValue(null, 'viewer');
+    for (const id of removed) store.delete(id);
+    store.getRoot().setValue(null, 'viewer');
   });
   // Deletion notifies subscribers; removing its tombstones also forgets private
   // account/credential IDs when the store is subsequently serialized.
   // Our environments own a mutable RecordSource (relay/environment.ts).
-  const source = environment.getStore().getSource() as MutableRecordSource;
   for (const id of removed) source.remove(id);
 }

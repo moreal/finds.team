@@ -59,6 +59,10 @@ export function SecurityPage(props: { initialViewer?: Viewer; initialFailure?: A
     const next = result?.viewer;
     if (!next) { clearProtectedState(); setError('로그인이 필요해요. Passkey로 로그인해 주세요.'); }
     else {
+      if ([next.passkeys.error, next.sessions.error].some(error => error?.code === 'FORBIDDEN')) {
+        clearProtectedState();
+        throw new AccountActionError(accountFailureMessage({ status: 403 }));
+      }
       if (next.passkeys.error || next.sessions.error) throw new AccountActionError(mutationError(next.passkeys.error?.code ?? next.sessions.error?.code));
       setViewer(kind && current ? { ...current, [kind]: { ...next[kind], edges: [...current[kind].edges, ...next[kind].edges] } } : next);
     }

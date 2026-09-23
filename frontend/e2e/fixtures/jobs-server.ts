@@ -22,8 +22,8 @@ createServer(async (req, res) => {
         user: { id: account, roles: ['USER'] },
         passkeys: connection([{ __typename: 'Passkey', id: 'key-1', label: account === 'user-1' ? 'Laptop' : `${account} laptop`, createdAt: '2026-09-20T00:00:00Z', lastUsedAt: null },
           { __typename: 'Passkey', id: 'key-2', label: 'Backup', createdAt: '2026-09-20T00:00:00Z', lastUsedAt: null }]),
-        sessions: connection([{ __typename: 'Session', id: 'session-1', createdAt: '2026-09-20T00:00:00Z', expiresAt: '2026-09-25T00:00:00Z', current: true },
-          { __typename: 'Session', id: 'session-2', createdAt: '2026-09-20T00:00:00Z', expiresAt: '2026-09-25T00:00:00Z', current: false }]),
+        sessions: { ...connection([{ __typename: 'Session', id: 'session-1', createdAt: '2026-09-20T00:00:00Z', expiresAt: '2026-09-25T00:00:00Z', current: true },
+          { __typename: 'Session', id: 'session-2', createdAt: '2026-09-20T00:00:00Z', expiresAt: '2026-09-25T00:00:00Z', current: false }]), error: account === 'private-semantic' ? { code: 'FORBIDDEN', message: 'private diagnostic' } : null },
       } : null } }));
       return;
     }

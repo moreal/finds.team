@@ -296,3 +296,28 @@ for (const status of [401, 403]) test(`HTTP ${status} on refresh after a complet
   await expect(page.getByLabel('Laptop 이름')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toHaveCount(0);
 });
+
+test('semantic viewer FORBIDDEN never serializes protected account records in SSR', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'private-semantic', url: 'http://localhost:4175' }]);
+  const response = await page.goto('/account/security');
+  const html = await response!.text();
+  expect(html).not.toContain('private-semantic');
+  expect(html).not.toContain('private diagnostic');
+  expect(html).not.toContain('session-1');
+  expect(html).not.toContain('key-1');
+  await expect(page.getByRole('alert')).toContainText('접근 권한이 없어요');
+  await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toHaveCount(0);
+});
+
+test('mutation FORBIDDEN preserves the account and offers recent Passkey reauthentication', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/graphql', route => route.fulfill({ json: { data: { rotateRecoveryCode: { outcome: 'REJECTED', recoveryCode: null, error: { code: 'FORBIDDEN', message: 'private diagnostic' }, clientMutationId: null } } } }));
+  await page.goto('/account/security');
+  await page.getByRole('button', { name: '복구 코드 새로 발급' }).click();
+  await page.getByRole('button', { name: '발급 확인' }).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('최근 Passkey 인증이 필요해요');
+  await page.getByRole('button', { name: '취소', exact: true }).click();
+  await expect(page.getByLabel('Laptop 이름')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Passkey로 다시 인증' })).toBeVisible();
+});
