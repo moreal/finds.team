@@ -55,8 +55,14 @@ for visual review and checks horizontal overflow and visible keyboard focus.
 These main-route captures are review artifacts rather than host-dependent pixel
 goldens; catalog pixel baselines remain in `frontend/e2e/ui-catalog.spec.ts-snapshots`.
 Review the route captures when changing layout and retain them as CI artifacts.
-Update catalog baselines only after reviewing differences on the pinned browser
-and matching OS. Fixture coverage does not prove real Spring/browser integration:
+Catalog goldens are compared only on native macOS Chromium. On Linux, Windows,
+and remote browser connections, all catalog axe/control checks still run and
+screenshots are saved and attached for review; no absent platform golden is
+required. Keep native macOS pixel comparisons in release checks until separately
+reviewed Linux goldens exist. Update catalog baselines only after reviewing
+differences on the pinned browser and matching OS. An inherited
+`FINDS_PUBLIC_ORIGIN` never disables fixture servers: live smoke uses its own
+explicit Playwright configuration. Fixture coverage does not prove real Spring/browser integration:
 the same-origin production smoke below remains a separate final program gate.
 
 Flyway applies the schema at startup. The service listens on port 8080 by

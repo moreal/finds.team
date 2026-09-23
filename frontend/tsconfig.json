@@ -15,5 +15,5 @@
     "target": "ES2022",
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts", "playwright.production.config.ts"]
 }

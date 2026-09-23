@@ -86,5 +86,6 @@ for (const path of routes) {
       await page.keyboard.press('Enter');
       await expect.poll(() => new URL(page.url()).pathname).toBe(new URL(href!, 'http://127.0.0.1:4176').pathname);
     }
+    expect(errors, 'Keyboard interactions must not introduce page errors').toEqual([]);
   });
 }

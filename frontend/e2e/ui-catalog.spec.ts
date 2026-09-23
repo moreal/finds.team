@@ -1,16 +1,28 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { verifyCatalogVisual } from './fixtures/catalog-visual-policy';
+
+async function catalogVisual(target: Page | Locator, info: TestInfo, name: string, fullPage = false) {
+  await verifyCatalogVisual({ platform: process.platform, remoteBrowser: !!process.env.PW_TEST_CONNECT_WS_ENDPOINT }, {
+    compareGolden: async () => { await expect(target).toHaveScreenshot(name, fullPage ? { fullPage: true } : {}); },
+    captureArtifact: async () => {
+      const path = info.outputPath(name);
+      await target.screenshot({ path, animations: 'disabled', ...(fullPage ? { fullPage: true } : {}) });
+      await info.attach(name, { path, contentType: 'image/png' });
+    },
+  });
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/ui");
   await expect(page.getByRole("heading", { name: "컴포넌트 카탈로그" })).toBeVisible();
 });
 
-test("accessible catalog has no serious axe violations and fits its viewport", async ({ page }) => {
+test("accessible catalog has no serious axe violations and fits its viewport", async ({ page }, info) => {
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations.filter(({ impact }) => impact === "serious" || impact === "critical")).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await expect(page).toHaveScreenshot("catalog.png", { fullPage: true });
+  await catalogVisual(page, info, 'catalog.png', true);
 });
 
 test("placeholder text meets normal-text contrast in both themes", async ({ page }, info) => {
@@ -54,11 +66,11 @@ test("native controls meet hit targets and expose focus, hover and active states
   await button.focus();
   await expect(button).toBeFocused();
   expect(await button.evaluate((node) => getComputedStyle(node).outlineStyle)).toBe("solid");
-  await expect(button).toHaveScreenshot("button-focus.png");
+  await catalogVisual(button, info, 'button-focus.png');
   await button.hover();
-  await expect(button).toHaveScreenshot("button-hover.png");
+  await catalogVisual(button, info, 'button-hover.png');
   await page.mouse.down();
-  await expect(button).toHaveScreenshot("button-active.png");
+  await catalogVisual(button, info, 'button-active.png');
   await page.mouse.up();
   for (const control of [page.getByLabel("검색어", { exact: true }), page.getByRole("button", { name: "필터 닫기" }), page.getByRole("link", { name: "채용 페이지" })]) {
     await control.focus();
@@ -67,14 +79,14 @@ test("native controls meet hit targets and expose focus, hover and active states
   }
 });
 
-test("filled danger appears only in a final confirmation dialog", async ({ page }) => {
+test("filled danger appears only in a final confirmation dialog", async ({ page }, info) => {
   await expect(page.getByRole("button", { name: "삭제 확인", exact: true })).not.toBeVisible();
   await page.getByRole("button", { name: "최종 삭제 확인 예시" }).click();
   const dialog = page.getByRole("dialog", { name: "패스키를 삭제할까요?" });
   await expect(dialog.getByRole("button", { name: "삭제 확인", exact: true })).toBeVisible();
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations.filter(({ impact }) => impact === "serious" || impact === "critical")).toEqual([]);
-  await expect(dialog).toHaveScreenshot("confirmation.png");
+  await catalogVisual(dialog, info, 'confirmation.png');
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
 });

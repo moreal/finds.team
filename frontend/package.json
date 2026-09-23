@@ -10,7 +10,7 @@
     "relay:validate": "node scripts/relay.ts --validate",
     "test": "vitest",
     "test:e2e": "playwright test --workers 4",
-    "test:production": "playwright test --project production --workers 1",
+    "test:production": "playwright test --config playwright.production.config.ts --workers 1",
     "test:built": "node --test tests/built-handler.test.mjs",
     "typecheck": "tsc --noEmit"
   },

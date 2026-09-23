@@ -94,13 +94,28 @@ pnpm --dir frontend exec playwright install chromium
 pnpm frontend:check
 ```
 
-The gate order is Relay validation, TypeScript, Vitest, the two compatibility
-Playwright specs (`e2e/kobalte-hydration.spec.ts` and
-`e2e/virtual-list.spec.ts`), the production build, then `test:built` against the
+The gate order is Relay validation, TypeScript, Vitest, all fixture Playwright
+acceptance specs (compatibility, catalog, discovery, authentication,
+administration, the primary-route accessibility/keyboard matrix, and concurrent
+SSR isolation), the production build, then `test:built` against the
 emitted artifacts. That final suite verifies nonce-only CSP, a unique nonce on
 every script, one hydration bootstrap, no dynamic evaluation, and no internal
 GraphQL endpoint in the client bundle. The opt-in Kobalte and Solid Virtual
 failure reproductions below remain outside the passing gate.
+
+Catalog pixel comparisons use the committed Darwin goldens only with native
+macOS Chromium. Linux, Windows, and remote browser connections still run every
+catalog accessibility/control assertion and save/attach screenshot artifacts
+under `frontend/test-results`; they do not look for absent platform goldens.
+Those runs require artifact review for visual changes, not an automatic pixel
+comparison claim. Main-route captures use artifact review on every platform.
+Keep macOS pixel comparison in the release checks until a separately reviewed,
+pinned Linux baseline is committed. Do not generate or approve baseline images
+as a side effect of an ordinary gate run.
+
+Fixture configuration never selects live infrastructure from environment
+variables. Live Spring/Caddy checks use the separate production configuration:
+`FINDS_PUBLIC_ORIGIN=http://127.0.0.1:8080 pnpm --dir frontend test:production`.
 
 ## KOBALTE-ALPHA2-SOLID-RC9
 
