@@ -2,6 +2,11 @@ import { expect, test, type Page } from '@playwright/test';
 
 test.use({ baseURL: 'http://localhost:4175' });
 const recoveryCode = 'ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ23-4567';
+const accountResponse = { data: { viewer: {
+  user: { id: 'user-1', roles: ['USER'] },
+  passkeys: { edges: [{ cursor: 'key-1', node: { __typename: 'Passkey', id: 'key-1', label: 'Laptop', createdAt: '2026-09-20T00:00:00Z', lastUsedAt: null } }], totalCount: 1, error: null, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: 'key-1', endCursor: 'key-1' } },
+  sessions: { edges: [], totalCount: 0, error: null, pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: null, endCursor: null } },
+} } };
 async function authFixture(page: Page) {
   let registered: string | undefined;
   let csrfEpoch = 0;
@@ -27,7 +32,7 @@ async function authFixture(page: Page) {
       expect(route.request().headers()['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/);
       return route.fulfill({ status: 202, json: { accepted: true } });
     }
-    if (body.otp !== '123456' || (path.includes('recovery') && body.recoveryCode !== 'saved-recovery')) return route.fulfill({ status: 401, json: {} });
+    if (body.otp !== '12345678' || (path.includes('recovery') && body.recoveryCode !== 'saved-recovery')) return route.fulfill({ status: 401, json: {} });
     csrfEpoch++;
     return route.fulfill({ json: { scope: path.includes('recovery') ? 'RECOVERY' : 'ENROLLMENT' } });
   });
@@ -61,7 +66,8 @@ async function verifyEmail(page: Page, mode = 'join') {
   await page.goto(`/${mode}`);
   await page.getByLabel('이메일', { exact: true }).fill('person@example.com');
   await page.getByRole('button', { name: '인증 코드 보내기' }).click();
-  await page.getByLabel('이메일 인증 코드').fill('123456');
+  await page.getByLabel('이메일 인증 코드').fill('12345678');
+  await expect(page.getByLabel('이메일 인증 코드')).toHaveValue('12345678');
   if (mode === 'recover') await page.getByLabel('저장한 복구 코드').fill('saved-recovery');
   await page.getByRole('button', { name: '인증 확인' }).click();
 }
@@ -122,6 +128,7 @@ test('browser cancellation has a retryable message distinct from credential vali
 });
 
 test('restricted sessions denied by GraphQL never expose account records', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'restricted', url: 'http://localhost:4175' }]);
   await page.route('**/graphql', route => route.fulfill({ status: 403, json: { title: 'Request rejected', status: 403 } }));
   await page.goto('/account/security');
   await expect(page.getByRole('alert')).toContainText('접근 권한이 없어요');
@@ -133,12 +140,15 @@ test('wrong OTP stays on proof form and recovery requires both proofs before rep
   await page.goto('/recover');
   await page.getByLabel('이메일', { exact: true }).fill('person@example.com');
   await page.getByRole('button', { name: '인증 코드 보내기' }).click();
-  await page.getByLabel('이메일 인증 코드').fill('000000');
+  await page.getByLabel('이메일 인증 코드').fill('00000000');
   await page.getByLabel('저장한 복구 코드').fill('saved-recovery');
   await page.getByRole('button', { name: '인증 확인' }).click();
   await expect(page.getByRole('alert')).toContainText('코드');
   await expect(page.getByRole('button', { name: 'Passkey 등록', exact: true })).toHaveCount(0);
-  await page.getByLabel('이메일 인증 코드').fill('123456');
+  await page.getByLabel('이메일 인증 코드').fill('87654321');
+  await page.getByRole('button', { name: '인증 확인' }).click();
+  await expect(page.getByRole('alert')).toContainText('만료');
+  await page.getByLabel('이메일 인증 코드').fill('12345678');
   await page.getByLabel('저장한 복구 코드').fill('wrong');
   await page.getByRole('button', { name: '인증 확인' }).click();
   await expect(page.getByRole('alert')).toBeVisible();
@@ -149,6 +159,7 @@ test('wrong OTP stays on proof form and recovery requires both proofs before rep
 });
 
 test('account management renames, confirms removal, rotates recovery material and revokes other sessions', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
   let label = 'Laptop'; let removed = false; let revoked = false;
   await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
   await page.route('**/graphql', async route => {
@@ -186,4 +197,102 @@ test('account management renames, confirms removal, rotates recovery material an
   await page.getByRole('button', { name: '발급 확인' }).click();
   await expect(page.getByText(recoveryCode)).toBeVisible();
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toContain(recoveryCode);
+});
+
+test('unresolved OTP request retries the same key and body until explicitly starting a new request', async ({ page }) => {
+  const requests: { key: string; body: unknown }[] = [];
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/auth/enrollment/otp/request', async route => {
+    requests.push({ key: route.request().headers()['idempotency-key'], body: route.request().postDataJSON() });
+    if (requests.length === 1) return route.abort('failed');
+    return route.fulfill({ status: 202, json: { accepted: true } });
+  });
+  await page.goto('/join');
+  await page.getByLabel('이메일', { exact: true }).fill('person@example.com');
+  await page.getByRole('button', { name: '인증 코드 보내기' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await page.getByRole('button', { name: /인증 코드 보내기|같은 요청 다시 시도/ }).click();
+  await expect(page.getByLabel('이메일 인증 코드')).toBeVisible();
+  expect(requests[1]).toEqual(requests[0]);
+  await page.getByRole('button', { name: '이메일 변경 또는 코드 다시 받기' }).click();
+  await page.getByRole('button', { name: '인증 코드 보내기' }).click();
+  await expect(page.getByLabel('이메일 인증 코드')).toBeVisible();
+  expect(requests[2].key).not.toEqual(requests[0].key);
+});
+
+test('account page SSR contains only its own hydrated viewer without initial browser refetch', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'account-a', url: 'http://localhost:4175' }]);
+  let browserQueries = 0;
+  page.on('request', request => { if (request.url().endsWith('/graphql')) browserQueries++; });
+  const response = await page.goto('/account/security');
+  const html = await response!.text();
+  expect(html).toContain('data-account-id="account-a"');
+  expect(html).toContain('account-a laptop');
+  expect(html).not.toContain('account-b');
+  expect(html).toContain('relayRecords');
+  // Start consumes/removes its hydration payload scripts after execution; inspect
+  // the original streamed document rather than the post-hydration DOM.
+  const serializedScripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(match => match[1]).join('\n');
+  expect(serializedScripts).toContain('relayRecords');
+  expect(serializedScripts).toContain('account-a laptop');
+  expect(serializedScripts).not.toContain('account-b');
+  await expect(page.getByLabel('account-a laptop 이름')).toBeVisible();
+  await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toBeEnabled();
+  expect(browserQueries).toBe(0);
+});
+
+test('lost rotation response retries one command and never reveals plaintext on replay', async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  const commands: unknown[] = [];
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/graphql', async route => {
+    const body = route.request().postDataJSON();
+    if (body.operationName !== 'AccountOperationsRotateMutation') return route.fulfill({ json: accountResponse });
+    commands.push(body.variables.input);
+    if (commands.length === 1) return route.abort('failed');
+    return route.fulfill({ json: { data: { rotateRecoveryCode: { outcome: 'ALREADY_ROTATED', recoveryCode: null, error: null, clientMutationId: null } } } });
+  });
+  await page.goto('/account/security');
+  await page.getByRole('button', { name: '복구 코드 새로 발급' }).click();
+  await page.getByRole('button', { name: '발급 확인' }).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toBeVisible();
+  await page.getByRole('button', { name: /발급 확인|같은 변경 다시 시도/ }).click();
+  await expect(page.getByText('이미 발급된 복구 코드는 다시 표시할 수 없어요. 필요한 경우 새로 발급해 주세요.')).toBeVisible();
+  expect(commands[1]).toEqual(commands[0]);
+  await expect(page.getByText(recoveryCode)).toHaveCount(0);
+});
+
+for (const status of [401, 403]) test(`HTTP ${status} after an authenticated mutation clears the account and dialog`, async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/graphql', route => route.request().postDataJSON().operationName === 'AccountOperationsViewerQuery' ? route.fulfill({ json: accountResponse }) : route.fulfill({ status, json: {} }));
+  await page.goto('/account/security');
+  await expect(page.getByLabel('Laptop 이름')).toBeVisible();
+  await page.getByRole('button', { name: '복구 코드 새로 발급' }).click();
+  await page.getByRole('button', { name: '발급 확인' }).click();
+  await expect(page.getByRole('alert')).toContainText(status === 401 ? '로그인이 필요해요' : '접근 권한이 없어요');
+  await expect(page.getByLabel('Laptop 이름')).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toHaveCount(0);
+  const records = await page.evaluate(async () => {
+    const modulePath = '/src/relay/environment.ts';
+    const { getBrowserRelayEnvironment } = await import(modulePath);
+    return JSON.stringify(getBrowserRelayEnvironment({}).getStore().getSource().toJSON());
+  });
+  expect(records).not.toContain('Laptop');
+  expect(records).not.toContain('user-1');
+});
+
+for (const status of [401, 403]) test(`HTTP ${status} on refresh after a completed rename clears the previous viewer`, async ({ page }) => {
+  await page.context().addCookies([{ name: 'security-account', value: 'user-1', url: 'http://localhost:4175' }]);
+  await page.route('**/auth/csrf', route => route.fulfill({ json: { token: 'fresh', headerName: 'X-CSRF-TOKEN' } }));
+  await page.route('**/graphql', route => route.request().postDataJSON().operationName === 'AccountOperationsViewerQuery'
+    ? route.fulfill({ status, json: {} })
+    : route.fulfill({ json: { data: { renamePasskey: { outcome: 'CHANGED', error: null, clientMutationId: null } } } }));
+  await page.goto('/account/security');
+  await page.getByLabel('Laptop 이름').fill('Phone');
+  await page.getByRole('button', { name: '이름 저장' }).first().click();
+  await expect(page.getByRole('alert')).toContainText(status === 401 ? '로그인이 필요해요' : '접근 권한이 없어요');
+  await expect(page.getByLabel('Laptop 이름')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '복구 코드 새로 발급' })).toHaveCount(0);
 });

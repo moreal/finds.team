@@ -12,6 +12,21 @@ createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const { variables, operationName } = JSON.parse(body);
+    if (operationName === 'AccountOperationsViewerQuery') {
+      const account = /(?:^|;\s*)security-account=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
+      if (account === 'restricted') { res.writeHead(403); res.end(); return; }
+      res.setHeader('content-type', 'application/json');
+      const connection = (nodes: object[]) => ({ edges: nodes.map((node: any) => ({ cursor: node.id, node })), totalCount: nodes.length, error: null,
+        pageInfo: { hasNextPage: false, hasPreviousPage: false, startCursor: (nodes[0] as any)?.id ?? null, endCursor: (nodes.at(-1) as any)?.id ?? null } });
+      res.end(JSON.stringify({ data: { viewer: account ? {
+        user: { id: account, roles: ['USER'] },
+        passkeys: connection([{ __typename: 'Passkey', id: 'key-1', label: account === 'user-1' ? 'Laptop' : `${account} laptop`, createdAt: '2026-09-20T00:00:00Z', lastUsedAt: null },
+          { __typename: 'Passkey', id: 'key-2', label: 'Backup', createdAt: '2026-09-20T00:00:00Z', lastUsedAt: null }]),
+        sessions: connection([{ __typename: 'Session', id: 'session-1', createdAt: '2026-09-20T00:00:00Z', expiresAt: '2026-09-25T00:00:00Z', current: true },
+          { __typename: 'Session', id: 'session-2', createdAt: '2026-09-20T00:00:00Z', expiresAt: '2026-09-25T00:00:00Z', current: false }]),
+      } : null } }));
+      return;
+    }
     if (operationName !== "DiscoveryOperationsJobsQuery" && ["unavailable", "unauthorized", "forbidden"].includes(variables.slug ?? variables.id)) {
       const value = variables.slug ?? variables.id;
       res.writeHead(value === "unauthorized" ? 401 : value === "forbidden" ? 403 : 503); res.end(); return;
