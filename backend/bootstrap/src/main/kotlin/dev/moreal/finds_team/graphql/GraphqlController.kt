@@ -36,6 +36,9 @@ class GraphqlController(
     produces = [MediaType.APPLICATION_JSON_VALUE],
   )
   fun execute(@RequestBody request: GraphqlRequest, authentication: Authentication?, servletRequest: HttpServletRequest): CompletableFuture<Map<String, Any>> {
+    // graphql-java treats an empty name differently from null and can execute the first operation.
+    // Reject it before selection so execution cannot bypass the selected mutation's CSRF check.
+    if (request.operationName == "") throw ResponseStatusException(HttpStatus.BAD_REQUEST)
     // The security filter leaves public POST queries open. Check the selected operation here, after
     // bounded JSON parsing, using the same deferred session token and XOR handler as Spring Security.
     val operations = try { graphql.parser.Parser().parseDocument(request.query)

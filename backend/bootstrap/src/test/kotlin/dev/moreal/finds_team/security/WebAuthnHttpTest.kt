@@ -238,6 +238,60 @@ class WebAuthnHttpTest {
     assertEquals("FORBIDDEN", register(session)["error"]["code"].asText())
     assertEquals(1, discoveries.get())
   }
+  @Test fun `empty GraphQL operation names cannot bypass administrator mutation CSRF`() {
+    val session = recentAdministratorSession()
+    discoveries.set(0)
+    val database = context.getBean(org.jooq.DSLContext::class.java)
+    fun counts() = listOf("career_sites", "audit_events", "command_requests").map {
+      database.fetchValue("SELECT count(*)::int FROM $it")
+    }
+    val before = counts()
+    val statuses = mutableListOf<Int>()
+    for (multiple in listOf(false, true)) for (invalidCsrf in listOf(false, true)) {
+      val input = """{url: "https://jobs-${UUID.randomUUID()}.example.test", displayName: "Acme", idempotencyKey: "${UUID.randomUUID()}"}"""
+      val query = if (multiple)
+        "mutation Private { ...Registration } query Public { __typename } fragment Registration on Mutation { aliased: registerCareerSite(input: $input) { site { id } } }"
+        else "mutation { registerCareerSite(input: $input) { site { id } } }"
+      val builder = post("/graphql").session(session).secure(true).contentType("application/json")
+        .content(json.writeValueAsString(mapOf("query" to query, "operationName" to "")))
+      if (invalidCsrf) builder.with(csrf().useInvalidToken())
+      val pending = mvc.perform(builder).andReturn()
+      val response = if (pending.request.isAsyncStarted) mvc.perform(asyncDispatch(pending)).andReturn().response else pending.response
+      statuses += response.status
+    }
+    assertEquals(listOf(400, 400, 400, 400), statuses)
+    assertEquals(0, discoveries.get())
+    assertEquals(before, counts(), "Rejected operation names cannot create a site, audit event or command result")
+  }
+
+  @Test fun `null omitted and selected GraphQL operation names preserve CSRF and public queries`() {
+    val session = recentAdministratorSession()
+    discoveries.set(0)
+    val input = """{url: "https://jobs-${UUID.randomUUID()}.example.test", displayName: "Acme", idempotencyKey: "${UUID.randomUUID()}"}"""
+    val mutation = "mutation Private { ...Registration } fragment Registration on Mutation { aliased: registerCareerSite(input: $input) { site { id } } }"
+    val multiple = "$mutation query Public { __typename }"
+    fun body(query: String, explicitNull: Boolean) = json.writeValueAsString(
+      mutableMapOf<String, Any?>("query" to query).apply { if (explicitNull) put("operationName", null) })
+    for (explicitNull in listOf(false, true)) {
+      mvc.perform(post("/graphql").session(session).secure(true).contentType("application/json")
+        .content(body(mutation, explicitNull))).andExpect(status().isForbidden)
+      mvc.perform(post("/graphql").session(session).secure(true).with(csrf().useInvalidToken()).contentType("application/json")
+        .content(body(mutation, explicitNull))).andExpect(status().isForbidden)
+      val ambiguous = mvc.perform(post("/graphql").session(session).secure(true).contentType("application/json")
+        .content(body(multiple, explicitNull))).andExpect(request().asyncStarted()).andReturn()
+      mvc.perform(asyncDispatch(ambiguous)).andExpect(status().isOk).andExpect(jsonPath("$.errors").isArray)
+        .andExpect(jsonPath("$.data").doesNotExist())
+      val public = mvc.perform(post("/graphql").session(session).secure(true).contentType("application/json")
+        .content(body("{ __typename }", explicitNull))).andExpect(request().asyncStarted()).andReturn()
+      mvc.perform(asyncDispatch(public)).andExpect(status().isOk).andExpect(jsonPath("$.data.__typename").value("Query"))
+    }
+    val selected = mvc.perform(post("/graphql").session(session).secure(true).contentType("application/json")
+      .content(json.writeValueAsString(mapOf("query" to multiple, "operationName" to "Public"))))
+      .andExpect(request().asyncStarted()).andReturn()
+    mvc.perform(asyncDispatch(selected)).andExpect(status().isOk).andExpect(jsonPath("$.data.__typename").value("Query"))
+    assertEquals(0, discoveries.get())
+  }
+
   @Test fun `real server cookie is secure HttpOnly SameSite Lax and csrf bootstrap is no-store`() {
     val port = context.environment.getProperty("local.server.port")
     val response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI("http://localhost:$port/auth/csrf")).GET().build(), HttpResponse.BodyHandlers.ofString())
@@ -383,6 +437,16 @@ class WebAuthnHttpTest {
     return MockHttpSession().apply { setAttribute("finds.restricted-session", restricted.id) }
   }
   private data class Account(val user: User, val key: Fixture, val handle: ByteArray)
+  private fun recentAdministratorSession(): MockHttpSession {
+    val account = seed()
+    tx.execute {
+      val user = it.users.lockByEmail(account.user.email)!!
+      it.users.save(assertIs<UserChange.Updated>(user.grantRole(UserRole.ADMIN)).user)
+    }
+    val (options, session) = options()
+    login(session, account.key.assertion(options["challenge"].asText(), account.handle)).andExpect(status().isOk)
+    return session
+  }
   private fun seed(pending: Boolean = false, counter: Long = 7, email: String = "${UUID.randomUUID()}@example.test"): Account {
     val key = Fixture()
     val user = User(UserId(UUID.randomUUID()), EmailAddress(email))
