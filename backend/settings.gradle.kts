@@ -20,6 +20,7 @@ include(
   "mail-transport-pool",
   "mail-observability",
   "mail-transport-smtp",
+  "mail-transport-ses",
   "adapter-source",
   "adapter-persistence",
   "adapter-graphql",

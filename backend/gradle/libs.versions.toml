@@ -13,6 +13,8 @@ postgresql = "42.7.13"
 testcontainers = "2.0.5"
 graphql-java = "26.1"
 angus-mail = "2.0.4"
+aws-sdk = "1.9.6"
+logback = "1.5.38"
 
 [libraries]
 kotlin-test-junit5 = { module = "org.jetbrains.kotlin:kotlin-test-junit5", version.ref = "kotlin" }
@@ -43,6 +45,8 @@ testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgr
 testcontainers-junit = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }
 graphql-java = { module = "com.graphql-java:graphql-java", version.ref = "graphql-java" }
 angus-mail = { module = "org.eclipse.angus:jakarta.mail", version.ref = "angus-mail" }
+aws-ses = { module = "aws.sdk.kotlin:sesv2", version.ref = "aws-sdk" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
