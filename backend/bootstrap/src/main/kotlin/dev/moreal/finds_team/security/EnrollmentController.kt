@@ -3,7 +3,6 @@ package dev.moreal.finds_team.security
 import dev.moreal.finds.application.usecase.*
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -25,7 +24,7 @@ class EnrollmentController(private val requestOtp: RequestEnrollmentOtp, private
       is VerifyEnrollmentOtpResult.Verified -> {
         boundary.bind(request, response, result.session); boundary.verified("ENROLLMENT")
       }
-      VerifyEnrollmentOtpResult.Rejected -> throw OtpHttpRejected(HttpStatus.UNAUTHORIZED)
+      VerifyEnrollmentOtpResult.Rejected -> boundary.rejected(request)
     }
   }
 }

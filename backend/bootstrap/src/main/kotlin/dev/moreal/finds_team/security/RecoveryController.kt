@@ -4,7 +4,6 @@ import dev.moreal.finds.application.usecase.*
 import dev.moreal.finds.application.port.VerificationCode
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -28,7 +27,7 @@ class RecoveryController(private val requestOtp: RequestRecoveryOtp, private val
       is VerifyRecoveryProofsResult.Verified -> {
         boundary.bind(request, response, result.session); boundary.verified("RECOVERY")
       }
-      VerifyRecoveryProofsResult.Rejected -> throw OtpHttpRejected(HttpStatus.UNAUTHORIZED)
+      VerifyRecoveryProofsResult.Rejected -> boundary.rejected(request)
     }
   }
 }

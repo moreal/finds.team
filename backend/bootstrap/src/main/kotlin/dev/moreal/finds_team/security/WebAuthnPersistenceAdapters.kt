@@ -40,5 +40,5 @@ internal fun CredentialRecord.material() = PasskeyCredentialMaterial(
   dev.moreal.finds.domain.identity.CredentialId(credentialId.toBase64UrlString()), publicKey.bytes,
   signatureCount, transports.map { it.value }.toSet(), isBackupEligible, isBackupState,
 )
-internal class CeremonyRejected : RuntimeException()
+internal class CeremonyRejected(val replayed: Boolean = false) : RuntimeException()
 internal class CeremonyConflict : RuntimeException()

@@ -22,7 +22,7 @@ class JooqSecurityEventLog(private val context: DSLContext) : SecurityEventPort 
       .set(SECURITY_EVENTS.TARGET_ID, event.careerSiteId?.toString())
       .set(SECURITY_EVENTS.REQUEST_ID, event.requestId)
       .set(SECURITY_EVENTS.CORRELATION_ID, event.correlationId)
-      .set(SECURITY_EVENTS.DETAILS, JSONB.valueOf("""{"reason":"FORBIDDEN"}"""))
+      .set(SECURITY_EVENTS.DETAILS, JSONB.valueOf("""{"reason":"${event.action.reason}"}"""))
       .execute()
   }
 }

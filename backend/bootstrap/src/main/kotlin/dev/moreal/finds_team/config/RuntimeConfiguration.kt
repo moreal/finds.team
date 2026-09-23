@@ -10,7 +10,13 @@ import dev.moreal.finds.application.port.SourceFetchPort
 import dev.moreal.finds.application.port.SuccessfulCrawlPort
 import dev.moreal.finds.application.port.TransactionPort
 import dev.moreal.finds.application.port.SecurityEventPort
+import dev.moreal.finds.application.port.AuditQueryPort
+import dev.moreal.finds.application.port.CommandMaintenancePort
+import dev.moreal.finds.application.port.CrawlMaintenancePort
 import dev.moreal.finds.persistence.JooqSecurityEventLog
+import dev.moreal.finds.persistence.JooqAuditQuery
+import dev.moreal.finds.persistence.JooqCommandMaintenance
+import dev.moreal.finds.persistence.JooqCrawlMaintenance
 import dev.moreal.finds.application.port.MailPayloadCrypto
 import dev.moreal.finds.application.port.MailOutbox
 import dev.moreal.finds.application.port.VerificationCodeNotifier
@@ -37,6 +43,9 @@ import dev.moreal.finds.application.usecase.CrawlSite
 import dev.moreal.finds.application.usecase.GetCrawlStatus
 import dev.moreal.finds.application.usecase.RegisterCareerSite
 import dev.moreal.finds.application.usecase.SearchPostings
+import dev.moreal.finds.application.usecase.SearchAuditEvents
+import dev.moreal.finds.application.usecase.PurgeExpiredCommandRequests
+import dev.moreal.finds.application.usecase.ExpireAbandonedCrawlRuns
 import dev.moreal.finds.domain.career.CrawlSettings
 import dev.moreal.finds.domain.career.SiteUrl
 import dev.moreal.finds.domain.career.SiteUrlResult
@@ -64,6 +73,8 @@ import dev.moreal.finds.source.provider.SourceAdapter
 import dev.moreal.finds.source.robots.RobotsClient
 import dev.moreal.finds.source.sitemap.SitemapCrawler
 import dev.moreal.finds_team.crawl.ScheduledCrawlDispatcher
+import dev.moreal.finds_team.crawl.ScheduledAuditMaintenance
+import dev.moreal.finds_team.security.HttpSecurityEvents
 import dev.moreal.finds_team.runtime.ManagedCoroutineScope
 import io.micrometer.core.instrument.MeterRegistry
 import org.jooq.DSLContext
@@ -78,9 +89,19 @@ import javax.sql.DataSource
 
 @Configuration(proxyBeanMethods = false)
 class RuntimeConfiguration {
+  @Bean fun auditQueries(context: DSLContext): AuditQueryPort = JooqAuditQuery(context)
+  @Bean fun searchAuditEvents(queries: AuditQueryPort) = SearchAuditEvents(queries)
+  @Bean fun commandMaintenance(context: DSLContext): CommandMaintenancePort = JooqCommandMaintenance(context)
+  @Bean fun purgeExpiredCommandRequests(requests: CommandMaintenancePort, clock: ClockPort) = PurgeExpiredCommandRequests(requests, clock)
+  @Bean fun crawlMaintenance(context: DSLContext): CrawlMaintenancePort = JooqCrawlMaintenance(context)
+  @Bean fun expireAbandonedCrawlRuns(runs: CrawlMaintenancePort, clock: ClockPort, properties: FindsProperties) =
+    ExpireAbandonedCrawlRuns(runs, clock, properties.crawl.leaseDuration)
+  @Bean fun scheduledAuditMaintenance(requests: PurgeExpiredCommandRequests, runs: ExpireAbandonedCrawlRuns) =
+    ScheduledAuditMaintenance(requests, runs)
   @Bean fun authRateLimits(context: DSLContext): AuthRateLimitPort = JooqAuthRateLimit(context)
   @Bean fun otpHttpBoundary(rates: AuthRateLimitPort, hashes: KeyedIdentityHashPort, random: SecureRandomPort,
-    clock: ClockPort, properties: SecurityProperties) = OtpHttpBoundary(rates, hashes, random, clock, properties)
+    clock: ClockPort, properties: SecurityProperties, securityEvents: HttpSecurityEvents) =
+    OtpHttpBoundary(rates, hashes, random, clock, properties, securityEvents = securityEvents)
   @Bean fun requestEnrollmentOtp(transactions: TransactionPort, clock: ClockPort,
     random: SecureRandomPort, hashes: KeyedIdentityHashPort,
     notifier: VerificationCodeNotifier) = RequestEnrollmentOtp(transactions, clock, random, hashes, notifier)

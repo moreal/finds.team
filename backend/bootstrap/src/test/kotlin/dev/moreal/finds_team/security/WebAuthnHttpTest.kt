@@ -136,6 +136,32 @@ class WebAuthnHttpTest {
       login(session, account.key.assertion(options["challenge"].asText(), account.handle, count = 0)).andExpect(status().isOk)
     }
   }
+  @Test fun `failed signature and completed challenge replay append categorical events without credential material`(output: CapturedOutput) {
+    val account = seed()
+    val (options, session) = options()
+    val challenge = options["challenge"].asText()
+    val database = context.getBean(org.jooq.DSLContext::class.java)
+    val before = database.fetchValue("SELECT count(*)::int FROM security_events") as Int
+    val failedId = UUID.randomUUID()
+    login(session, account.key.assertion(challenge, account.handle, corruptSignature = true), failedId).andExpect(status().isUnauthorized)
+    assertEquals(before + 1, database.fetchValue("SELECT count(*)::int FROM security_events"))
+    assertEquals("{\"reason\": \"AUTHENTICATION_FAILED\"}", database.fetchValue("SELECT details::text FROM security_events WHERE request_id = ?", failedId))
+    now = now.plusSeconds(1)
+    val assertion = account.key.assertion(challenge, account.handle)
+    login(session, assertion).andExpect(status().isOk)
+    val replayId = UUID.randomUUID()
+    login(session, assertion, replayId).andExpect(status().isUnauthorized)
+    assertEquals(before + 2, database.fetchValue("SELECT count(*)::int FROM security_events"))
+    assertEquals("{\"reason\": \"CHALLENGE_REPLAY\"}", database.fetchValue("SELECT details::text FROM security_events WHERE request_id = ?", replayId))
+    val events = database.fetch("SELECT row_to_json(s)::text FROM security_events s").joinToString()
+    val normalSessions = tx.execute { it.userSessions.findByUserId(account.user.id) }
+    // MockHttpSession uses short numeric IDs that can coincidentally occur in any UUID. Inspect
+    // the actual persisted secret session ID, not that test harness counter.
+    for (value in listOf(challenge, account.key.id.value, account.user.email.value, normalSessions.single().id.value.toString(), b64(account.key.cose))) {
+      assertFalse(events.contains(value)); assertFalse(output.all.contains(value))
+    }
+    assertEquals(1, normalSessions.size)
+  }
   @Test fun `registration requires live restricted binding and validates attestation`() {
     mvc.perform(post("/webauthn/register/options").secure(true).with(csrf())).andExpect(status().isUnauthorized)
     val account = seed(pending = true, email = "Admin@Example.test")
@@ -276,7 +302,7 @@ class WebAuthnHttpTest {
     val key = UUID.randomUUID()
     val query = """mutation Crawl { ...Trigger } fragment Trigger on Mutation { aliased: triggerCrawl(careerSiteId: "${site.id.value}", idempotencyKey: "$key") { runId outcome error { code } } }"""
     val body = json.writeValueAsString(mapOf("query" to query))
-    val beforeEvents = database.fetchValue("SELECT count(*)::int FROM security_events") as Int
+    val beforeEvents = database.fetchValue("SELECT count(*)::int FROM security_events WHERE action = 'crawl.trigger_denied'") as Int
     fun trigger(session: MockHttpSession?): JsonNode {
       val builder = post("/graphql").secure(true).with(csrf()).contentType("application/json").content(body)
       if (session != null) builder.session(session)
@@ -311,7 +337,7 @@ class WebAuthnHttpTest {
     tx.execute { it.users.lockByEmail(account.user.email); it.userSessions.revokeForUser(account.user.id, now) }
     assertEquals("FORBIDDEN", trigger(session)["outcome"].asText())
     assertEquals(1, fetches.get())
-    assertEquals(beforeEvents + 4, database.fetchValue("SELECT count(*)::int FROM security_events"))
+    assertEquals(beforeEvents + 4, database.fetchValue("SELECT count(*)::int FROM security_events WHERE action = 'crawl.trigger_denied'"))
     assertEquals(1, database.fetchValue("SELECT count(*)::int FROM crawl_runs WHERE career_site_id = ?", site.id.value))
   }
 
@@ -476,8 +502,8 @@ class WebAuthnHttpTest {
     val result = mvc.perform(post("/webauthn/authenticate/options").secure(true).with(csrf())).andExpect(status().isOk).andReturn()
     return json.readTree(result.response.contentAsString) to (result.request.session as MockHttpSession)
   }
-  private fun login(session: MockHttpSession, body: Map<String, Any>) = mvc.perform(post("/login/webauthn").secure(true)
-    .session(session).with(csrf()).contentType("application/json").content(json.writeValueAsString(body)))
+  private fun login(session: MockHttpSession, body: Map<String, Any>, requestId: UUID = UUID.randomUUID()) = mvc.perform(post("/login/webauthn").secure(true)
+    .session(session).with(csrf()).header("X-Request-ID", requestId).contentType("application/json").content(json.writeValueAsString(body)))
   private fun registerOptions(session: MockHttpSession): JsonNode = json.readTree(mvc.perform(post("/webauthn/register/options")
     .secure(true).session(session).with(csrf())).andExpect(status().isOk).andReturn().response.contentAsString)
   private fun register(session: MockHttpSession, body: Map<String, Any>, key: UUID = UUID.randomUUID()) = mvc.perform(post("/webauthn/register").secure(true)

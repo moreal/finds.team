@@ -53,6 +53,7 @@ data class NewCareerSite(
 }
 
 enum class CrawlFailureCode {
+  LEASE_EXPIRED,
   CANCELLED,
   SOURCE_FETCH_FAILED,
   ROBOTS_DENIED,

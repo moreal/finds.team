@@ -1,6 +1,7 @@
 package dev.moreal.finds_team.security
 
 import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.port.SecurityEventAction
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.http.HttpStatus
@@ -25,7 +26,7 @@ import com.fasterxml.jackson.annotation.JsonRawValue
 import com.fasterxml.jackson.annotation.JsonValue
 
 @RestController
-class WebAuthnController(private val ceremonies: WebAuthnCeremonies) {
+class WebAuthnController(private val ceremonies: WebAuthnCeremonies, private val securityEvents: HttpSecurityEvents) {
   private val mapper = JsonMapper.builder().addModule(WebauthnJacksonModule()).build()
   private val contexts = HttpSessionSecurityContextRepository()
 
@@ -60,8 +61,11 @@ class WebAuthnController(private val ceremonies: WebAuthnCeremonies) {
     return json(ceremonies.register(request, authentication, key, metadata))
   }
   @ExceptionHandler(CeremonyRejected::class)
-  fun rejected(): ResponseEntity<ProblemDetail> = ResponseEntity.status(401).header("Cache-Control", "no-store")
-    .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Passkey ceremony rejected"))
+  internal fun rejected(request: HttpServletRequest, error: CeremonyRejected): ResponseEntity<ProblemDetail> {
+    securityEvents.denied(request, if (error.replayed) SecurityEventAction.CHALLENGE_REPLAY else SecurityEventAction.WEBAUTHN_FAILED)
+    return ResponseEntity.status(401).header("Cache-Control", "no-store")
+      .body(ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, "Passkey ceremony rejected"))
+  }
   @ExceptionHandler(MalformedCeremony::class)
   fun malformed(): ResponseEntity<ProblemDetail> = ResponseEntity.badRequest().header("Cache-Control", "no-store")
     .body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Malformed Passkey request"))

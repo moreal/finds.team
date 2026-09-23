@@ -325,7 +325,27 @@ truncate the audit ledger. The migrator remains a privileged operational
 credential and must not be used for application queries.
 
 Ordinary command request rows expire after 24 hours; `AUDIT` retention has no
-ordinary expiration. Audit retention/legal deletion is an explicit operator
+ordinary expiration. Scheduled maintenance runs every minute (override
+`finds.audit.maintenance-interval`), deleting at most 100 expired ordinary
+requests per invocation. It also closes at most 100 abandoned crawl runs as
+`LEASE_EXPIRED` after their lease window, provided no matching live lease
+remains. It never fetches sources, replays a reserved run, or removes a newer
+lease. A later scheduler window may create a new eligible run.
+
+`SearchAuditEvents` is the administrator-only application query for immutable
+history. Actor, action, target and half-open time filters use a descending
+`(occurred_at, event_id)` cursor, with at most 100 events per page. Runtime
+queries use the existing SELECT grant; no audit edit or delete API is exposed.
+
+Identity denials write categorical security events without request bodies or
+authentication material. If that independent write fails, the HTTP boundary
+preserves its denial status and increments
+`finds.security.events{outcome=write_failed,action=...}` with a categorical
+warning. Alert on any increase: authorization remains denied, but security
+history is degraded and the failed event is not retried. Administrator command
+denials retain their stricter event-store failure propagation.
+
+Audit retention/legal deletion is an explicit operator
 procedure using a separately controlled administrative connection and backup:
 stop writers, begin a transaction, disable `audit_events_immutable`, perform
 only the approved scoped deletion, enable the trigger with `ENABLE ALWAYS`,

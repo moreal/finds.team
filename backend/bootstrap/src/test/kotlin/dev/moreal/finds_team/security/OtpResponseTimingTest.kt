@@ -16,6 +16,7 @@ class OtpResponseTimingTest {
       } }
       val boundary = OtpHttpBoundary(mock(AuthRateLimitPort::class.java), mock(KeyedIdentityHashPort::class.java),
         random, ClockPort { Instant.EPOCH }, SecurityProperties(),
+        HttpSecurityEvents({ error("unexpected security event") }, ClockPort { Instant.EPOCH }, io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
         nanoTime = { nanos }, sleepNanos = { sleeps += it; nanos += it })
       val rejection = IllegalStateException("categorical test rejection")
       if (reject) assertSame(rejection, assertFailsWith<IllegalStateException> {

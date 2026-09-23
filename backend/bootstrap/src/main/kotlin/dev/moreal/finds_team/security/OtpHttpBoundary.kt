@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit
 /** Transport parsing, privacy, and abuse policy only; account decisions remain application results. */
 class OtpHttpBoundary(private val rates: AuthRateLimitPort, private val hashes: KeyedIdentityHashPort,
   private val random: SecureRandomPort, private val clock: ClockPort, properties: SecurityProperties,
+  private val securityEvents: HttpSecurityEvents,
   private val nanoTime: () -> Long = System::nanoTime,
   private val sleepNanos: (Long) -> Unit = { TimeUnit.NANOSECONDS.sleep(it) }) {
   private val mapper = JsonMapper.builder().build()
@@ -68,8 +69,15 @@ class OtpHttpBoundary(private val rates: AuthRateLimitPort, private val hashes: 
     }
     when (val decision = rates.consume(buckets, clock.now())) {
       AuthRateDecision.Allowed -> Unit
-      is AuthRateDecision.Limited -> throw OtpHttpRejected(HttpStatus.TOO_MANY_REQUESTS, decision.retryAfterSeconds)
+      is AuthRateDecision.Limited -> {
+        securityEvents.denied(request, SecurityEventAction.AUTH_THROTTLED)
+        throw OtpHttpRejected(HttpStatus.TOO_MANY_REQUESTS, decision.retryAfterSeconds)
+      }
     }
+  }
+  fun rejected(request: HttpServletRequest): Nothing {
+    securityEvents.denied(request, SecurityEventAction.OTP_FAILED)
+    throw OtpHttpRejected(HttpStatus.UNAUTHORIZED)
   }
   fun bind(request: HttpServletRequest, response: HttpServletResponse, restricted: RestrictedSession) {
     // Replace all prior ceremony/proof/context state. A proof verification never inherits login.

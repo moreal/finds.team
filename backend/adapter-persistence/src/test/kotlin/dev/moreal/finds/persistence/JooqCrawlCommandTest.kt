@@ -24,6 +24,112 @@ import org.postgresql.ds.PGSimpleDataSource
 import kotlin.test.*
 
 class JooqCrawlCommandTest : PostgresIntegrationTest() {
+  @Test fun `crash after committed reservation replays after restart and expires before later scheduler window`() {
+    val (_, db) = migratedContext()
+    var time = NOW
+    var fetches = 0
+    val clock = ClockPort { time }
+    val tx = JooqTransactionAdapter(db) { null }
+    val crashAfterCommit = object : TransactionPort {
+      override fun <T> execute(block: (TransactionContext) -> T): T {
+        tx.execute(block)
+        throw SimulatedCrash()
+      }
+    }
+    val f = fixture(db) { error("fixture must not fetch") }
+    val source = SourceFetchPort { site ->
+      fetches++
+      SourceFetchResult.Success(Snapshot(site.id, site.canonicalBaseUrl.host, time, emptyList()))
+    }
+    assertFailsWith<SimulatedCrash> { runBlocking { service(db, source, clock, crashAfterCommit).execute(f.command) } }
+    assertCounts(db, 1)
+    assertEquals(0, fetches)
+    val runId = db.fetchValue("SELECT id FROM crawl_runs") as Long
+    assertNull(JooqCrawlRunRepository(db).latestStatuses().single().outcome)
+    // The restarted process has fresh adapter instances, but no in-memory continuation.
+    val restarted = service(db, source, clock, JooqTransactionAdapter(db) { null })
+    assertEquals(CrawlSiteResult.Triggered(dev.moreal.finds.application.model.CrawlRunId(runId)), runBlocking { restarted.execute(f.command) })
+    val cleanup = ExpireAbandonedCrawlRuns(JooqCrawlMaintenance(db), clock, Duration.ofMinutes(5))
+    time = NOW.plusSeconds(299)
+    assertEquals(0, cleanup.execute(1))
+    time = NOW.plusSeconds(300)
+    assertEquals(1, cleanup.execute(1))
+    val status = JooqCrawlRunRepository(db).latestStatuses().single()
+    assertEquals(CrawlOutcome.FAILED, status.outcome)
+    assertEquals("LEASE_EXPIRED", status.failure!!.code.name)
+    assertEquals(0, cleanup.execute(1))
+    assertEquals(CrawlSiteResult.Triggered(dev.moreal.finds.application.model.CrawlRunId(runId)), runBlocking { restarted.execute(f.command) })
+    assertEquals(0, fetches)
+    time = NOW.plusSeconds(900)
+    val later = f.command.copy(actor = Actor.System, sessionId = null, trigger = CrawlTrigger.SCHEDULED,
+      metadata = CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), UUID.nameUUIDFromBytes("later-window".toByteArray())))
+    assertIs<CrawlSiteResult.Succeeded>(runBlocking { restarted.execute(later) })
+    assertIs<CrawlSiteResult.Triggered>(runBlocking { restarted.execute(later) })
+    assertEquals(1, fetches)
+    assertEquals(2, db.fetchCount(DSL.table("crawl_runs")))
+    assertEquals(1, db.fetchCount(DSL.table("audit_events")))
+    assertEquals(CrawlOutcome.SUCCESS, JooqCrawlRunRepository(db).latestStatuses().single().outcome)
+  }
+
+  @Test fun `orphan cleanup is bounded respects live leases and fences late completion`() {
+    val (_, db) = migratedContext()
+    val f = fixture(db) { error("unexpected fetch") }
+    val runs = JooqCrawlRunRepository(db)
+    val leases = JooqCrawlLeasePort(db)
+    val a = runs.start(f.command.siteId, NOW)
+    val b = runs.start(f.command.siteId, NOW)
+    leases.tryAcquire(f.command.siteId, "live", NOW, Duration.ofMinutes(10))
+    val cleanup = JooqCrawlMaintenance(db)
+    assertFailsWith<IllegalArgumentException> { cleanup.expireAbandoned(NOW, NOW, 1001) }
+    assertEquals(0, cleanup.expireAbandoned(NOW.plusSeconds(300), NOW, 1))
+    assertEquals(1, cleanup.expireAbandoned(NOW.plusSeconds(600), NOW, 1))
+    assertEquals(1, db.fetchValue("SELECT count(*)::int FROM crawl_runs WHERE outcome IS NULL"))
+    assertEquals(1, cleanup.expireAbandoned(NOW.plusSeconds(600), NOW, 1))
+    assertEquals(1, db.fetchCount(DSL.table("crawl_leases")))
+    assertFailsWith<IllegalStateException> {
+      JooqSuccessfulCrawlAdapter(db).applyAndComplete(a, SyncPlan(), 0, NOW.plusSeconds(601))
+    }
+    assertEquals(0, db.fetchCount(DSL.table("job_postings")))
+    assertEquals("FAILED", db.fetchValue("SELECT outcome FROM crawl_runs WHERE id = ?", b.value))
+  }
+
+  private class SimulatedCrash : Error("simulated process death after commit")
+
+  @Test fun `expired worker finishing cannot release the later run lease of the same dispatcher`() {
+    val (_, db) = migratedContext()
+    val time = java.util.concurrent.atomic.AtomicReference(NOW)
+    val started = listOf(CountDownLatch(1), CountDownLatch(1))
+    val release = listOf(CountDownLatch(1), CountDownLatch(1))
+    val calls = java.util.concurrent.atomic.AtomicInteger()
+    val f = fixture(db) { error("fixture must not fetch") }
+    val source = SourceFetchPort { site ->
+      val call = calls.getAndIncrement()
+      started[call].countDown()
+      check(release[call].await(10, TimeUnit.SECONDS))
+      SourceFetchResult.Success(Snapshot(site.id, site.canonicalBaseUrl.host, time.get(), emptyList()))
+    }
+    val useCase = service(db, source, ClockPort(time::get), JooqTransactionAdapter(db) { null })
+    Executors.newFixedThreadPool(2).use { pool ->
+      try {
+        val first = pool.submit<CrawlSiteResult> { runBlocking { useCase.execute(f.command) } }
+        assertTrue(started[0].await(10, TimeUnit.SECONDS))
+        time.set(NOW.plusSeconds(300))
+        assertEquals(1, JooqCrawlMaintenance(db).expireAbandoned(time.get(), NOW, 1))
+        time.set(NOW.plusSeconds(900))
+        val later = f.command.copy(actor = Actor.System, trigger = CrawlTrigger.SCHEDULED, sessionId = null,
+          metadata = CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))
+        val second = pool.submit<CrawlSiteResult> { runBlocking { useCase.execute(later) } }
+        assertTrue(started[1].await(10, TimeUnit.SECONDS))
+        release[0].countDown()
+        assertIs<CrawlSiteResult.Triggered>(first.get(10, TimeUnit.SECONDS))
+        assertEquals(1, db.fetchCount(DSL.table("crawl_leases")), "late old worker removed current lease")
+        assertEquals(0, db.fetchCount(DSL.table("job_postings")))
+        release[1].countDown()
+        assertIs<CrawlSiteResult.Succeeded>(second.get(10, TimeUnit.SECONDS))
+        assertEquals(0, db.fetchCount(DSL.table("crawl_leases")))
+      } finally { release.forEach(CountDownLatch::countDown); pool.shutdownNow() }
+    }
+  }
   @Test fun `concurrent retry returns committed run while original transport is still blocked`() {
     val (_, db) = migratedContext()
     val fetching = CountDownLatch(1)
@@ -129,10 +235,13 @@ class JooqCrawlCommandTest : PostgresIntegrationTest() {
     val command = CrawlSiteCommand(site.id, CrawlTrigger.MANUAL,
       Actor.User(user.id.value, setOf(UserRole.USER, UserRole.ADMIN), NOW, AuthenticationStrength.PASSKEY),
       CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()), session)
-    return Fixture(CrawlSite(JooqPostingRepository(db), JooqCrawlRunRepository(db), source,
-      JooqCrawlLeasePort(db), JooqSuccessfulCrawlAdapter(db), ClockPort { NOW }, RetryPolicy(listOf(Duration.ofMinutes(5))),
-      ClosePolicy(2), "test-worker", Duration.ofMinutes(5), tx, JooqSecurityEventLog(db)), command)
+    return Fixture(service(db, source, ClockPort { NOW }, tx), command)
   }
+
+  private fun service(db: DSLContext, source: SourceFetchPort, clock: ClockPort, tx: TransactionPort) =
+    CrawlSite(JooqPostingRepository(db), JooqCrawlRunRepository(db), source,
+      JooqCrawlLeasePort(db), JooqSuccessfulCrawlAdapter(db), clock, RetryPolicy(listOf(Duration.ofMinutes(5))),
+      ClosePolicy(2), "test-worker", Duration.ofMinutes(5), tx, JooqSecurityEventLog(db))
 
   private fun assertCounts(db: DSLContext, n: Int) {
     for (table in listOf("crawl_runs", "command_requests", "audit_events")) assertEquals(n, db.fetchCount(DSL.table(table)), table)

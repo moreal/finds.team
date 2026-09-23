@@ -37,6 +37,7 @@ class WebAuthnCeremonies(
   private val rp = PublicKeyCredentialRpEntity.builder().id(settings.rpId).name("finds.team").build()
 
   fun authenticationOptions(request: HttpServletRequest): PublicKeyCredentialRequestOptions {
+    request.getSession(false)?.removeAttribute(AUTHENTICATION_COMPLETED)
     val options = PublicKeyCredentialRequestOptions.builder().rpId(settings.rpId).challenge(Bytes(random.bytes(32)))
       .timeout(Duration.ofMinutes(5)).allowCredentials(emptyList()).userVerification(UserVerificationRequirement.REQUIRED).build()
     request.session.setAttribute(AUTHENTICATION, Ceremony(issue(request, WebAuthnChallengePurpose.AUTHENTICATION, options.challenge, null), options))
@@ -44,7 +45,8 @@ class WebAuthnCeremonies(
   }
 
   internal fun authenticate(request: HttpServletRequest, credential: PublicKeyCredential<AuthenticatorAssertionResponse>): PasskeyAuthentication {
-    val ceremony = request.getSession(false)?.getAttribute(AUTHENTICATION) as? Ceremony<*> ?: throw CeremonyRejected()
+    val ceremony = request.getSession(false)?.getAttribute(AUTHENTICATION) as? Ceremony<*>
+      ?: throw CeremonyRejected(request.getSession(false)?.getAttribute(AUTHENTICATION_COMPLETED) == true)
     val options = ceremony.options as? PublicKeyCredentialRequestOptions ?: throw CeremonyRejected()
     checkBinding(request, ceremony.challenge, options.challenge)
     canonicalId(credential)
@@ -70,13 +72,14 @@ class WebAuthnCeremonies(
       val current = tx.users.lockByEmail(user.email) ?: throw CeremonyRejected()
       if (current.status != UserStatus.ACTIVE || material.id !in current.credentials) throw CeremonyRejected()
       val now = clock.now()
-      if (!tx.webauthnChallenges.consume(ceremony.challenge, now) ||
-        !tx.credentials.updateUsage(material.id, material.signatureCount, validated.signCount, validated.isFlagBS, now)) throw CeremonyRejected()
+      if (!tx.webauthnChallenges.consume(ceremony.challenge, now)) throw CeremonyRejected(replayed = true)
+      if (!tx.credentials.updateUsage(material.id, material.signatureCount, validated.signCount, validated.isFlagBS, now)) throw CeremonyRejected()
       val normal = UserSession(UserSessionId(random.uuid()), user.id, now, now.plusSeconds(43200), now)
       tx.userSessions.save(normal)
       normal
     }
     request.session.removeAttribute(AUTHENTICATION)
+    request.session.setAttribute(AUTHENTICATION_COMPLETED, true)
     request.session.removeAttribute(RESTRICTED_SESSION)
     request.session.removeAttribute(REGISTRATION)
     request.session.removeAttribute(COMPLETION)
@@ -110,7 +113,7 @@ class WebAuthnCeremonies(
       // restores a usable restricted session and the application never returns recovery plaintext.
       return complete(transactions, previous.scope, previous.proof, metadata, publicKey.label, authentication)
     }
-    val ceremony = request.getSession(false)?.getAttribute(REGISTRATION) as? Ceremony<*> ?: throw CeremonyRejected()
+    val ceremony = request.getSession(false)?.getAttribute(REGISTRATION) as? Ceremony<*> ?: throw CeremonyRejected(replayed = previous != null)
     val options = ceremony.options as? PublicKeyCredentialCreationOptions ?: throw CeremonyRejected()
     checkBinding(request, ceremony.challenge, options.challenge)
     val scope = restricted(request)
@@ -134,7 +137,7 @@ class WebAuthnCeremonies(
       override fun <T> execute(block: (TransactionContext) -> T): T = transactions.execute { tx ->
         val user = tx.users.findById(scope.userId) ?: throw CeremonyRejected()
         tx.users.lockByEmail(user.email) ?: throw CeremonyRejected()
-        if (!tx.webauthnChallenges.consume(ceremony.challenge, clock.now())) throw CeremonyRejected()
+        if (!tx.webauthnChallenges.consume(ceremony.challenge, clock.now())) throw CeremonyRejected(replayed = true)
         block(tx).also { result ->
           // A semantic conflict must also roll back challenge consumption, so the original
           // verified ceremony can be submitted with a fresh command key after a 409.
@@ -227,6 +230,7 @@ class WebAuthnCeremonies(
   companion object {
     const val RESTRICTED_SESSION = "finds.restricted-session"
     private const val AUTHENTICATION = "finds.webauthn.authentication"
+    private const val AUTHENTICATION_COMPLETED = "finds.webauthn.authentication-completed"
     private const val REGISTRATION = "finds.webauthn.registration"
     private const val COMPLETION = "finds.webauthn.completion"
   }

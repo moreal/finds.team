@@ -202,7 +202,7 @@ class CrawlSiteTest {
     assertEquals(failure, result.failure)
     assertEquals(result.runId, fixture.runs.failedRuns.single().runId)
     assertTrue(fixture.completion.applied.isEmpty())
-    assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
+    assertEquals(listOf(SITE_ID to fixture.leases.attempts.single().owner), fixture.leases.releases)
   }
 
   @Test
@@ -220,7 +220,7 @@ class CrawlSiteTest {
 
       assertEquals(expectedCode, result.failure.code)
       assertTrue(fixture.completion.applied.isEmpty())
-      assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
+      assertEquals(listOf(SITE_ID to fixture.leases.attempts.single().owner), fixture.leases.releases)
     }
 
     val suspicious = fixture()
@@ -229,7 +229,7 @@ class CrawlSiteTest {
     val result = assertIs<CrawlSiteResult.Failed>(suspicious.useCase.execute(command()))
     assertEquals(CrawlFailureCode.SUSPICIOUS_SNAPSHOT, result.failure.code)
     assertTrue(suspicious.completion.applied.isEmpty())
-    assertEquals(listOf(SITE_ID to OWNER), suspicious.leases.releases)
+    assertEquals(listOf(SITE_ID to suspicious.leases.attempts.single().owner), suspicious.leases.releases)
   }
 
   @Test
@@ -251,7 +251,7 @@ class CrawlSiteTest {
     assertEquals(fixture.completion.result, result.counts)
     assertEquals(1, fixture.completion.applied.single().fetched)
     assertEquals("new", fixture.completion.applied.single().plan.insert.single().raw.externalKey)
-    assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
+    assertEquals(listOf(SITE_ID to fixture.leases.attempts.single().owner), fixture.leases.releases)
   }
 
   @Test
@@ -265,7 +265,7 @@ class CrawlSiteTest {
 
     assertEquals("network secret", result.message)
     assertEquals(CrawlFailureCode.SOURCE_FETCH_FAILED, fixture.runs.failedRuns.single().failure.code)
-    assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
+    assertEquals(listOf(SITE_ID to fixture.leases.attempts.single().owner), fixture.leases.releases)
   }
 
   @Test
@@ -278,7 +278,7 @@ class CrawlSiteTest {
     }
 
     assertEquals(CrawlFailureCode.CANCELLED, fixture.runs.failedRuns.single().failure.code)
-    assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
+    assertEquals(listOf(SITE_ID to fixture.leases.attempts.single().owner), fixture.leases.releases)
   }
 
   @Test
@@ -292,7 +292,7 @@ class CrawlSiteTest {
 
     assertEquals("database unavailable", result.message)
     assertEquals(CrawlFailureCode.PERSISTENCE_FAILED, fixture.runs.failedRuns.single().failure.code)
-    assertEquals(listOf(SITE_ID to OWNER), fixture.leases.releases)
+    assertEquals(listOf(SITE_ID to fixture.leases.attempts.single().owner), fixture.leases.releases)
   }
 
   private fun fixture(

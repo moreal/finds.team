@@ -20,6 +20,8 @@ import java.util.Base64
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(SecurityProperties::class)
 class SecurityConfiguration {
+  @Bean fun httpSecurityEvents(events: SecurityEventPort, clock: ClockPort, metrics: io.micrometer.core.instrument.MeterRegistry) =
+    HttpSecurityEvents(events, clock, metrics)
   // Suppress Boot's generated password/user fallback; normal authentication is ceremony-only.
   @Bean fun authenticationManager(): org.springframework.security.authentication.AuthenticationManager =
     org.springframework.security.authentication.AuthenticationManager { throw org.springframework.security.authentication.BadCredentialsException("Passkey required") }
@@ -40,7 +42,8 @@ class SecurityConfiguration {
 
   @Bean
   @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-  fun securityFilterChain(http: HttpSecurity, actors: ActorResolver, transactions: TransactionPort, clock: ClockPort): SecurityFilterChain {
+  fun securityFilterChain(http: HttpSecurity, actors: ActorResolver, transactions: TransactionPort, clock: ClockPort,
+    securityEvents: HttpSecurityEvents): SecurityFilterChain {
     http.formLogin { it.disable() }.httpBasic { it.disable() }.requestCache { it.disable() }
       .securityContext { it.securityContextRepository(HttpSessionSecurityContextRepository()) }
       // Public POST queries need no CSRF token. GraphqlController validates the selected mutation
@@ -58,9 +61,14 @@ class SecurityConfiguration {
           .anyRequest().denyAll()
       }
       .exceptionHandling { errors ->
-        errors.authenticationEntryPoint { request, response, _ -> securityProblem(response,
-          if (request.requestURI == request.contextPath + "/graphql" && request.getSession(false)?.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) != null) 403 else 401) }
-        errors.accessDeniedHandler { _, response, _ -> securityProblem(response, 403) }
+        errors.authenticationEntryPoint { request, response, _ ->
+          securityEvents.denied(request, SecurityEventAction.AUTHORIZATION_DENIED)
+          securityProblem(response, if (request.requestURI == request.contextPath + "/graphql" && request.getSession(false)?.getAttribute(WebAuthnCeremonies.RESTRICTED_SESSION) != null) 403 else 401)
+        }
+        errors.accessDeniedHandler { request, response, _ ->
+          securityEvents.denied(request, SecurityEventAction.AUTHORIZATION_DENIED)
+          securityProblem(response, 403)
+        }
       }
       .logout { logout ->
         logout.logoutUrl("/auth/logout").addLogoutHandler { _, _, authentication ->

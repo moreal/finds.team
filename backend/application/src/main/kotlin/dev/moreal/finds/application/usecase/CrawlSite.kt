@@ -99,7 +99,7 @@ class CrawlSite(
     val runId = (reservation.result as CrawlSiteResult.Triggered).runId
     // The transaction has committed the run, lease, audit and semantic result. Neither source I/O
     // nor reconciliation can retain its connection. A replay returns above without fetching.
-    val completed = crawl(site, runId)
+    val completed = crawl(site, runId, checkNotNull(reservation.leaseToken))
     return if (command.trigger == CrawlTrigger.MANUAL) reservation.result else completed
   }
 
@@ -142,17 +142,20 @@ class CrawlSite(
         is CrawlEligibility.Disabled -> throw TriggerRejected(CrawlSiteResult.Disabled)
       }
     }
-    if (!tx.crawlLeases.tryAcquire(site.id, leaseOwner, now, leaseTtl)) throw TriggerRejected(CrawlSiteResult.Busy)
+    // A process can have an expired worker finishing while its next run already owns the site.
+    // Give every reservation its own release token, even when both use the same dispatcher name.
+    val leaseToken = "$leaseOwner:${UUID.randomUUID()}"
+    if (!tx.crawlLeases.tryAcquire(site.id, leaseToken, now, leaseTtl)) throw TriggerRejected(CrawlSiteResult.Busy)
     val runId = tx.crawlRuns.start(site.id, now)
     if (command.trigger == CrawlTrigger.MANUAL) tx.auditLog.append(AuditEvent(UUID.randomUUID(), 1, now, actor,
       AuditAction.MANUAL_CRAWL_TRIGGERED, "crawl_run", runId.value.toString(), command.metadata.requestId,
       command.metadata.correlationId, AuditOutcome.SUCCEEDED))
     tx.commandRequests.complete(key, StoredCommandResult(1, OPERATION, "TRIGGERED",
       mapOf("crawl_run" to CommandResourceId.Number(runId.value))))
-    return Reservation(CrawlSiteResult.Triggered(runId), site)
+    return Reservation(CrawlSiteResult.Triggered(runId), site, leaseToken)
   }
 
-  private suspend fun crawl(site: CareerSite, startedRunId: CrawlRunId): CrawlSiteResult {
+  private suspend fun crawl(site: CareerSite, startedRunId: CrawlRunId, leaseToken: String): CrawlSiteResult {
     var infrastructureFailureCode = CrawlFailureCode.SOURCE_FETCH_FAILED
     try {
       val fetchResult = source.fetch(site)
@@ -194,11 +197,11 @@ class CrawlSite(
       runCatching { runs.fail(startedRunId, failure, clock.now()) }
       return CrawlSiteResult.InfrastructureFailure(failure.message)
     } finally {
-      runCatching { leases.release(site.id, leaseOwner) }
+      runCatching { leases.release(site.id, leaseToken) }
     }
   }
 
-  private data class Reservation(val result: CrawlSiteResult, val site: CareerSite? = null)
+  private data class Reservation(val result: CrawlSiteResult, val site: CareerSite? = null, val leaseToken: String? = null)
   private class TriggerRejected(val result: CrawlSiteResult) : RuntimeException(null, null, false, false)
   private companion object { const val OPERATION = "crawl.trigger" }
 
