@@ -47,10 +47,13 @@ data class MailOutboxLease(
   val recovered: Boolean,
 )
 
-interface MailOutbox {
+/** Transaction-compatible enqueue only; encryption uses a loaded key and performs no external I/O. */
+fun interface MailOutboxEnqueue {
   /** Duplicate message ids are rejected. Supply a transaction-bound implementation for atomic enqueue. */
   fun enqueue(metadata: MailPayloadMetadata, plaintext: ByteArray, now: Instant)
+}
 
+interface MailOutbox : MailOutboxEnqueue {
   /**
    * Returns ciphertext only. Decrypt and perform provider I/O after the leasing transaction commits.
    * Workers must recheck expiry before sending and resolve recovered leases using provider idempotency policy.
