@@ -48,6 +48,16 @@ class PostingGraphqlMappingTest {
     assertFailsWith<IllegalArgumentException> { CursorCodec.decode("not-base64!") }
   }
 
+  @Test fun `NUL text and location leaves are typed invalid filters at every recursive depth`() {
+    for (leaf in listOf(PostingFilterInput(textContains = "x\u0000y"), PostingFilterInput(atLocation = "x\u0000y"))) {
+      val nested = PostingFilterInput(all = listOf(PostingFilterInput(any = listOf(PostingFilterInput(not = leaf)))))
+      for (input in listOf(leaf, nested)) {
+        val error = assertFailsWith<GraphqlRequestException> { PostingGraphqlMapping.filter(input) }
+        assertEquals(ApiErrorCode.INVALID_FILTER, error.code)
+      }
+    }
+  }
+
   @Test fun `search page maps connection edges and page info`() {
     val posting = posting()
     val dto = PostingGraphqlMapping.connection(

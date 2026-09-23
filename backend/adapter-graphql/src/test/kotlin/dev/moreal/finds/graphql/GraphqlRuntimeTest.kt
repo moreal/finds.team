@@ -48,8 +48,9 @@ class GraphqlRuntimeTest {
         unavailable.errors.single().extensions?.get("code"))
       assertEquals(mapOf("node" to null), unavailable.getData())
     }
-    val filter = graphQL.execute("""{ jobPostings(filter: {not: {atSite: "djE6Sm9iUG9zdGluZzox"}}) { totalCount } }""")
-    assertEquals("INVALID_INPUT", filter.errors.single().extensions?.get("code"))
+    val filter = graphQL.execute("""{ jobPostings(filter: {not: {atSite: "djE6Sm9iUG9zdGluZzox"}}) { totalCount error { code } } }""")
+    assertEquals(emptyList(), filter.errors)
+    assertEquals(mapOf("jobPostings" to mapOf("totalCount" to 0, "error" to mapOf("code" to "INVALID_FILTER"))), filter.getData())
   }
   @Test fun `security event failure becomes sanitized error and never invokes crawl`() = runTest {
     var calls = 0

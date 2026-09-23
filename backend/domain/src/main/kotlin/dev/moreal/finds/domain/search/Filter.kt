@@ -17,6 +17,7 @@ sealed interface Filter {
   data class TextContains(val text: String) : Filter {
     init {
       require(text.isNotBlank()) { "Text filter must not be blank" }
+      require('\u0000' !in text) { "Text filter must not contain NUL" }
     }
   }
 
@@ -31,7 +32,10 @@ sealed interface Filter {
   data class HasEmployment(val employment: EmploymentType) : Filter
   data class HasRemotePolicy(val policy: RemotePolicy) : Filter
   data class AtLocation(val searchValue: String) : Filter {
-    init { require(searchValue.isNotBlank()) { "Location search value must not be blank" } }
+    init {
+      require(searchValue.isNotBlank()) { "Location search value must not be blank" }
+      require('\u0000' !in searchValue) { "Location search value must not contain NUL" }
+    }
   }
 
   data class Not(val inner: Filter) : Filter

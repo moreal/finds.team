@@ -90,6 +90,24 @@ class FilterTest {
   }
 
   @Test
+  fun `text filter rejects NUL before it can reach an application query`() {
+    assertFailsWith<IllegalArgumentException> { Filter.TextContains("x\u0000y") }
+  }
+
+  @Test
+  fun `location filter rejects NUL before it can reach an application query`() {
+    assertFailsWith<IllegalArgumentException> { Filter.AtLocation("x\u0000y") }
+  }
+
+  @Test
+  fun `text and location filters preserve supported Unicode and whitespace`() {
+    for (value in listOf("서울", "Zürich", "e\u0301", "👩‍💻", "\t Kotlin\r\n", "x\u0001y", "x\u0085y\u2028")) {
+      assertTrue(Filter.TextContains(value).matches(posting(title = value)))
+      assertEquals(value, Filter.AtLocation(value).searchValue)
+    }
+  }
+
+  @Test
   fun `enrichment leaves match canonical values with exact requirement level`() {
     val base = posting(title = "Backend Engineer", description = "Required:\nKotlin\nPreferred:\nJava")
     val raw = base.raw.copy(employmentHint = "정규직", remoteHint = "hybrid", locationHint = "서울")

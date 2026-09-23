@@ -178,6 +178,35 @@ class DiscoveryQueryCountTest : OtpHttpSupport() {
   }
 
   @ParameterizedTest
+  @ValueSource(strings = ["bad", "djE6Sm9iUG9zdGluZzox"])
+  fun `invalid atSite IDs stay local to their alias before SQL`(id: String) {
+    assertInvalidPostingFilter("""{atSite: "$id"}""")
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = ["textContains", "atLocation"])
+  fun `NUL filter text stays local to its alias before SQL`(operator: String) {
+    assertInvalidPostingFilter("""{$operator: "x\u0000y"}""")
+  }
+
+  @Test fun `Unicode and whitespace filters retain their PostgreSQL matching semantics`() {
+    val value = "\t 서울 Zürich e\u0301 👩‍💻\r\n"
+    sql.execute("update job_postings set title = ?, location_search_value = ? where id = ?", value, value, postingIds.first())
+    selects.set(0)
+    val literal = json.writeValueAsString(value)
+    val data = executeHttp("""{
+      text: jobPostings(filter: {textContains: $literal}) { totalCount edges { node { id } } error { code } }
+      location: jobPostings(filter: {atLocation: $literal}) { totalCount edges { node { id } } error { code } }
+    }""")
+    for (alias in listOf("text", "location")) {
+      assertEquals(null, data.obj(alias)["error"])
+      assertEquals(1, data.obj(alias)["totalCount"])
+      assertEquals(GlobalIdCodec.encode(NodeType.JobPosting, postingIds.first()), data.obj(alias).edges().single().obj("node")["id"])
+    }
+    assertEquals(1, selects.get(), "Valid Unicode and whitespace filters share one batch")
+  }
+
+  @ParameterizedTest
   @ValueSource(strings = [
     "+300000-01-01T00:00:00Z",
     "+294277-01-01T00:00:00Z",
@@ -239,6 +268,46 @@ class DiscoveryQueryCountTest : OtpHttpSupport() {
     } finally {
       sql.execute("alter table temporarily_unavailable_postings rename to job_postings")
     }
+  }
+
+  private fun assertInvalidPostingFilter(leaf: String) {
+    val filters = listOf(leaf, "{all: [{hasStatus: OPEN}, {any: [{not: $leaf}]}]}")
+    org.junit.jupiter.api.Assertions.assertAll(filters.flatMap { filter -> listOf(
+      org.junit.jupiter.api.function.Executable {
+        selects.set(0)
+        val data = executeHttp("""{
+          bad: jobPostings(filter: $filter) { totalCount edges { cursor }
+            pageInfo { hasNextPage hasPreviousPage startCursor endCursor } error { code } }
+          good: jobPostings(first: 1) { totalCount edges { node { id } } error { code } }
+        }""")
+        assertEquals(mapOf("code" to "INVALID_FILTER"), data.obj("bad")["error"])
+        assertEquals(emptyList<Any>(), data.obj("bad")["edges"])
+        assertEquals(0, data.obj("bad")["totalCount"])
+        assertEquals(mapOf("hasNextPage" to false, "hasPreviousPage" to false, "startCursor" to null, "endCursor" to null),
+          data.obj("bad")["pageInfo"])
+        assertEquals(12, data.obj("good")["totalCount"])
+        assertEquals(null, data.obj("good")["error"])
+        assertEquals(GlobalIdCodec.encode(NodeType.JobPosting, postingIds[16]), data.obj("good").edges().single().obj("node")["id"])
+        assertEquals(1, selects.get(), "Only the valid key may execute SQL")
+      },
+      org.junit.jupiter.api.function.Executable {
+        selects.set(0)
+        val data = executeHttp("{ jobPostings(filter: $filter) { error { code } } }")
+        assertEquals("INVALID_FILTER", data.obj("jobPostings").obj("error")["code"])
+        assertEquals(0, selects.get(), "Invalid filters must be rejected before batch enqueue")
+      },
+    ) })
+  }
+
+  private fun executeHttp(query: String): Map<String, Any?> {
+    val pending = mvc.perform(post("/graphql").secure(true).contentType("application/json")
+      .content(json.writeValueAsString(mapOf("query" to query))))
+      .andExpect(request().asyncStarted()).andReturn()
+    val response = mvc.perform(asyncDispatch(pending)).andExpect(status().isOk).andReturn().response.contentAsString
+    @Suppress("UNCHECKED_CAST")
+    val result = json.readValue(response, Map::class.java) as Map<String, Any?>
+    assertNull(result["errors"], response)
+    return result.obj("data")
   }
 
   private fun execute(query: String): Map<String, Any?> {

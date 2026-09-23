@@ -26,7 +26,7 @@ it("copies canonical schema bytes on every compiler invocation, replacing stale 
   }
 });
 
-it("the real launcher fails on stale or schema-invalid operations without silently refreshing artifacts", async () => {
+it("the real launcher fails on missing, stale or schema-invalid artifacts without silently refreshing them", async () => {
   // Node canonicalizes import.meta.url; keep argv on the same path on macOS (/var -> /private/var).
   const root = await realpath(await mkdtemp(join(tmpdir(), "finds-relay-compiler-")));
   const frontend = resolve(import.meta.dirname, "../../..");
@@ -56,6 +56,12 @@ it("the real launcher fails on stale or schema-invalid operations without silent
     expect(run("--validate").status).toBe(0);
     const artifact = join(root, "src/__generated__/ProbeQuery.graphql.ts");
     const original = await readFile(artifact);
+    await rm(artifact);
+    const missing = run("--validate");
+    expect(missing.status, missing.stdout + missing.stderr).toBe(1);
+    await expect(readFile(artifact)).rejects.toMatchObject({ code: "ENOENT" });
+    await writeFile(artifact, original);
+    expect(run("--validate").status).toBe(0);
     await writeFile(source, operation("renamed: viewer"));
     const stale = run("--validate");
     expect(stale.status, stale.stdout + stale.stderr).toBe(1);

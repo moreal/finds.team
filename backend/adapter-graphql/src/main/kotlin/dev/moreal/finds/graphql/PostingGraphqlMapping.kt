@@ -65,8 +65,7 @@ data class JobPostingConnectionDto(
 object PostingGraphqlMapping {
   fun filter(input: PostingFilterInput?): Filter = try {
     input?.toDomain() ?: Filter.HasStatus(PostingStatus.OPEN)
-  } catch (error: GlobalIdException) { throw error }
-  catch (_: UnknownSkillException) { throw GraphqlRequestException(ApiErrorCode.UNKNOWN_SKILL, "Unknown canonical skill") }
+  } catch (_: UnknownSkillException) { throw GraphqlRequestException(ApiErrorCode.UNKNOWN_SKILL, "Unknown canonical skill") }
   catch (_: IllegalArgumentException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid posting filter") }
   catch (_: java.time.DateTimeException) { throw GraphqlRequestException(ApiErrorCode.INVALID_FILTER, "Invalid posting filter") }
 
