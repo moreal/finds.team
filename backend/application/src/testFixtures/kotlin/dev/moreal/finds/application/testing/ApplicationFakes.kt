@@ -92,6 +92,7 @@ class FakePostingRepository : PostingRepository {
 
 data class AppliedCrawl(
   val runId: CrawlRunId,
+  val lease: dev.moreal.finds.application.port.CrawlLease,
   val plan: SyncPlan,
   val fetched: Int,
   val finishedAt: Instant,
@@ -104,12 +105,13 @@ class FakeSuccessfulCrawlPort : SuccessfulCrawlPort {
 
   override fun applyAndComplete(
     runId: CrawlRunId,
+    lease: dev.moreal.finds.application.port.CrawlLease,
     plan: SyncPlan,
     fetched: Int,
     finishedAt: Instant,
   ): CrawlChangeCounts {
     throwable?.let { throw it }
-    applied += AppliedCrawl(runId, plan, fetched, finishedAt)
+    applied += AppliedCrawl(runId, lease, plan, fetched, finishedAt)
     return result
   }
 }

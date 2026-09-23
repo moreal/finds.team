@@ -3,9 +3,11 @@ package dev.moreal.finds.persistence
 import dev.moreal.finds.application.model.CrawlChangeCounts
 import dev.moreal.finds.application.model.CrawlRunId
 import dev.moreal.finds.application.port.SuccessfulCrawlPort
+import dev.moreal.finds.application.port.CrawlLease
 import dev.moreal.finds.domain.crawl.SyncPlan
 import dev.moreal.finds.domain.posting.PostingStatus
 import dev.moreal.finds.persistence.jooq.generated.tables.references.CRAWL_RUNS
+import dev.moreal.finds.persistence.jooq.generated.tables.references.CRAWL_LEASES
 import dev.moreal.finds.persistence.jooq.generated.tables.references.JOB_POSTINGS
 import java.time.Instant
 import java.time.ZoneOffset
@@ -17,6 +19,7 @@ class JooqSuccessfulCrawlAdapter(
 ) : SuccessfulCrawlPort {
   override fun applyAndComplete(
     runId: CrawlRunId,
+    lease: CrawlLease,
     plan: SyncPlan,
     fetched: Int,
     finishedAt: Instant,
@@ -33,6 +36,16 @@ class JooqSuccessfulCrawlAdapter(
       "Crawl run ${runId.value} is already completed as ${run.outcome}"
     }
     val siteId = requireNotNull(run.careerSiteId)
+    // Holding this row lock prevents replacement/release until the posting transaction commits.
+    // Run state alone is not a fence: an expired worker can remain pending until maintenance.
+    val currentLease = transaction.selectFrom(CRAWL_LEASES)
+      .where(CRAWL_LEASES.CAREER_SITE_ID.eq(siteId))
+      .forUpdate()
+      .fetchOne()
+    check(siteId == lease.siteId.value && finishedAt < lease.expiresAt &&
+      currentLease?.owner == lease.owner && currentLease.expiresAt!!.toInstant() > finishedAt) {
+      "Crawl lease no longer owns completion"
+    }
 
     plan.insert.forEach { insertion ->
       val raw = insertion.raw

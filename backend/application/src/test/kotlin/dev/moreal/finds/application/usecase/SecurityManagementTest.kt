@@ -8,6 +8,37 @@ import dev.moreal.finds.domain.identity.*
 import kotlin.test.*
 
 class SecurityManagementTest {
+  @Test fun `logout same request replays SignedOut after revocation without exposing session or auditing again`() {
+    val f = SecurityFixture()
+    val manage = ManageSessions(f.tx, f.clock, f.random)
+    val metadata = f.metadata()
+    val principal = f.principal()
+    assertEquals(SecurityChangeResult.SignedOut, manage.logout(principal, metadata))
+    assertEquals(SecurityChangeResult.SignedOut, manage.logout(principal, metadata))
+    assertEquals(1, f.tx.auditEvents.size)
+    assertEquals(AuditAction.SESSION_REVOKED, f.tx.auditEvents.single().action)
+    assertTrue(f.tx.auditEvents.single().details.fields.isEmpty())
+    assertEquals(f.userId.value.toString(), f.tx.auditEvents.single().targetId)
+    assertEquals("SIGNED_OUT", f.tx.completedRequests.values.single().outcome)
+    assertTrue(f.tx.completedRequests.values.single().resourceIds.isEmpty())
+    assertNull(f.tx.userSessions.single { it.id == f.otherSessionId }.revokedAt)
+    assertEquals(SecurityChangeResult.IdempotencyConflict, manage.logout(principal.copy(sessionId = f.otherSessionId), metadata))
+  }
+
+  @Test fun `logout refuses a session belonging to another trusted authentication context`() {
+    val f = SecurityFixture()
+    val manage = ManageSessions(f.tx, f.clock, f.random)
+    val principal = f.principal()
+    for (invalid in listOf(principal.copy(sessionId = UserSessionId(java.util.UUID.randomUUID())),
+      principal.copy(actor = dev.moreal.finds.application.security.Actor.User(principal.actor.userId,
+        principal.actor.roles, f.start.minusSeconds(1), AuthenticationStrength.PASSKEY)),
+      f.principal(AuthenticationStrength.EMAIL_OTP))) {
+      assertEquals(SecurityChangeResult.Forbidden, manage.logout(invalid, f.metadata()))
+    }
+    assertTrue(f.tx.userSessions.all { it.revokedAt == null })
+    assertTrue(f.tx.auditEvents.isEmpty())
+    assertTrue(f.tx.completedRequests.isEmpty())
+  }
   @Test fun `role replay rejects an outcome from a different security operation`() {
     val f = SecurityFixture()
     f.addAdminAndTarget()
@@ -239,6 +270,7 @@ class SecurityManagementTest {
     val mutations: List<(SecurityFixture) -> Unit> = listOf(
       { f -> ManagePasskeys(f.tx, f.clock, f.random).remove(f.principal(), CredentialId("old-passkey-1"), f.metadata()) },
       { f -> ManageSessions(f.tx, f.clock, f.random).revokeOthers(f.principal(), f.metadata()) },
+      { f -> ManageSessions(f.tx, f.clock, f.random).logout(f.principal(), f.metadata()) },
       { f -> RotateRecoveryCode(f.tx, f.clock, f.random, f.hashes).execute(f.principal(), f.metadata()) },
       { f -> ManageRoles(f.tx, f.clock, f.random).grant(f.principal(), f.otherId, UserRole.ADMIN, f.metadata()) },
     )

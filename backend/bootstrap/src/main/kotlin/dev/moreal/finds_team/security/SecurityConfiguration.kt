@@ -1,7 +1,8 @@
 package dev.moreal.finds_team.security
 
 import dev.moreal.finds.application.port.*
-import dev.moreal.finds.domain.identity.UserId
+import dev.moreal.finds.application.command.CommandMetadata
+import dev.moreal.finds.application.usecase.ManageSessions
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
@@ -16,6 +17,7 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository
 import org.springframework.scheduling.annotation.Scheduled
 import java.util.Base64
+import java.util.UUID
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(SecurityProperties::class)
@@ -43,7 +45,8 @@ class SecurityConfiguration {
   @Bean
   @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
   fun securityFilterChain(http: HttpSecurity, actors: ActorResolver, transactions: TransactionPort, clock: ClockPort,
-    securityEvents: HttpSecurityEvents): SecurityFilterChain {
+    securityEvents: HttpSecurityEvents, random: SecureRandomPort): SecurityFilterChain {
+    val sessions = ManageSessions(transactions, clock, random)
     http.formLogin { it.disable() }.httpBasic { it.disable() }.requestCache { it.disable() }
       .securityContext { it.securityContextRepository(HttpSessionSecurityContextRepository()) }
       // Public POST queries need no CSRF token. GraphqlController validates the selected mutation
@@ -72,11 +75,18 @@ class SecurityConfiguration {
       }
       .logout { logout ->
         logout.logoutUrl("/auth/logout").addLogoutHandler { _, _, authentication ->
-          val principal = actors.sessionPrincipal(authentication)
-          if (principal != null) transactions.execute { tx ->
-            val user = tx.users.findById(UserId(principal.actor.userId)) ?: return@execute
-            tx.users.lockByEmail(user.email)
-            tx.userSessions.revoke(principal.sessionId, clock.now())
+          try {
+            val principal = actors.sessionPrincipal(authentication)
+            if (principal != null) {
+              // Logout has one semantic request per server-established session. Hash its identity
+              // into a stable retry key; never store the raw session ID in an audit/result.
+              val key = UUID.nameUUIDFromBytes("session.logout:${principal.sessionId.value}".toByteArray(Charsets.UTF_8))
+              sessions.logout(principal, CommandMetadata(random.uuid(), random.uuid(), key))
+            }
+          } catch (_: Exception) {
+            // Abort the handler chain before Spring destroys the HTTP session. A retry still has
+            // its trusted identity. Do not attach SQL exceptions containing session bindings.
+            throw IllegalStateException("Logout unavailable")
           }
         }.deleteCookies("JSESSIONID").logoutSuccessHandler { _, response, _ -> response.status = 204 }
       }

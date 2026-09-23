@@ -121,8 +121,9 @@ class FakeTransaction(
         checkActive()
         val row = snapshot.requests[request.key]
         if (row != null) {
+          val result = checkNotNull(row.result) { "Command already reserved in this transaction" }
           if (row.request.requestHash != request.requestHash) return CommandReservation.Conflict
-          return CommandReservation.Replay(checkNotNull(row.result) { "Command already reserved in this transaction" })
+          return CommandReservation.Replay(result)
         }
         snapshot.requests[request.key] = RequestRow(request)
         reserved += request.key

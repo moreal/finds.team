@@ -2,6 +2,7 @@ package dev.moreal.finds.persistence
 
 import dev.moreal.finds.application.model.NewCareerSite
 import dev.moreal.finds.application.port.InsertCareerSiteResult
+import dev.moreal.finds.application.port.CrawlLease
 import dev.moreal.finds.domain.career.CareerSiteId
 import dev.moreal.finds.domain.career.SiteHost
 import dev.moreal.finds.domain.career.SiteUrl
@@ -22,9 +23,11 @@ import dev.moreal.finds.domain.posting.RawPosting
 import dev.moreal.finds.persistence.jooq.generated.tables.references.CRAWL_RUNS
 import dev.moreal.finds.persistence.jooq.generated.tables.references.JOB_POSTINGS
 import java.time.Instant
+import java.time.Duration
 import java.time.ZoneOffset
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -36,6 +39,7 @@ class JooqSuccessfulCrawlAdapterTest : PostgresIntegrationTest() {
     val (dataSource, context) = migratedContext()
     val siteId = insertSite(context)
     val run = JooqCrawlRunRepository(context).start(siteId, NOW)
+    val lease = lease(context, siteId)
     val raw = raw("once")
     val plan = SyncPlan(insert = listOf(NewPosting(raw, raw.contentHash(), NOW)))
     val start = CountDownLatch(1)
@@ -43,17 +47,41 @@ class JooqSuccessfulCrawlAdapterTest : PostgresIntegrationTest() {
     try {
       val results = List(2) {
         pool.submit {
-          start.await()
+          check(start.await(5, TimeUnit.SECONDS))
           JooqSuccessfulCrawlAdapter(
             org.jooq.impl.DSL.using(dataSource, org.jooq.SQLDialect.POSTGRES),
-          ).applyAndComplete(run, plan, 1, NOW)
+          ).applyAndComplete(run, lease, plan, 1, NOW)
         }
       }
       start.countDown()
-      assertEquals(results[0].get(), results[1].get())
+      assertEquals(results[0].get(10, TimeUnit.SECONDS), results[1].get(10, TimeUnit.SECONDS))
       assertEquals(1, context.fetchCount(JOB_POSTINGS))
     } finally {
       pool.shutdownNow()
+    }
+  }
+
+  @Test
+  fun `completion requires its own unexpired lease before any posting write`() {
+    for (case in listOf("expired", "replaced", "absent", "wrong-site")) {
+      val (_, context) = migratedContext()
+      val siteId = insertSite(context)
+      val run = JooqCrawlRunRepository(context).start(siteId, NOW)
+      val lease = lease(context, siteId)
+      when (case) {
+        "replaced" -> context.execute("UPDATE crawl_leases SET owner = 'new-reservation'")
+        "absent" -> JooqCrawlLeasePort(context).release(siteId, lease.owner)
+      }
+      val completionLease = if (case == "wrong-site") lease.copy(siteId = CareerSiteId(999)) else lease
+      val finishedAt = if (case == "expired") lease.expiresAt else NOW
+      val raw = raw("must-not-write")
+      assertFailsWith<IllegalStateException>(case) {
+        JooqSuccessfulCrawlAdapter(context).applyAndComplete(run, completionLease,
+          SyncPlan(insert = listOf(NewPosting(raw, raw.contentHash(), NOW))), 1, finishedAt)
+      }
+      assertEquals(0, context.fetchCount(JOB_POSTINGS), case)
+      assertEquals(null, context.select(CRAWL_RUNS.OUTCOME).from(CRAWL_RUNS)
+        .where(CRAWL_RUNS.ID.eq(run.value)).fetchOne(CRAWL_RUNS.OUTCOME), case)
     }
   }
 
@@ -63,10 +91,11 @@ class JooqSuccessfulCrawlAdapterTest : PostgresIntegrationTest() {
     val siteId = insertSite(context)
     val runs = JooqCrawlRunRepository(context)
     val completion = JooqSuccessfulCrawlAdapter(context)
+    val lease = lease(context, siteId)
     val seedRun = runs.start(siteId, NOW.minusSeconds(20))
     val seedRaw = listOf(raw("update", "Old"), raw("touch"), raw("missing"), raw("close"), raw("reopen"))
     val seedPlan = SyncPlan(insert = seedRaw.map { NewPosting(it, it.contentHash(), NOW.minusSeconds(10)) })
-    completion.applyAndComplete(seedRun, seedPlan, seedRaw.size, NOW.minusSeconds(9))
+    completion.applyAndComplete(seedRun, lease, seedPlan, seedRaw.size, NOW.minusSeconds(9))
 
     val repository = JooqPostingRepository(context)
     val seeded = repository.findByCareerSite(siteId).associateBy { it.raw.externalKey }
@@ -92,8 +121,8 @@ class JooqSuccessfulCrawlAdapterTest : PostgresIntegrationTest() {
     ).plan
     val run = runs.start(siteId, NOW.minusSeconds(1))
 
-    val counts = completion.applyAndComplete(run, plan, snapshot.postings.size, NOW)
-    val retryCounts = completion.applyAndComplete(run, plan, snapshot.postings.size, NOW.plusSeconds(1))
+    val counts = completion.applyAndComplete(run, lease, plan, snapshot.postings.size, NOW)
+    val retryCounts = completion.applyAndComplete(run, lease, plan, snapshot.postings.size, NOW.plusSeconds(1))
 
     assertEquals(counts, retryCounts)
     assertEquals(listOf(1, 1, 1, 1, 1, 1, 4), listOf(
@@ -115,6 +144,7 @@ class JooqSuccessfulCrawlAdapterTest : PostgresIntegrationTest() {
     val (_, context) = migratedContext()
     val siteId = insertSite(context)
     val run = JooqCrawlRunRepository(context).start(siteId, NOW)
+    val lease = lease(context, siteId)
     val inserted = raw("new")
     val invalidPlan = SyncPlan(
       insert = listOf(NewPosting(inserted, inserted.contentHash(), NOW)),
@@ -122,12 +152,18 @@ class JooqSuccessfulCrawlAdapterTest : PostgresIntegrationTest() {
     )
 
     assertFailsWith<IllegalStateException> {
-      JooqSuccessfulCrawlAdapter(context).applyAndComplete(run, invalidPlan, 1, NOW)
+      JooqSuccessfulCrawlAdapter(context).applyAndComplete(run, lease, invalidPlan, 1, NOW)
     }
 
     assertEquals(0, context.fetchCount(JOB_POSTINGS))
     assertEquals(null, context.select(CRAWL_RUNS.OUTCOME).from(CRAWL_RUNS)
       .where(CRAWL_RUNS.ID.eq(run.value)).fetchOne(CRAWL_RUNS.OUTCOME))
+  }
+
+  private fun lease(context: org.jooq.DSLContext, siteId: CareerSiteId): CrawlLease {
+    val acquired = NOW.minusSeconds(30)
+    JooqCrawlLeasePort(context).tryAcquire(siteId, "test-lease", acquired, Duration.ofMinutes(5))
+    return CrawlLease(siteId, "test-lease", acquired.plusSeconds(300))
   }
 
   private fun insertSite(context: org.jooq.DSLContext): CareerSiteId =

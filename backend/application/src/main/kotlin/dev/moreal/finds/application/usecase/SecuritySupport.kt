@@ -71,6 +71,7 @@ private fun decodeSecurityResult(operation: String, outcome: String): SecurityCh
     "passkey.rename" -> setOf("CHANGED", "UNCHANGED", "NOT_FOUND")
     "passkey.register" -> setOf("CHANGED", "FORBIDDEN", "CREDENTIAL_ALREADY_EXISTS")
     "session.revoke" -> setOf("CHANGED", "UNCHANGED", "SIGNED_OUT", "NOT_FOUND")
+    "session.logout" -> setOf("SIGNED_OUT")
     "session.revoke_others" -> setOf("CHANGED", "UNCHANGED")
     else -> throw UnsupportedCommandResultException()
   }

@@ -199,14 +199,48 @@ class WebAuthnHttpTest {
     now = now.plusSeconds(600)
     mvc.perform(post("/webauthn/register/options").session(session).secure(true).with(csrf())).andExpect(status().isUnauthorized)
   }
-  @Test fun `logout requires CSRF revokes persisted session and destroys HTTP session`() {
+  @Test fun `logout requires CSRF atomically audits once and repeats generically after lost response`(output: CapturedOutput) {
     val account = seed()
     val (options, session) = options()
     login(session, account.key.assertion(options["challenge"].asText(), account.handle)).andExpect(status().isOk)
+    val sessionId = tx.execute { it.userSessions.findByUserId(account.user.id).single().id }
+    val sql = context.getBean(org.jooq.DSLContext::class.java)
     mvc.perform(post("/auth/logout").session(session).secure(true)).andExpect(status().isForbidden)
     mvc.perform(post("/auth/logout").session(session).secure(true).with(csrf())).andExpect(status().isNoContent)
     assertTrue(session.isInvalid)
     assertTrue(tx.execute { it.userSessions.findByUserId(account.user.id).none { s -> s.isUsable(now) } })
+    assertEquals(1, sql.fetchValue("SELECT count(*)::int FROM audit_events WHERE actor_user_id = ? AND action = 'session.revoked'", account.user.id.value))
+    val audit = sql.fetchValue("SELECT row_to_json(a)::text FROM audit_events a WHERE actor_user_id = ? AND action = 'session.revoked'", account.user.id.value).toString()
+    val result = sql.fetchValue("SELECT result::text FROM command_requests WHERE scope = ? AND operation = 'session.logout'", account.user.id.value.toString()).toString()
+    assertTrue(result.contains("SIGNED_OUT"))
+    assertFalse(audit.contains(sessionId.value.toString()))
+    assertFalse(result.contains(sessionId.value.toString()))
+    assertFalse(output.all.contains(sessionId.value.toString()))
+    // A lost response can leave the old cookie on the browser. The server session is gone;
+    // an anonymous repeat with a fresh CSRF token must keep the same generic outcome.
+    repeat(2) {
+      mvc.perform(post("/auth/logout").secure(true).with(csrf())).andExpect(status().isNoContent)
+    }
+    assertEquals(1, sql.fetchValue("SELECT count(*)::int FROM audit_events WHERE actor_user_id = ? AND action = 'session.revoked'", account.user.id.value))
+  }
+  @Test fun `logout audit failure preserves both sessions and allows same request retry`(output: CapturedOutput) {
+    val account = seed()
+    val (options, session) = options()
+    login(session, account.key.assertion(options["challenge"].asText(), account.handle)).andExpect(status().isOk)
+    val sql = context.getBean(org.jooq.DSLContext::class.java)
+    val sessionId = tx.execute { it.userSessions.findByUserId(account.user.id).single().id }
+    sql.execute("ALTER TABLE audit_events ADD CONSTRAINT reject_logout CHECK (action <> 'session.revoked')")
+    try {
+      assertFails { mvc.perform(post("/auth/logout").session(session).secure(true).with(csrf())) }
+      assertFalse(session.isInvalid)
+      assertTrue(tx.execute { it.userSessions.findById(sessionId)!!.isUsable(now) })
+      assertEquals(0, sql.fetchValue("SELECT count(*)::int FROM command_requests WHERE scope = ? AND operation = 'session.logout'", account.user.id.value.toString()))
+      assertEquals(0, sql.fetchValue("SELECT count(*)::int FROM audit_events WHERE actor_user_id = ? AND action = 'session.revoked'", account.user.id.value))
+    } finally { sql.execute("ALTER TABLE audit_events DROP CONSTRAINT reject_logout") }
+    mvc.perform(post("/auth/logout").session(session).secure(true).with(csrf())).andExpect(status().isNoContent)
+    assertTrue(session.isInvalid)
+    assertEquals(1, sql.fetchValue("SELECT count(*)::int FROM audit_events WHERE actor_user_id = ? AND action = 'session.revoked'", account.user.id.value))
+    assertFalse(output.all.contains(sessionId.value.toString()))
   }
   @Test fun `public GraphQL queries work without CSRF while mutations remain closed`() {
     val query = mvc.perform(post("/graphql").contentType("application/json")

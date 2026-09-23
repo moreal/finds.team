@@ -4,6 +4,8 @@ import dev.moreal.finds.application.command.CommandMetadata
 import dev.moreal.finds.application.audit.AuditAction
 import dev.moreal.finds.application.port.*
 import dev.moreal.finds.domain.identity.UserId
+import dev.moreal.finds.domain.identity.UserStatus
+import dev.moreal.finds.application.security.AuthenticationStrength
 import java.time.Instant
 
 data class SessionSummary(val id: UserSessionId, val createdAt: Instant, val expiresAt: Instant, val current: Boolean)
@@ -12,6 +14,26 @@ sealed interface SessionListResult {
   data object Forbidden : SessionListResult
 }
 class ManageSessions(private val transactions: TransactionPort, private val clock: ClockPort, private val random: SecureRandomPort) {
+  fun logout(principal: SessionPrincipal, metadata: CommandMetadata): SecurityChangeResult = transactions.execute { tx ->
+    val id = UserId(principal.actor.userId)
+    val user = tx.lockUsers(setOf(id))[id]
+    val session = tx.userSessions.findById(principal.sessionId)
+    val now = clock.now()
+    // A committed logout invalidates its own authorization. Retain only enough trusted binding
+    // to replay this terminal result; no other security command accepts a revoked session.
+    if (user?.status != UserStatus.ACTIVE || session?.userId != id ||
+      principal.actor.authenticationStrength != AuthenticationStrength.PASSKEY ||
+      session.authenticatedAt != principal.actor.authenticatedAt || session.authenticatedAt > now ||
+      (session.revokedAt == null && !session.isUsable(now))) return@execute SecurityChangeResult.Forbidden
+    tx.securityCommand(id, "session.logout", metadata, now, mapOf("session" to principal.sessionId.value.toString())) {
+      if (session.revokedAt == null) {
+        tx.userSessions.revoke(principal.sessionId, now)
+        tx.auditSecurity(random, now, principal.actor, AuditAction.SESSION_REVOKED, id, metadata)
+      }
+      SecurityChangeResult.SignedOut
+    }
+  }
+
   fun list(principal: SessionPrincipal): SessionListResult = transactions.execute { tx ->
     val id = UserId(principal.actor.userId)
     val user = tx.lockUsers(setOf(id))[id]

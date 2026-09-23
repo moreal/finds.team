@@ -87,13 +87,51 @@ class JooqCrawlCommandTest : PostgresIntegrationTest() {
     assertEquals(1, cleanup.expireAbandoned(NOW.plusSeconds(600), NOW, 1))
     assertEquals(1, db.fetchCount(DSL.table("crawl_leases")))
     assertFailsWith<IllegalStateException> {
-      JooqSuccessfulCrawlAdapter(db).applyAndComplete(a, SyncPlan(), 0, NOW.plusSeconds(601))
+      JooqSuccessfulCrawlAdapter(db).applyAndComplete(a, CrawlLease(f.command.siteId, "live", NOW.plusSeconds(600)), SyncPlan(), 0, NOW.plusSeconds(601))
     }
     assertEquals(0, db.fetchCount(DSL.table("job_postings")))
     assertEquals("FAILED", db.fetchValue("SELECT outcome FROM crawl_runs WHERE id = ?", b.value))
   }
 
   private class SimulatedCrash : Error("simulated process death after commit")
+
+  @Test fun `replacement lease fences pending old worker without maintenance and preserves newer postings`() {
+    val (_, db) = migratedContext()
+    val time = java.util.concurrent.atomic.AtomicReference(NOW)
+    val started = listOf(CountDownLatch(1), CountDownLatch(1))
+    val release = listOf(CountDownLatch(1), CountDownLatch(1))
+    val calls = java.util.concurrent.atomic.AtomicInteger()
+    val f = fixture(db) { error("fixture must not fetch") }
+    val source = SourceFetchPort { site ->
+      val call = calls.getAndIncrement()
+      started[call].countDown()
+      check(release[call].await(10, TimeUnit.SECONDS))
+      val raw = dev.moreal.finds.domain.posting.RawPosting("same-posting", if (call == 0) "Stale A" else "Current B", "description",
+        assertIs<dev.moreal.finds.domain.posting.PostingUrlResult.Valid>(dev.moreal.finds.domain.posting.PostingUrl.parse("https://crawl.example/job/1")).url)
+      SourceFetchResult.Success(Snapshot(site.id, site.canonicalBaseUrl.host, time.get(), listOf(raw)))
+    }
+    val useCase = service(db, source, ClockPort(time::get), JooqTransactionAdapter(db) { null })
+    Executors.newFixedThreadPool(2).use { pool ->
+      try {
+        val first = pool.submit<CrawlSiteResult> { runBlocking { useCase.execute(f.command) } }
+        assertTrue(started[0].await(10, TimeUnit.SECONDS))
+        val firstId = db.fetchValue("SELECT id FROM crawl_runs") as Long
+        time.set(NOW.plusSeconds(301))
+        val later = f.command.copy(actor = Actor.System, trigger = CrawlTrigger.SCHEDULED, sessionId = null,
+          metadata = CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))
+        val second = pool.submit<CrawlSiteResult> { runBlocking { useCase.execute(later) } }
+        assertTrue(started[1].await(10, TimeUnit.SECONDS))
+        assertNull(db.fetchValue("SELECT outcome FROM crawl_runs WHERE id = ?", firstId))
+        release[1].countDown()
+        assertIs<CrawlSiteResult.Succeeded>(second.get(10, TimeUnit.SECONDS))
+        release[0].countDown()
+        assertIs<CrawlSiteResult.Triggered>(first.get(10, TimeUnit.SECONDS))
+        assertEquals("FAILED", db.fetchValue("SELECT outcome FROM crawl_runs WHERE id = ?", firstId))
+        assertEquals("Current B", JooqPostingRepository(db).findByCareerSite(f.command.siteId).single().raw.title)
+        assertEquals(0, db.fetchCount(DSL.table("crawl_leases")))
+      } finally { release.forEach(CountDownLatch::countDown); pool.shutdownNow() }
+    }
+  }
 
   @Test fun `expired worker finishing cannot release the later run lease of the same dispatcher`() {
     val (_, db) = migratedContext()
@@ -113,8 +151,7 @@ class JooqCrawlCommandTest : PostgresIntegrationTest() {
       try {
         val first = pool.submit<CrawlSiteResult> { runBlocking { useCase.execute(f.command) } }
         assertTrue(started[0].await(10, TimeUnit.SECONDS))
-        time.set(NOW.plusSeconds(300))
-        assertEquals(1, JooqCrawlMaintenance(db).expireAbandoned(time.get(), NOW, 1))
+        val firstId = db.fetchValue("SELECT id FROM crawl_runs") as Long
         time.set(NOW.plusSeconds(900))
         val later = f.command.copy(actor = Actor.System, trigger = CrawlTrigger.SCHEDULED, sessionId = null,
           metadata = CommandMetadata(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))
@@ -122,6 +159,7 @@ class JooqCrawlCommandTest : PostgresIntegrationTest() {
         assertTrue(started[1].await(10, TimeUnit.SECONDS))
         release[0].countDown()
         assertIs<CrawlSiteResult.Triggered>(first.get(10, TimeUnit.SECONDS))
+        assertEquals("FAILED", db.fetchValue("SELECT outcome FROM crawl_runs WHERE id = ?", firstId))
         assertEquals(1, db.fetchCount(DSL.table("crawl_leases")), "late old worker removed current lease")
         assertEquals(0, db.fetchCount(DSL.table("job_postings")))
         release[1].countDown()

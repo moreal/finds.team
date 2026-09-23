@@ -19,6 +19,7 @@ interface PostingRepository {
 fun interface SuccessfulCrawlPort {
   fun applyAndComplete(
     runId: CrawlRunId,
+    lease: CrawlLease,
     plan: SyncPlan,
     fetched: Int,
     finishedAt: Instant,

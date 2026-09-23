@@ -77,6 +77,7 @@ internal object CommandResultCodec {
         "passkey.rename" -> setOf("CHANGED", "UNCHANGED", "NOT_FOUND")
         "passkey.register" -> setOf("CHANGED", "FORBIDDEN", "CREDENTIAL_ALREADY_EXISTS")
         "session.revoke" -> setOf("CHANGED", "UNCHANGED", "NOT_FOUND", "SIGNED_OUT")
+        "session.logout" -> setOf("SIGNED_OUT")
         "session.revoke_others" -> setOf("CHANGED", "UNCHANGED")
         else -> emptySet()
       }

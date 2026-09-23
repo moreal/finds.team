@@ -99,7 +99,7 @@ class CrawlSite(
     val runId = (reservation.result as CrawlSiteResult.Triggered).runId
     // The transaction has committed the run, lease, audit and semantic result. Neither source I/O
     // nor reconciliation can retain its connection. A replay returns above without fetching.
-    val completed = crawl(site, runId, checkNotNull(reservation.leaseToken))
+    val completed = crawl(site, runId, checkNotNull(reservation.lease))
     return if (command.trigger == CrawlTrigger.MANUAL) reservation.result else completed
   }
 
@@ -152,10 +152,10 @@ class CrawlSite(
       command.metadata.correlationId, AuditOutcome.SUCCEEDED))
     tx.commandRequests.complete(key, StoredCommandResult(1, OPERATION, "TRIGGERED",
       mapOf("crawl_run" to CommandResourceId.Number(runId.value))))
-    return Reservation(CrawlSiteResult.Triggered(runId), site, leaseToken)
+    return Reservation(CrawlSiteResult.Triggered(runId), site, CrawlLease(site.id, leaseToken, now.plus(leaseTtl)))
   }
 
-  private suspend fun crawl(site: CareerSite, startedRunId: CrawlRunId, leaseToken: String): CrawlSiteResult {
+  private suspend fun crawl(site: CareerSite, startedRunId: CrawlRunId, lease: CrawlLease): CrawlSiteResult {
     var infrastructureFailureCode = CrawlFailureCode.SOURCE_FETCH_FAILED
     try {
       val fetchResult = source.fetch(site)
@@ -182,6 +182,7 @@ class CrawlSite(
 
       val counts = completion.applyAndComplete(
         runId = startedRunId,
+        lease = lease,
         plan = reconciliation.plan,
         fetched = snapshot.postings.size,
         finishedAt = clock.now(),
@@ -197,11 +198,11 @@ class CrawlSite(
       runCatching { runs.fail(startedRunId, failure, clock.now()) }
       return CrawlSiteResult.InfrastructureFailure(failure.message)
     } finally {
-      runCatching { leases.release(site.id, leaseToken) }
+      runCatching { leases.release(site.id, lease.owner) }
     }
   }
 
-  private data class Reservation(val result: CrawlSiteResult, val site: CareerSite? = null, val leaseToken: String? = null)
+  private data class Reservation(val result: CrawlSiteResult, val site: CareerSite? = null, val lease: CrawlLease? = null)
   private class TriggerRejected(val result: CrawlSiteResult) : RuntimeException(null, null, false, false)
   private companion object { const val OPERATION = "crawl.trigger" }
 

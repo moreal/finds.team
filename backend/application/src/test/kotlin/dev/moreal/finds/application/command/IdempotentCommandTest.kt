@@ -71,9 +71,11 @@ class IdempotentCommandTest {
   fun `simultaneous attempts produce one committed effect and replay the same result`() {
     val tx = FakeTransaction()
     Executors.newFixedThreadPool(2).use { pool ->
-      val results = pool.invokeAll(List(2) { Callable { register(tx) } })
-        .map { it.get(5, TimeUnit.SECONDS) }
-      assertEquals(listOf(Created(CareerSiteId(1)), Created(CareerSiteId(1))), results)
+      try {
+        val results = pool.invokeAll(List(2) { Callable { register(tx) } }, 5, TimeUnit.SECONDS)
+          .map { it.get(5, TimeUnit.SECONDS) }
+        assertEquals(listOf(Created(CareerSiteId(1)), Created(CareerSiteId(1))), results)
+      } finally { pool.shutdownNow() }
     }
     assertEquals(1, tx.sites.size)
     assertEquals(1, tx.auditEvents.size)
@@ -91,6 +93,18 @@ class IdempotentCommandTest {
     }
     assertFailsWith<IllegalStateException> { escaped.careerSites.findEnabled() }
     assertEquals(Created(CareerSiteId(1)), register(tx))
+  }
+
+  @Test
+  fun `pending reservation errors before comparing hashes`() {
+    val tx = FakeTransaction()
+    tx.execute { context ->
+      context.commandRequests.reserve(request(fields))
+      for (values in listOf(fields, fields + ("displayName" to "Different"))) {
+        assertFailsWith<IllegalStateException> { context.commandRequests.reserve(request(values)) }
+      }
+      context.commandRequests.complete(key, storedResult(1))
+    }
   }
 
   @Test

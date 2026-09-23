@@ -34,6 +34,9 @@ interface CrawlRunRepository {
   fun latestStatuses(): List<CrawlStatus>
 }
 
+/** A per-reservation fence, carried from committed reservation to the atomic completion. */
+data class CrawlLease(val siteId: CareerSiteId, val owner: String, val expiresAt: Instant)
+
 interface CrawlLeasePort {
   fun tryAcquire(
     siteId: CareerSiteId,
