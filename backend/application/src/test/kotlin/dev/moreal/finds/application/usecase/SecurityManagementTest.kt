@@ -169,6 +169,19 @@ class SecurityManagementTest {
     assertEquals(1, f.tx.auditEvents.size)
   }
 
+  @Test fun `self revocation replay from another live session cannot instruct that caller to sign out`() {
+    val f = SecurityFixture()
+    val manage = ManageSessions(f.tx, f.clock, f.random)
+    val metadata = f.metadata()
+    assertEquals(SecurityChangeResult.SignedOut, manage.revoke(f.principal(), f.currentSessionId, metadata))
+    val otherPrincipal = f.principal().copy(sessionId = f.otherSessionId)
+    assertEquals(SecurityChangeResult.IdempotencyConflict, manage.revoke(otherPrincipal, f.currentSessionId, metadata))
+    assertEquals(SecurityChangeResult.Unchanged, manage.revoke(otherPrincipal, f.currentSessionId, f.metadata()))
+    assertNull(f.tx.userSessions.single { it.id == f.otherSessionId }.revokedAt)
+    assertEquals(f.otherSessionId, assertIs<SessionListResult.Listed>(manage.list(otherPrincipal)).sessions.single().id)
+    assertEquals(1, f.tx.auditEvents.size)
+  }
+
   @Test fun `recovery rotation invalidates pending recovery proof sessions and returns plaintext only once`() {
     val f = SecurityFixture()
     val pending = f.beginRecovery()

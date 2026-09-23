@@ -123,7 +123,7 @@ class RecoveryTest {
     assertEquals(f.userId.value.toString(), audit.targetId)
     assertEquals(metadata.correlationId, audit.correlationId)
     assertTrue(audit.details.fields.isEmpty())
-    assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(firstSession, metadata = metadata))
+    assertEquals(CompletePasskeyRecoveryResult.AlreadyCompleted(f.userId), f.completeRecovery(firstSession, metadata = metadata))
     assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(secondSession))
     assertEquals(1, f.tx.auditEvents.size)
     f.now = f.now.plusSeconds(60)
@@ -156,6 +156,79 @@ class RecoveryTest {
     assertEquals(1, results.count { it is CompletePasskeyRecoveryResult.Completed })
     assertEquals(1, results.count { it == CompletePasskeyRecoveryResult.Rejected })
     assertEquals(1, f.tx.auditEvents.size)
+  }
+
+  @Test fun `lost response recovery replay returns no secret after expiry and altered credential material conflicts`() {
+    val f = SecurityFixture()
+    val session = f.beginRecovery()
+    val metadata = f.metadata()
+    val material = f.material("new-passkey")
+    val original = VerifiedPasskeyRegistration(f.userId, session.id, material)
+    val completed = assertIs<CompletePasskeyRecoveryResult.Completed>(f.completeRecovery(session, metadata = metadata, proof = original))
+    val recoveryHash = f.tx.recoveryCodes.single()
+    f.now = session.expiresAt
+    val replay = f.completeRecovery(session, metadata = metadata, proof = original)
+    assertEquals(CompletePasskeyRecoveryResult.AlreadyCompleted(f.userId), replay)
+    assertFalse(replay.toString().contains(completed.recoveryCode.format()))
+    val changes = listOf(
+      f.material("changed-id"),
+      PasskeyCredentialMaterial(material.id, byteArrayOf(4), 0, setOf("internal"), true, true),
+      PasskeyCredentialMaterial(material.id, byteArrayOf(1, 2, 3), 1, setOf("internal"), true, true),
+      PasskeyCredentialMaterial(material.id, byteArrayOf(1, 2, 3), 0, setOf("usb"), true, true),
+      PasskeyCredentialMaterial(material.id, byteArrayOf(1, 2, 3), 0, setOf("internal"), true, false),
+      PasskeyCredentialMaterial(material.id, byteArrayOf(1, 2, 3), 0, setOf("internal"), false, false),
+    )
+    for (changed in changes) assertEquals(CompletePasskeyRecoveryResult.IdempotencyConflict,
+      f.completeRecovery(session, metadata = metadata, proof = VerifiedPasskeyRegistration(f.userId, session.id, changed)))
+    assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(session, metadata = f.metadata(), proof = original))
+    assertEquals(1, f.tx.credentials.size)
+    assertEquals(1, f.tx.auditEvents.size)
+    assertSame(recoveryHash, f.tx.recoveryCodes.single())
+    assertTrue(f.tx.completedRequests.values.all { it.resourceIds.isEmpty() })
+  }
+
+  @Test fun `recovery replay still requires original stored session user and recovery scope binding`() {
+    val f = SecurityFixture()
+    val session = f.beginRecovery()
+    f.now = f.start.plusSeconds(60)
+    val otherSession = f.beginRecovery()
+    val metadata = f.metadata()
+    assertIs<CompletePasskeyRecoveryResult.Completed>(f.completeRecovery(session, metadata = metadata))
+    assertEquals(CompletePasskeyRecoveryResult.IdempotencyConflict, f.completeRecovery(otherSession, metadata = metadata))
+    assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(session, metadata = metadata,
+      proof = VerifiedPasskeyRegistration(f.otherId, session.id, f.material("new-passkey"))))
+    assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(session, metadata = metadata,
+      proof = VerifiedPasskeyRegistration(f.userId, RestrictedSessionId(UUID.randomUUID()), f.material("new-passkey"))))
+    f.tx.execute { it.users.lockByEmail(f.email); it.restrictedSessions.save(session.copy(scope = RestrictedSessionScope.ENROLLMENT, invalidatedAt = f.now)) }
+    assertEquals(CompletePasskeyRecoveryResult.Rejected, f.completeRecovery(session, metadata = metadata))
+    assertEquals(1, f.tx.auditEvents.size)
+  }
+
+  @Test fun `concurrent identical recovery retries produce one plaintext result and one secret free replay`() {
+    val f = SecurityFixture()
+    val session = f.beginRecovery()
+    val metadata = f.metadata()
+    val results = concurrent { f.completeRecovery(session, metadata = metadata) }
+    assertEquals(1, results.count { it is CompletePasskeyRecoveryResult.Completed })
+    assertEquals(1, results.count { it == CompletePasskeyRecoveryResult.AlreadyCompleted(f.userId) })
+    assertEquals(1, f.tx.auditEvents.size)
+    assertEquals(1, f.tx.credentials.size)
+  }
+
+  @Test fun `concurrent recovery retries changing verified material conflict with the one winner`() {
+    val f = SecurityFixture()
+    val session = f.beginRecovery()
+    val metadata = f.metadata()
+    val counter = java.util.concurrent.atomic.AtomicInteger()
+    val results = concurrent {
+      val material = PasskeyCredentialMaterial(CredentialId("new-passkey"), byteArrayOf(counter.incrementAndGet().toByte()),
+        0, setOf("internal"), true, true)
+      f.completeRecovery(session, metadata = metadata, proof = VerifiedPasskeyRegistration(f.userId, session.id, material))
+    }
+    assertEquals(1, results.count { it is CompletePasskeyRecoveryResult.Completed })
+    assertEquals(1, results.count { it == CompletePasskeyRecoveryResult.IdempotencyConflict })
+    assertEquals(1, f.tx.auditEvents.size)
+    assertEquals(1, f.tx.credentials.size)
   }
 
   @Test fun `audit and notification failures roll back every recovery write`() {

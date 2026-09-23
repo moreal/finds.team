@@ -26,7 +26,9 @@ class ManageSessions(private val transactions: TransactionPort, private val cloc
     val now = clock.now()
     val current = sessionId == principal.sessionId
     if (!tx.authorize(principal, user, now, recent = !current)) return@execute SecurityChangeResult.Forbidden
-    tx.securityCommand(id, "session.revoke", metadata, now, mapOf("session" to sessionId.value.toString())) {
+    // SignedOut is relative to the requesting session, so retries must retain that context.
+    tx.securityCommand(id, "session.revoke", metadata, now, mapOf(
+      "session" to sessionId.value.toString(), "requestingSession" to principal.sessionId.value.toString())) {
       val target = tx.userSessions.findById(sessionId)
       when {
         target?.userId != id -> SecurityChangeResult.NotFound
