@@ -44,6 +44,7 @@ function JobsPage() {
   const router = useRouter();
   const location = useLocation();
   const [open, setOpen] = createSignal(false);
+  const filterState = () => parseJobSearch(location().searchStr).state;
   const corrections = () => {
     const state = location().state as { jobsCorrections?: string[] };
     return (state.jobsCorrections ?? result().corrections).join(" ");
@@ -74,10 +75,10 @@ function JobsPage() {
     <header class="jobs-header"><Link href="/jobs">finds.team</Link><h1>다음 기회를 발견하세요.</h1><p>관심 있는 기술과 일하는 방식으로 채용 공고를 찾아보세요.</p></header>
     <p role="status" aria-live="polite" aria-atomic="true" class="jobs-correction">{corrections()}</p>
     <div class="jobs-mobile-filter"><Dialog trigger="필터 열기" title="공고 필터" closeLabel="닫기" open={open()} onOpenChange={setOpen}>
-      <FilterBuilder state={result().state} onApply={apply} />
+      <FilterBuilder state={filterState()} onApply={apply} />
     </Dialog></div>
     <div class="jobs-layout">
-      <aside class="jobs-desktop-filter" aria-label="공고 필터"><h2>필터</h2><FilterBuilder state={result().state} onApply={apply} /></aside>
+      <aside class="jobs-desktop-filter" aria-label="공고 필터"><h2>필터</h2><FilterBuilder state={filterState()} onApply={apply} /></aside>
       <div class="jobs-results">
         <ul class="jobs-constraints" aria-label="적용한 조건"><For each={constraints()}>{([key, value], index) => <li><Link href={remove(index())}>{labels[key] ?? key}: {value} 해제</Link></li>}</For></ul>
         <JobsConnection variables={result().variables} failure={result().failure} constraints={constraints().map(([key, value]) => `${labels[key]}: ${value}`).join(" · ")} onClear={() => navigate("")} />

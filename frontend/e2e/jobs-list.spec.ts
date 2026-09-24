@@ -116,6 +116,37 @@ test("authorization and invalid-filter errors have distinct safe states", async 
   await expect(page.getByText("Private diagnostic")).toHaveCount(0);
 });
 
+test("a late filter result does not overwrite a newer search draft", async ({ page }) => {
+  let releaseResult!: () => void;
+  let resultRequested!: () => void;
+  const heldResult = new Promise<void>(resolve => { releaseResult = resolve; });
+  const requested = new Promise<void>(resolve => { resultRequested = resolve; });
+  await page.route("**/graphql", async route => {
+    const body = route.request().postDataJSON();
+    const text = body.variables?.filter?.all?.find((part: { textContains?: string }) => part.textContains)?.textContains;
+    if (text === "valid") {
+      resultRequested();
+      await heldResult;
+    }
+    await route.continue();
+  });
+
+  await page.goto("/jobs");
+  const controls = page.getByRole("complementary");
+  const search = controls.getByLabel("검색어", { exact: true });
+  await search.fill("valid");
+  await controls.getByRole("button", { name: "필터 적용" }).click();
+  await requested;
+  await expect(page).toHaveURL(/\?q=valid$/);
+
+  await search.fill("changed");
+  releaseResult();
+  await expect(page.getByRole("link", { name: "검색어: valid 해제" })).toBeVisible();
+  await expect(search).toHaveValue("changed");
+  await controls.getByRole("button", { name: "필터 적용" }).click();
+  await expect(page).toHaveURL(/\?q=changed$/);
+});
+
 for (const mobile of [false, true]) {
   test(`${mobile ? "mobile" : "desktop"} announces subsequent invalid form corrections and clears stale notices`, async ({ page }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
